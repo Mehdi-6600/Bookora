@@ -1,0 +1,43 @@
+{
+  "common": {
+    "appName": "Bookora",
+    "tagline": "Let customers book you.",
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Try again",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "back": "Back",
+    "next": "Next",
+    "close": "Close",
+    "submit": "Submit",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "home": {
+    "title": "Bookora",
+    "subtitle": "Online booking for small service businesses",
+    "getStarted": "Get Started",
+    "learnMore": "Learn More"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "business": "Business",
+    "services": "Services",
+    "schedule": "Schedule",
+    "bookings": "Bookings",
+    "customers": "Customers",
+    "offers": "Offers",
+    "deposits": "Deposits",
+    "subscription": "Subscription",
+    "settings": "Settings",
+    "admin": "Admin"
+  },
+  "errors": {
+    "notFound": "Not found",
+    "unauthorized": "Unauthorized",
+    "forbidden": "Forbidden",
+    "serverError": "Server error"
+  }
+}
