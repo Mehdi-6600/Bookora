@@ -9,6 +9,7 @@ const serverSchema = z.object({
   ADMIN_TELEGRAM_IDS: z.string().optional(),
   APP_URL: z.string().url(),
   BOT_USERNAME: z.string().min(1),
+  JWT_SECRET: z.string().min(32),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
 
@@ -21,6 +22,7 @@ const serverEnv = serverSchema.safeParse({
   ADMIN_TELEGRAM_IDS: process.env.ADMIN_TELEGRAM_IDS,
   APP_URL: process.env.APP_URL,
   BOT_USERNAME: process.env.BOT_USERNAME,
+  JWT_SECRET: process.env.JWT_SECRET,
   NODE_ENV: process.env.NODE_ENV,
 });
 
@@ -31,9 +33,6 @@ if (!serverEnv.success) {
 
 export const env = serverEnv.data;
 
-/**
- * لیست آیدی‌های عددی ادمین‌ها به صورت آرایه
- */
 export const adminTelegramIds: bigint[] = (env.ADMIN_TELEGRAM_IDS ?? "")
   .split(",")
   .map((id) => id.trim())
