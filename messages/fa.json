@@ -1,0 +1,43 @@
+{
+  "common": {
+    "appName": "بوکورا",
+    "tagline": "بگذار مشتری‌ها نوبت بگیرند.",
+    "loading": "در حال بارگذاری...",
+    "error": "خطایی رخ داد",
+    "retry": "دوباره تلاش کن",
+    "save": "ذخیره",
+    "cancel": "لغو",
+    "confirm": "تأیید",
+    "back": "بازگشت",
+    "next": "بعدی",
+    "close": "بستن",
+    "submit": "ارسال",
+    "yes": "بله",
+    "no": "خیر"
+  },
+  "home": {
+    "title": "بوکورا",
+    "subtitle": "رزرو آنلاین برای کسب‌وکارهای خدماتی کوچک",
+    "getStarted": "شروع کن",
+    "learnMore": "بیشتر بدان"
+  },
+  "nav": {
+    "dashboard": "داشبورد",
+    "business": "کسب‌وکار",
+    "services": "خدمات",
+    "schedule": "برنامه",
+    "bookings": "رزروها",
+    "customers": "مشتریان",
+    "offers": "پیشنهادها",
+    "deposits": "بیعانه‌ها",
+    "subscription": "اشتراک",
+    "settings": "تنظیمات",
+    "admin": "مدیریت"
+  },
+  "errors": {
+    "notFound": "یافت نشد",
+    "unauthorized": "دسترسی غیرمجاز",
+    "forbidden": "ممنوع",
+    "serverError": "خطای سرور"
+  }
+}
