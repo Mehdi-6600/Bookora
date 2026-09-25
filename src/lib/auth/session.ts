@@ -7,17 +7,13 @@ export const SESSION_COOKIE = "bookora_session";
 export type CurrentUser = {
   id: string;
   telegramId: string;
-  firstName: string;
+  firstName: string | null;
   lastName: string | null;
   username: string | null;
   languageCode: string | null;
   isAdmin: boolean;
 };
 
-/**
- * کاربر جاری رو از cookie می‌خونه. اگه لاگین نباشه، null برمی‌گردونه.
- * توی Server Components، API routes و Server Actions کار می‌کنه.
- */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
@@ -52,10 +48,6 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   };
 }
 
-/**
- * مثل getCurrentUser ولی اگه کاربر لاگین نباشه، خطا پرتاب می‌کنه.
- * برای API routes که auth اجباری دارن.
- */
 export async function requireUser(): Promise<CurrentUser> {
   const user = await getCurrentUser();
   if (!user) {
