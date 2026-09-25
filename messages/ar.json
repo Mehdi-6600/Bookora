@@ -1,0 +1,43 @@
+{
+  "common": {
+    "appName": "بوكورا",
+    "tagline": "دع العملاء يحجزون معك.",
+    "loading": "جارٍ التحميل...",
+    "error": "حدث خطأ ما",
+    "retry": "حاول مرة أخرى",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "confirm": "تأكيد",
+    "back": "رجوع",
+    "next": "التالي",
+    "close": "إغلاق",
+    "submit": "إرسال",
+    "yes": "نعم",
+    "no": "لا"
+  },
+  "home": {
+    "title": "بوكورا",
+    "subtitle": "حجز إلكتروني للشركات الخدمية الصغيرة",
+    "getStarted": "ابدأ الآن",
+    "learnMore": "اعرف المزيد"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "business": "النشاط التجاري",
+    "services": "الخدمات",
+    "schedule": "الجدول",
+    "bookings": "الحجوزات",
+    "customers": "العملاء",
+    "offers": "العروض",
+    "deposits": "الودائع",
+    "subscription": "الاشتراك",
+    "settings": "الإعدادات",
+    "admin": "الإدارة"
+  },
+  "errors": {
+    "notFound": "غير موجود",
+    "unauthorized": "غير مصرح",
+    "forbidden": "محظور",
+    "serverError": "خطأ في الخادم"
+  }
+}
