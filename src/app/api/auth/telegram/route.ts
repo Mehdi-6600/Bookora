@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   const tg = validated.user;
 
   const user = await prisma.user.upsert({
-    where: { telegramId: BigInt(tg.id) },
+    where: { telegramId: String(tg.id) },
     update: {
       telegramUsername: tg.username ?? null,
       firstName: tg.first_name,
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       languageCode: tg.language_code ?? null,
     },
     create: {
-      telegramId: BigInt(tg.id),
+      telegramId: String(tg.id),
       telegramUsername: tg.username ?? null,
       firstName: tg.first_name,
       lastName: tg.last_name ?? null,
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     user: {
       id: user.id,
-      telegramId: user.telegramId.toString(),
+      telegramId: user.telegramId,
       firstName: user.firstName,
       lastName: user.lastName,
       username: user.telegramUsername,
