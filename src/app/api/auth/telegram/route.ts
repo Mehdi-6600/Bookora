@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { validateInitData } from "@/lib/telegram/initData";
+import { signSession } from "@/lib/auth/jwt";
+import { cookies } from "next/headers";
 
 const bodySchema = z.object({
   initData: z.string().min(1),
 });
+
+const SESSION_COOKIE = "bookora_session";
+const THIRTY_DAYS_SECONDS = 60 * 60 * 24 * 30;
 
 export async function POST(req: NextRequest) {
   let body: unknown;
@@ -56,6 +61,21 @@ export async function POST(req: NextRequest) {
         select: { id: true, slug: true, name: true, status: true },
       },
     },
+  });
+
+  const token = await signSession({
+    userId: user.id,
+    telegramId: user.telegramId,
+    isAdmin: user.isAdmin,
+  });
+
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: THIRTY_DAYS_SECONDS,
+    path: "/",
   });
 
   return NextResponse.json({
