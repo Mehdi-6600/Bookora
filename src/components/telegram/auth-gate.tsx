@@ -23,16 +23,25 @@ export function TelegramAuthGate({ children }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    async function authenticate() {
+    async function authenticate(attempt = 0) {
       try {
         const tg = window.Telegram?.WebApp;
 
         if (!tg) {
+          if (attempt < 20) {
+            timer = setTimeout(() => {
+              authenticate(attempt + 1);
+            }, 250);
+            return;
+          }
+
           if (!cancelled) {
             setError("این صفحه باید داخل تلگرام باز شود.");
             setLoading(false);
           }
+
           return;
         }
 
@@ -40,10 +49,18 @@ export function TelegramAuthGate({ children }: Props) {
         tg.expand();
 
         if (!tg.initData) {
+          if (attempt < 20) {
+            timer = setTimeout(() => {
+              authenticate(attempt + 1);
+            }, 250);
+            return;
+          }
+
           if (!cancelled) {
             setError("اطلاعات احراز هویت تلگرام دریافت نشد.");
             setLoading(false);
           }
+
           return;
         }
 
@@ -61,7 +78,9 @@ export function TelegramAuthGate({ children }: Props) {
 
         if (!response.ok) {
           throw new Error(
-            data?.error || "احراز هویت تلگرام ناموفق بود."
+            data?.reason
+              ? `${data.error}: ${data.reason}`
+              : data?.error || "احراز هویت تلگرام ناموفق بود."
           );
         }
 
@@ -85,6 +104,10 @@ export function TelegramAuthGate({ children }: Props) {
 
     return () => {
       cancelled = true;
+
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
   }, []);
 
