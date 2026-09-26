@@ -4,9 +4,23 @@ import { useEffect, useState } from "react";
 
 type Status = "loading" | "ready" | "error" | "outside-telegram";
 
-export function TelegramAuthGate() {
+type AuthUser = {
+  id: string;
+  telegramId: string;
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
+  languageCode: string | null;
+  isAdmin: boolean;
+};
+
+type Props = {
+  children: (user: AuthUser) => React.ReactNode;
+};
+
+export function TelegramAuthGate({ children }: Props) {
   const [status, setStatus] = useState<Status>("loading");
-  const [user, setUser] = useState<unknown>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -21,6 +35,7 @@ export function TelegramAuthGate() {
     tg.expand();
 
     const initData = tg.initData;
+
     if (!initData) {
       setStatus("outside-telegram");
       return;
@@ -28,56 +43,69 @@ export function TelegramAuthGate() {
 
     fetch("/api/auth/telegram", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ initData }),
       credentials: "include",
     })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.error) {
-          setError(data.reason ?? data.error);
-          setStatus("error");
-          return;
+      .then(async (res) => {
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          throw new Error(data.reason ?? data.error ?? "Authentication failed");
         }
+
+        return data;
+      })
+      .then((data) => {
         setUser(data.user);
         setStatus("ready");
       })
       .catch((err) => {
-        setError(err.message);
+        setError(err instanceof Error ? err.message : "Authentication failed");
         setStatus("error");
       });
   }, []);
 
   if (status === "loading") {
-    return <p className="text-muted-foreground">Loading...</p>;
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-foreground" />
+          <p className="text-sm text-muted-foreground">Loading Bookora...</p>
+        </div>
+      </div>
+    );
   }
 
   if (status === "outside-telegram") {
     return (
-      <div className="text-center space-y-2">
-        <p className="text-lg font-medium">این صفحه باید داخل تلگرام باز بشه</p>
-        <p className="text-sm text-muted-foreground">
-          از دکمه‌ی مینی‌اپ ربات استفاده کن.
-        </p>
+      <div className="flex min-h-[60vh] items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl border bg-card p-8 text-center shadow-sm">
+          <div className="mb-4 text-4xl">📱</div>
+          <h1 className="text-xl font-bold">Bookora Mini App</h1>
+          <p className="mt-3 text-sm text-muted-foreground">
+            این بخش باید از داخل مینی‌اپ تلگرام Bookora باز شود.
+          </p>
+        </div>
       </div>
     );
   }
 
-  if (status === "error") {
+  if (status === "error" || !user) {
     return (
-      <div className="text-center space-y-2">
-        <p className="text-lg font-medium text-destructive">خطا در ورود</p>
-        <p className="text-sm text-muted-foreground">{error}</p>
+      <div className="flex min-h-[60vh] items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl border border-destructive/30 bg-card p-8 text-center shadow-sm">
+          <div className="mb-4 text-4xl">⚠️</div>
+          <h1 className="text-xl font-bold">خطا در ورود</h1>
+          <p className="mt-3 break-words text-sm text-muted-foreground">
+            {error ?? "Authentication failed"}
+          </p>
+        </div>
       </div>
     );
   }
 
-  return (
-    <div className="text-center space-y-2">
-      <p className="text-lg font-medium">خوش اومدی! 🎉</p>
-      <pre className="text-xs bg-muted p-4 rounded-md text-left overflow-auto max-w-sm">
-        {JSON.stringify(user, null, 2)}
-      </pre>
-    </div>
-  );
+  return <>{children(user)}</>;
 }
