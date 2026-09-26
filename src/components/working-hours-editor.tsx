@@ -1,5 +1,7 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+
+import { useEffect, useState } from "react";
+
 type WorkingHour = {
   dayOfWeek: number;
   enabled: boolean;
@@ -8,6 +10,7 @@ type WorkingHour = {
   breakStart: string | null;
   breakEnd: string | null;
 };
+
 const DAY_LABELS = [
   "یکشنبه",
   "دوشنبه",
@@ -17,6 +20,7 @@ const DAY_LABELS = [
   "جمعه",
   "شنبه",
 ];
+
 const DEFAULT_DAY: WorkingHour = {
   dayOfWeek: 0,
   enabled: false,
@@ -25,6 +29,7 @@ const DEFAULT_DAY: WorkingHour = {
   breakStart: null,
   breakEnd: null,
 };
+
 function buildDefaultWeek(): WorkingHour[] {
   return Array.from({ length: 7 }, (_, index) => ({
     ...DEFAULT_DAY,
@@ -32,15 +37,19 @@ function buildDefaultWeek(): WorkingHour[] {
     enabled: index >= 1 && index <= 5,
   }));
 }
+
 function mergeWithDefaults(loaded: WorkingHour[]): WorkingHour[] {
   const map = new Map(
     loaded.map((day) => [day.dayOfWeek, day])
   );
+
   return buildDefaultWeek().map((defaultDay) => {
     const existing = map.get(defaultDay.dayOfWeek);
+
     if (!existing) {
       return defaultDay;
     }
+
     return {
       dayOfWeek: defaultDay.dayOfWeek,
       enabled: existing.enabled,
@@ -51,37 +60,38 @@ function mergeWithDefaults(loaded: WorkingHour[]): WorkingHour[] {
     };
   });
 }
+
 function isValidTime(value: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
+
 function validateDays(days: WorkingHour[]): string | null {
   if (days.length !== 7) {
     return "اطلاعات هفت روز هفته کامل نیست.";
   }
-  const dayNumbers = days.map((day) => day.dayOfWeek);
-  if (
-    new Set(dayNumbers).size !== 7 ||
-    dayNumbers.some((day) => day < 0 || day > 6)
-  ) {
-    return "ساختار روزهای هفته نامعتبر است.";
-  }
+
   for (const day of days) {
     if (!isValidTime(day.openTime) || !isValidTime(day.closeTime)) {
       return `ساعت کاری ${DAY_LABELS[day.dayOfWeek]} معتبر نیست.`;
     }
+
     if (day.enabled && day.openTime >= day.closeTime) {
       return `ساعت شروع ${DAY_LABELS[day.dayOfWeek]} باید قبل از ساعت پایان باشد.`;
     }
+
     if (day.breakStart && !isValidTime(day.breakStart)) {
       return `شروع زمان استراحت ${DAY_LABELS[day.dayOfWeek]} معتبر نیست.`;
     }
+
     if (day.breakEnd && !isValidTime(day.breakEnd)) {
       return `پایان زمان استراحت ${DAY_LABELS[day.dayOfWeek]} معتبر نیست.`;
     }
+
     if (day.breakStart && day.breakEnd) {
       if (day.breakStart >= day.breakEnd) {
         return `زمان استراحت ${DAY_LABELS[day.dayOfWeek]} معتبر نیست.`;
       }
+
       if (
         day.enabled &&
         (day.breakStart < day.openTime ||
@@ -91,8 +101,10 @@ function validateDays(days: WorkingHour[]): string | null {
       }
     }
   }
+
   return null;
 }
+
 export function WorkingHoursEditor({
   businessId,
   onSaved,
@@ -103,95 +115,97 @@ export function WorkingHoursEditor({
   const [days, setDays] = useState<WorkingHour[]>(
     buildDefaultWeek()
   );
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const loadWorkingHours = useCallback(async () => {
+
+  useEffect(() => {
     if (!businessId) {
-      setError("شناسه کسب‌وکار موجود نیست.");
       setLoading(false);
+      setError("شناسه کسب‌وکار موجود نیست.");
       return;
     }
-    try {
-      setLoading(true);
-      setError(null);
-      setMessage(null);
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => {
-        controller.abort();
-      }, 10000);
-      let response: Response;
+
+    let cancelled = false;
+
+    async function loadWorkingHours() {
       try {
-        response = await fetch(
+        setLoading(true);
+        setError(null);
+
+        const response = await fetch(
           `/api/working-hours?businessId=${encodeURIComponent(
             businessId
           )}`,
           {
             method: "GET",
             cache: "no-store",
-            signal: controller.signal,
           }
         );
-      } finally {
-        window.clearTimeout(timeout);
-      }
-      let data: unknown = null;
-      try {
-        data = await response.json();
-      } catch {
-        data = null;
-      }
-      if (!response.ok) {
-        const apiError =
+
+        let data: unknown = null;
+
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+
+        if (!response.ok) {
+          const apiError =
+            typeof data === "object" &&
+            data !== null &&
+            "error" in data &&
+            typeof data.error === "string"
+              ? data.error
+              : "خطا در دریافت ساعت کاری.";
+
+          throw new Error(apiError);
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const workingHours =
           typeof data === "object" &&
           data !== null &&
-          "error" in data &&
-          typeof data.error === "string"
-            ? data.error
-            : "خطا در دریافت ساعت کاری.";
-        throw new Error(apiError);
-      }
-      const loadedHours =
-        typeof data === "object" &&
-        data !== null &&
-        "workingHours" in data &&
-        Array.isArray(data.workingHours)
-          ? data.workingHours
-          : [];
-      setDays(mergeWithDefaults(loadedHours as WorkingHour[]));
-    } catch (error) {
-      if (
-        error instanceof DOMException &&
-        error.name === "AbortError"
-      ) {
-        setError(
-          "دریافت ساعت کاری بیشتر از حد معمول طول کشید."
+          "workingHours" in data &&
+          Array.isArray(data.workingHours)
+            ? data.workingHours
+            : [];
+
+        setDays(
+          mergeWithDefaults(
+            workingHours as WorkingHour[]
+          )
         );
-      } else {
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
         setError(
           error instanceof Error
             ? error.message
             : "خطا در دریافت ساعت کاری."
         );
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    } finally {
-      setLoading(false);
     }
-  }, [businessId]);
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      if (cancelled) {
-        return;
-      }
-      await loadWorkingHours();
-    }
-    load();
+
+    loadWorkingHours();
+
     return () => {
       cancelled = true;
     };
-  }, [loadWorkingHours]);
+  }, [businessId]);
+
   function updateDay(
     index: number,
     patch: Partial<WorkingHour>
@@ -203,20 +217,25 @@ export function WorkingHoursEditor({
           : day
       )
     );
+
     setMessage(null);
     setError(null);
   }
+
   async function save() {
     const validationError = validateDays(days);
+
     if (validationError) {
       setError(validationError);
       setMessage(null);
       return;
     }
+
     try {
       setSaving(true);
       setError(null);
       setMessage(null);
+
       const response = await fetch("/api/working-hours", {
         method: "PUT",
         headers: {
@@ -227,12 +246,15 @@ export function WorkingHoursEditor({
           days,
         }),
       });
+
       let data: unknown = null;
+
       try {
         data = await response.json();
       } catch {
         data = null;
       }
+
       if (!response.ok) {
         const apiError =
           typeof data === "object" &&
@@ -241,8 +263,10 @@ export function WorkingHoursEditor({
           typeof data.error === "string"
             ? data.error
             : "ذخیره ساعت کاری ناموفق بود.";
+
         throw new Error(apiError);
       }
+
       if (
         typeof data === "object" &&
         data !== null &&
@@ -255,7 +279,9 @@ export function WorkingHoursEditor({
           )
         );
       }
+
       setMessage("ساعت کاری با موفقیت ذخیره شد.");
+
       onSaved?.();
     } catch (error) {
       setError(
@@ -267,39 +293,43 @@ export function WorkingHoursEditor({
       setSaving(false);
     }
   }
+
   return (
     <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
       <div>
-        <h2 className="text-xl font-bold">ساعت کاری</h2>
+        <h2 className="text-xl font-bold">
+          ساعت کاری
+        </h2>
+
         <p className="mt-1 text-sm text-muted-foreground">
           روزها و ساعت‌هایی که مشتری می‌تواند رزرو کند.
         </p>
+
+        <p className="mt-2 text-xs text-muted-foreground">
+          Business ID: {businessId}
+        </p>
       </div>
+
       {loading && (
         <div className="rounded-xl border bg-background p-3 text-sm text-muted-foreground">
           در حال دریافت ساعت کاری...
         </div>
       )}
+
       {error && (
-        <div className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
           <p className="text-sm text-destructive">
             {error}
           </p>
-          <button
-            type="button"
-            onClick={loadWorkingHours}
-            disabled={loading}
-            className="rounded-lg border bg-background px-4 py-2 text-sm font-medium disabled:opacity-50"
-          >
-            {loading ? "در حال تلاش..." : "تلاش دوباره"}
-          </button>
         </div>
       )}
+
       {message && (
         <div className="rounded-xl border bg-background p-3 text-sm">
           {message}
         </div>
       )}
+
       <div className="space-y-3">
         {days.map((day, index) => (
           <div
@@ -318,18 +348,22 @@ export function WorkingHoursEditor({
                   }
                   className="h-4 w-4"
                 />
+
                 {DAY_LABELS[day.dayOfWeek]}
               </label>
+
               <span className="text-xs text-muted-foreground">
                 {day.enabled ? "فعال" : "تعطیل"}
               </span>
             </div>
+
             {day.enabled && (
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <label className="block text-xs">
                   <span className="mb-1 block text-muted-foreground">
                     شروع
                   </span>
+
                   <input
                     type="time"
                     value={day.openTime}
@@ -341,10 +375,12 @@ export function WorkingHoursEditor({
                     className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
                   />
                 </label>
+
                 <label className="block text-xs">
                   <span className="mb-1 block text-muted-foreground">
                     پایان
                   </span>
+
                   <input
                     type="time"
                     value={day.closeTime}
@@ -361,6 +397,7 @@ export function WorkingHoursEditor({
           </div>
         ))}
       </div>
+
       <button
         type="button"
         onClick={save}
