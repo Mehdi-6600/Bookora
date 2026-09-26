@@ -10,17 +10,30 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const subscription = await prisma.subscription.findFirst({
-      where: { userId: user.id, status: "ACTIVE" },
-      orderBy: { createdAt: "desc" },
-    });
+    const [activeSubscription, pendingSubscription] = await Promise.all([
+      prisma.subscription.findFirst({
+        where: { userId: user.id, status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.subscription.findFirst({
+        where: { userId: user.id, status: "PENDING" },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
 
     return NextResponse.json({
-      subscription: subscription
+      subscription: activeSubscription
         ? {
-            plan: subscription.plan,
-            status: subscription.status,
-            expiresAt: subscription.expiresAt,
+            plan: activeSubscription.plan,
+            status: activeSubscription.status,
+            expiresAt: activeSubscription.expiresAt,
+          }
+        : null,
+      pendingSubscription: pendingSubscription
+        ? {
+            plan: pendingSubscription.plan,
+            status: pendingSubscription.status,
+            createdAt: pendingSubscription.createdAt,
           }
         : null,
     });
