@@ -16,27 +16,6 @@ type Props = {
   children: (user: TelegramUser) => React.ReactNode;
 };
 
-declare global {
-  interface Window {
-    Telegram?: {
-      WebApp?: {
-        initData: string;
-        initDataUnsafe?: {
-          user?: {
-            id: number;
-            username?: string;
-            first_name?: string;
-            last_name?: string;
-            language_code?: string;
-          };
-        };
-        ready: () => void;
-        expand: () => void;
-      };
-    };
-  }
-}
-
 export function TelegramAuthGate({ children }: Props) {
   const [user, setUser] = useState<TelegramUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,15 +26,13 @@ export function TelegramAuthGate({ children }: Props) {
 
     async function authenticate() {
       try {
-        if (typeof window === "undefined") {
-          return;
-        }
-
         const tg = window.Telegram?.WebApp;
 
         if (!tg) {
-          setError("این صفحه باید داخل تلگرام باز شود.");
-          setLoading(false);
+          if (!cancelled) {
+            setError("این صفحه باید داخل تلگرام باز شود.");
+            setLoading(false);
+          }
           return;
         }
 
@@ -63,8 +40,10 @@ export function TelegramAuthGate({ children }: Props) {
         tg.expand();
 
         if (!tg.initData) {
-          setError("اطلاعات احراز هویت تلگرام دریافت نشد.");
-          setLoading(false);
+          if (!cancelled) {
+            setError("اطلاعات احراز هویت تلگرام دریافت نشد.");
+            setLoading(false);
+          }
           return;
         }
 
@@ -114,6 +93,7 @@ export function TelegramAuthGate({ children }: Props) {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+
           <p className="text-sm text-muted-foreground">
             در حال ورود به Bookora...
           </p>
@@ -126,8 +106,13 @@ export function TelegramAuthGate({ children }: Props) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center p-4">
         <div className="w-full max-w-md rounded-2xl border bg-card p-6 text-center shadow-sm">
-          <h1 className="text-xl font-bold">ورود به Bookora</h1>
-          <p className="mt-3 text-sm text-muted-foreground">{error}</p>
+          <h1 className="text-xl font-bold">
+            ورود به Bookora
+          </h1>
+
+          <p className="mt-3 text-sm text-muted-foreground">
+            {error}
+          </p>
         </div>
       </div>
     );
