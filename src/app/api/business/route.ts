@@ -76,6 +76,7 @@ export async function GET() {
         description: business.description,
         country: business.country,
         currency: business.currency,
+        status: business.status,
         services: business.services.map((service) => ({
           id: service.id,
           name: service.name,
@@ -168,6 +169,7 @@ export async function POST(req: NextRequest) {
           description: business.description,
           country: business.country,
           currency: business.currency,
+          status: business.status,
           services: business.services.map((service) => ({
             id: service.id,
             name: service.name,
