@@ -9,17 +9,19 @@ type SubscriptionStatus = {
   expiresAt: string | null;
 } | null;
 
-declare global {
-  interface Window {
-    Telegram?: {
-      WebApp?: {
-        openInvoice: (
-          url: string,
-          callback: (status: "paid" | "cancelled" | "failed" | "pending") => void
-        ) => void;
-      };
-    };
-  }
+type TelegramWebAppWithInvoice = {
+  openInvoice?: (
+    url: string,
+    callback: (status: "paid" | "cancelled" | "failed" | "pending") => void
+  ) => void;
+};
+
+function getTelegramWebApp(): TelegramWebAppWithInvoice | undefined {
+  return (
+    window as unknown as {
+      Telegram?: { WebApp?: TelegramWebAppWithInvoice };
+    }
+  ).Telegram?.WebApp;
 }
 
 export function SubscriptionPanel() {
@@ -74,9 +76,9 @@ export function SubscriptionPanel() {
         throw new Error(data?.error || "ساخت لینک پرداخت ناموفق بود.");
       }
 
-      const webApp = window.Telegram?.WebApp;
+      const webApp = getTelegramWebApp();
 
-      if (!webApp) {
+      if (!webApp?.openInvoice) {
         setError("این بخش فقط داخل تلگرام کار می‌کند.");
         return;
       }
