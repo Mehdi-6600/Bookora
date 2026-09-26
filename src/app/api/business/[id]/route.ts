@@ -8,6 +8,7 @@ const updateBusinessSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(1000).nullable().optional(),
   country: z.string().refine(isCountryCode, "کشور معتبر نیست."),
+  reactivate: z.boolean().optional(),
 });
 
 export async function PUT(
@@ -44,7 +45,7 @@ export async function PUT(
 
     const existing = await prisma.business.findFirst({
       where: { id, ownerId: user.id },
-      select: { id: true, country: true },
+      select: { id: true, country: true, status: true },
     });
 
     if (!existing) {
@@ -54,13 +55,15 @@ export async function PUT(
       );
     }
 
-    const { name, description, country } = parsed.data;
+    const { name, description, country, reactivate } = parsed.data;
 
-    // اگر کشور واقعاً تغییر کرد، ارز هم متناسب با آن به‌روزرسانی می‌شود.
-    // ارز خود سرویس‌های قبلی دست‌نخورده می‌ماند تا قیمت‌های تاریخی خراب نشوند؛
-    // فقط سرویس‌های جدیدی که بعد از این ساخته می‌شوند ارز جدید را می‌گیرند.
     const countryChanged = existing.country !== country;
     const currency = countryChanged ? COUNTRY_CURRENCY[country] : undefined;
+
+    // فقط از حالت ARCHIVED می‌توان با درخواست صریح reactivate به ACTIVE برگشت.
+    // خودِ ویرایش عادی هرگز باعث تغییر status نمی‌شود.
+    const status =
+      reactivate && existing.status === "ARCHIVED" ? "ACTIVE" : undefined;
 
     const business = await prisma.business.update({
       where: { id },
@@ -69,6 +72,7 @@ export async function PUT(
         description: description || null,
         country,
         ...(currency ? { currency } : {}),
+        ...(status ? { status } : {}),
       },
       include: {
         services: {
@@ -86,6 +90,7 @@ export async function PUT(
         description: business.description,
         country: business.country,
         currency: business.currency,
+        status: business.status,
         services: business.services.map((service) => ({
           id: service.id,
           name: service.name,
@@ -125,7 +130,6 @@ export async function DELETE(
       where: { id, ownerId: user.id },
       select: {
         id: true,
-        status: true,
         _count: { select: { bookings: true } },
       },
     });
@@ -137,8 +141,6 @@ export async function DELETE(
       );
     }
 
-    // Business بدون هیچ Booking تاریخی → حذف واقعی (Cascade روی Service/WorkingHour و غیره بی‌خطر است).
-    // Business با Booking → به‌جای حذف، فقط Archive می‌شود تا سابقه‌ی مالی/رزرو از بین نرود.
     if (existing._count.bookings > 0) {
       await prisma.business.update({
         where: { id },
