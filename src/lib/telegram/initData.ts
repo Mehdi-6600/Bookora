@@ -28,14 +28,19 @@ export function validateInitData(initData: string): ValidatedInitData {
   const hash = params.get("hash");
   if (!hash) throw new Error("Missing hash");
 
-  // حذف hash و signature (فیلد signature بعداً اضافه شده و نباید در محاسبه هش باشد)
   params.delete("hash");
-  params.delete("signature");
 
   const dataCheckString = Array.from(params.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
     .join("\n");
+
+  // DEBUG: چاپ طول توکن و کاراکترهای اول
+  console.log("DEBUG TOKEN LENGTH:", env.TELEGRAM_BOT_TOKEN.length);
+  console.log("DEBUG TOKEN FIRST 10:", env.TELEGRAM_BOT_TOKEN.substring(0, 10));
+  console.log("DEBUG TOKEN LAST 5:", env.TELEGRAM_BOT_TOKEN.slice(-5));
+  console.log("DEBUG HASH FROM TG:", hash);
+  console.log("DEBUG DATA CHECK STRING:", dataCheckString.substring(0, 200));
 
   const secretKey = crypto
     .createHmac("sha256", "WebAppData")
@@ -47,14 +52,18 @@ export function validateInitData(initData: string): ValidatedInitData {
     .update(dataCheckString)
     .digest("hex");
 
+  console.log("DEBUG COMPUTED HASH:", computedHash);
+
   if (computedHash !== hash) {
-    throw new Error("Invalid initData hash");
+    throw new Error(
+      `Invalid initData hash (tokenLength=${env.TELEGRAM_BOT_TOKEN.length}, tokenStart=${env.TELEGRAM_BOT_TOKEN.substring(0, 10)})`
+    );
   }
 
   const authDate = Number(params.get("auth_date") ?? 0);
   if (!authDate) throw new Error("Missing auth_date");
 
-  const MAX_AGE_SECONDS = 60 * 60 * 24; // 24 ساعت
+  const MAX_AGE_SECONDS = 60 * 60 * 24;
   const now = Math.floor(Date.now() / 1000);
   if (now - authDate > MAX_AGE_SECONDS) {
     throw new Error("initData expired");
