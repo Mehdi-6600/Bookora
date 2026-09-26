@@ -4,6 +4,12 @@ import { useEffect, useState } from "react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
 import { SubscriptionPanel } from "@/components/subscription-panel";
+import {
+  COUNTRY_LABELS,
+  CountryCode,
+  formatPrice,
+  isCountryCode,
+} from "@/lib/currency";
 
 type TelegramUser = {
   id: string;
@@ -30,6 +36,8 @@ type Business = {
   name: string;
   slug: string;
   description: string | null;
+  country: string | null;
+  currency: string;
   services: Service[];
   _count?: {
     bookings: number;
@@ -47,11 +55,23 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   const [businessName, setBusinessName] = useState("");
   const [businessDescription, setBusinessDescription] = useState("");
+  const [businessCountry, setBusinessCountry] = useState<CountryCode>("IR");
 
   const [serviceName, setServiceName] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
   const [servicePrice, setServicePrice] = useState("");
   const [serviceDuration, setServiceDuration] = useState("60");
+
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(
+    null
+  );
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editDuration, setEditDuration] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [message, setMessage] = useState<string | null>(null);
 
@@ -116,6 +136,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         body: JSON.stringify({
           name: businessName.trim(),
           description: businessDescription.trim() || null,
+          country: businessCountry,
         }),
       });
 
@@ -200,6 +221,133 @@ function Dashboard({ user }: { user: TelegramUser }) {
     }
   }
 
+  function startEdit(service: Service) {
+    setEditingServiceId(service.id);
+    setEditName(service.name);
+    setEditDescription(service.description || "");
+    setEditPrice(service.price);
+    setEditDuration(String(service.durationMinutes));
+    setConfirmDeleteId(null);
+  }
+
+  function cancelEdit() {
+    setEditingServiceId(null);
+  }
+
+  async function saveEdit(serviceId: string) {
+    const price = Number(editPrice);
+    const durationMinutes = Number(editDuration);
+
+    if (!editName.trim()) {
+      setMessage("نام سرویس را وارد کنید.");
+      return;
+    }
+
+    if (!Number.isFinite(price) || price < 0) {
+      setMessage("قیمت سرویس معتبر نیست.");
+      return;
+    }
+
+    if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
+      setMessage("مدت سرویس معتبر نیست.");
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      setMessage(null);
+
+      const response = await fetch(`/api/services/${serviceId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName.trim(),
+          description: editDescription.trim() || null,
+          price,
+          durationMinutes,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "ویرایش سرویس ناموفق بود.");
+      }
+
+      setEditingServiceId(null);
+      await loadBusinesses();
+      setMessage("سرویس با موفقیت ویرایش شد.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "ویرایش سرویس ناموفق بود."
+      );
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function toggleActive(service: Service) {
+    try {
+      setMessage(null);
+
+      const response = await fetch(`/api/services/${service.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: service.name,
+          description: service.description,
+          price: Number(service.price),
+          durationMinutes: service.durationMinutes,
+          active: !service.active,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "تغییر وضعیت ناموفق بود.");
+      }
+
+      await loadBusinesses();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "تغییر وضعیت ناموفق بود."
+      );
+    }
+  }
+
+  async function deleteService(serviceId: string) {
+    try {
+      setDeletingId(serviceId);
+      setMessage(null);
+
+      const response = await fetch(`/api/services/${serviceId}`, {
+        method: "DELETE",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "حذف سرویس ناموفق بود.");
+      }
+
+      setConfirmDeleteId(null);
+      await loadBusinesses();
+
+      setMessage(
+        data.deactivated
+          ? "این سرویس رزرو داشته، پس به‌جای حذف غیرفعال شد."
+          : "سرویس حذف شد."
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "حذف سرویس ناموفق بود."
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -245,7 +393,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
             <h2 className="text-xl font-bold">اولین کسب‌وکارت را بساز</h2>
 
             <p className="mt-1 text-sm text-muted-foreground">
-              برای شروع فقط نام کسب‌وکار کافی است.
+              نام و کشور کسب‌وکار را وارد کن.
             </p>
           </div>
 
@@ -262,6 +410,33 @@ function Dashboard({ user }: { user: TelegramUser }) {
             placeholder="توضیح کوتاه"
             className="min-h-24 w-full rounded-xl border bg-background px-4 py-3 outline-none"
           />
+
+          <div>
+            <p className="mb-2 text-sm font-medium">کشور کسب‌وکار</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              {(["IR", "OTHER"] as CountryCode[]).map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setBusinessCountry(code)}
+                  className={`rounded-xl border px-4 py-3 text-sm font-medium ${
+                    businessCountry === code
+                      ? "border-primary bg-primary/10"
+                      : "bg-background"
+                  }`}
+                >
+                  {COUNTRY_LABELS[code]}
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-2 text-xs text-muted-foreground">
+              {businessCountry === "IR"
+                ? "قیمت خدمات به تومان نمایش داده می‌شود."
+                : "قیمت خدمات به دلار نمایش داده می‌شود."}
+            </p>
+          </div>
 
           <button
             type="submit"
@@ -285,6 +460,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   (item) => item.id === event.target.value
                 );
                 setSelectedBusiness(business || null);
+                setEditingServiceId(null);
+                setConfirmDeleteId(null);
               }}
               className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
             >
@@ -308,6 +485,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     {selectedBusiness.description}
                   </p>
                 )}
+
+                <p className="mt-2 text-xs text-muted-foreground">
+                  کشور:{" "}
+                  {selectedBusiness.country &&
+                  isCountryCode(selectedBusiness.country)
+                    ? COUNTRY_LABELS[selectedBusiness.country]
+                    : "ثبت نشده"}{" "}
+                  — واحد پول: {selectedBusiness.currency}
+                </p>
 
                 <div className="mt-4 rounded-xl bg-muted p-4">
                   <p className="text-xs text-muted-foreground">
@@ -360,7 +546,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     type="number"
                     min="0"
                     step="0.01"
-                    placeholder="قیمت"
+                    placeholder={`قیمت (${selectedBusiness.currency})`}
                     className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
                   />
 
@@ -394,27 +580,139 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   <div className="mt-4 space-y-3">
                     {selectedBusiness.services.map((service) => (
                       <div key={service.id} className="rounded-xl border p-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <h3 className="font-semibold">{service.name}</h3>
+                        {editingServiceId === service.id ? (
+                          <div className="space-y-3">
+                            <input
+                              value={editName}
+                              onChange={(event) =>
+                                setEditName(event.target.value)
+                              }
+                              className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                            />
 
-                            {service.description && (
-                              <p className="mt-1 text-sm text-muted-foreground">
-                                {service.description}
-                              </p>
-                            )}
-                          </div>
+                            <textarea
+                              value={editDescription}
+                              onChange={(event) =>
+                                setEditDescription(event.target.value)
+                              }
+                              className="min-h-16 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                            />
 
-                          <div className="text-left text-sm">
-                            <div className="font-semibold">
-                              {service.price} {service.currency}
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                value={editPrice}
+                                onChange={(event) =>
+                                  setEditPrice(event.target.value)
+                                }
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                              />
+
+                              <input
+                                value={editDuration}
+                                onChange={(event) =>
+                                  setEditDuration(event.target.value)
+                                }
+                                type="number"
+                                min="1"
+                                className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                              />
                             </div>
 
-                            <div className="text-muted-foreground">
-                              {service.durationMinutes} دقیقه
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => saveEdit(service.id)}
+                                disabled={savingEdit}
+                                className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                              >
+                                {savingEdit ? "در حال ذخیره..." : "ذخیره"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={cancelEdit}
+                                className="rounded-lg border px-3 py-2 text-sm font-medium"
+                              >
+                                انصراف
+                              </button>
                             </div>
                           </div>
-                        </div>
+                        ) : (
+                          <>
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <h3 className="font-semibold">
+                                  {service.name}
+                                  {!service.active && (
+                                    <span className="mr-2 text-xs font-normal text-muted-foreground">
+                                      (غیرفعال)
+                                    </span>
+                                  )}
+                                </h3>
+
+                                {service.description && (
+                                  <p className="mt-1 text-sm text-muted-foreground">
+                                    {service.description}
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="text-left text-sm">
+                                <div className="font-semibold">
+                                  {formatPrice(service.price, service.currency)}
+                                </div>
+
+                                <div className="text-muted-foreground">
+                                  {service.durationMinutes} دقیقه
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-3 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => startEdit(service)}
+                                className="rounded-lg border px-3 py-2 text-xs font-medium"
+                              >
+                                ویرایش
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => toggleActive(service)}
+                                className="rounded-lg border px-3 py-2 text-xs font-medium"
+                              >
+                                {service.active ? "غیرفعال کن" : "فعال کن"}
+                              </button>
+
+                              {confirmDeleteId === service.id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => deleteService(service.id)}
+                                  disabled={deletingId === service.id}
+                                  className="rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground disabled:opacity-50"
+                                >
+                                  {deletingId === service.id
+                                    ? "..."
+                                    : "مطمئنی؟"}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setConfirmDeleteId(service.id)
+                                  }
+                                  className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive"
+                                >
+                                  حذف
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
