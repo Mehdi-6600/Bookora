@@ -38,6 +38,7 @@ type Business = {
   description: string | null;
   country: string | null;
   currency: string;
+  status: string;
   services: Service[];
   _count?: {
     bookings: number;
@@ -56,6 +57,16 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [businessName, setBusinessName] = useState("");
   const [businessDescription, setBusinessDescription] = useState("");
   const [businessCountry, setBusinessCountry] = useState<CountryCode>("IR");
+
+  const [editingBusiness, setEditingBusiness] = useState(false);
+  const [editBusinessName, setEditBusinessName] = useState("");
+  const [editBusinessDescription, setEditBusinessDescription] = useState("");
+  const [editBusinessCountry, setEditBusinessCountry] =
+    useState<CountryCode>("IR");
+  const [savingBusinessEdit, setSavingBusinessEdit] = useState(false);
+  const [confirmDeleteBusiness, setConfirmDeleteBusiness] = useState(false);
+  const [deletingBusiness, setDeletingBusiness] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
 
   const [serviceName, setServiceName] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
@@ -156,6 +167,128 @@ function Dashboard({ user }: { user: TelegramUser }) {
       );
     } finally {
       setSavingBusiness(false);
+    }
+  }
+
+  function startEditBusiness(business: Business) {
+    setEditingBusiness(true);
+    setEditBusinessName(business.name);
+    setEditBusinessDescription(business.description || "");
+    setEditBusinessCountry(
+      business.country && isCountryCode(business.country)
+        ? business.country
+        : "IR"
+    );
+    setConfirmDeleteBusiness(false);
+  }
+
+  async function saveBusinessEdit(businessId: string) {
+    if (!editBusinessName.trim()) {
+      setMessage("نام کسب‌وکار را وارد کنید.");
+      return;
+    }
+
+    try {
+      setSavingBusinessEdit(true);
+      setMessage(null);
+
+      const response = await fetch(`/api/business/${businessId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editBusinessName.trim(),
+          description: editBusinessDescription.trim() || null,
+          country: editBusinessCountry,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "ویرایش کسب‌وکار ناموفق بود.");
+      }
+
+      setEditingBusiness(false);
+      await loadBusinesses();
+      setMessage(
+        data.currencyChanged
+          ? "کسب‌وکار ویرایش شد. واحد پول سرویس‌های جدید از حالا تغییر می‌کند."
+          : "کسب‌وکار ویرایش شد."
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "ویرایش کسب‌وکار ناموفق بود."
+      );
+    } finally {
+      setSavingBusinessEdit(false);
+    }
+  }
+
+  async function deleteBusiness(businessId: string) {
+    try {
+      setDeletingBusiness(true);
+      setMessage(null);
+
+      const response = await fetch(`/api/business/${businessId}`, {
+        method: "DELETE",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "حذف کسب‌وکار ناموفق بود.");
+      }
+
+      setConfirmDeleteBusiness(false);
+      await loadBusinesses();
+
+      setMessage(
+        data.archived
+          ? "این کسب‌وکار رزرو داشته، پس به‌جای حذف بایگانی شد."
+          : "کسب‌وکار حذف شد."
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "حذف کسب‌وکار ناموفق بود."
+      );
+    } finally {
+      setDeletingBusiness(false);
+    }
+  }
+
+  async function reactivateBusiness(business: Business) {
+    try {
+      setReactivating(true);
+      setMessage(null);
+
+      const response = await fetch(`/api/business/${business.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: business.name,
+          description: business.description,
+          country:
+            business.country && isCountryCode(business.country)
+              ? business.country
+              : "IR",
+          reactivate: true,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "بازگردانی ناموفق بود.");
+      }
+
+      await loadBusinesses();
+      setMessage("کسب‌وکار دوباره فعال شد.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "بازگردانی ناموفق بود."
+      );
+    } finally {
+      setReactivating(false);
     }
   }
 
@@ -366,6 +499,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
     );
   }
 
+  const isArchived = selectedBusiness?.status === "ARCHIVED";
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
       <div className="rounded-2xl border bg-card p-5 shadow-sm">
@@ -462,12 +597,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 setSelectedBusiness(business || null);
                 setEditingServiceId(null);
                 setConfirmDeleteId(null);
+                setEditingBusiness(false);
+                setConfirmDeleteBusiness(false);
               }}
               className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
             >
               {businesses.map((business) => (
                 <option key={business.id} value={business.id}>
                   {business.name}
+                  {business.status === "ARCHIVED" ? " (بایگانی)" : ""}
                 </option>
               ))}
             </select>
@@ -476,250 +614,374 @@ function Dashboard({ user }: { user: TelegramUser }) {
           {selectedBusiness && (
             <>
               <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                <h2 className="text-xl font-bold">
-                  {selectedBusiness.name}
-                </h2>
-
-                {selectedBusiness.description && (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {selectedBusiness.description}
-                  </p>
-                )}
-
-                <p className="mt-2 text-xs text-muted-foreground">
-                  کشور:{" "}
-                  {selectedBusiness.country &&
-                  isCountryCode(selectedBusiness.country)
-                    ? COUNTRY_LABELS[selectedBusiness.country]
-                    : "ثبت نشده"}{" "}
-                  — واحد پول: {selectedBusiness.currency}
-                </p>
-
-                <div className="mt-4 rounded-xl bg-muted p-4">
-                  <p className="text-xs text-muted-foreground">
-                    لینک رزرو عمومی
-                  </p>
-
-                  <a
-                    href={`/book/${selectedBusiness.slug}`}
-                    className="mt-1 block break-all text-sm font-medium underline"
-                  >
-                    {typeof window !== "undefined"
-                      ? `${window.location.origin}/book/${selectedBusiness.slug}`
-                      : `/book/${selectedBusiness.slug}`}
-                  </a>
-                </div>
-              </div>
-
-              <form
-                onSubmit={createService}
-                className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm"
-              >
-                <div>
-                  <h2 className="text-xl font-bold">افزودن سرویس</h2>
-
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    سرویس‌هایی که مشتری می‌تواند رزرو کند.
-                  </p>
-                </div>
-
-                <input
-                  value={serviceName}
-                  onChange={(event) => setServiceName(event.target.value)}
-                  placeholder="مثلاً Haircut"
-                  className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                />
-
-                <textarea
-                  value={serviceDescription}
-                  onChange={(event) =>
-                    setServiceDescription(event.target.value)
-                  }
-                  placeholder="توضیح سرویس"
-                  className="min-h-20 w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                />
-
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    value={servicePrice}
-                    onChange={(event) => setServicePrice(event.target.value)}
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder={`قیمت (${selectedBusiness.currency})`}
-                    className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                  />
-
-                  <input
-                    value={serviceDuration}
-                    onChange={(event) => setServiceDuration(event.target.value)}
-                    type="number"
-                    min="1"
-                    placeholder="مدت دقیقه"
-                    className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={savingService}
-                  className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
-                >
-                  {savingService ? "در حال افزودن..." : "افزودن سرویس"}
-                </button>
-              </form>
-
-              <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                <h2 className="text-xl font-bold">سرویس‌ها</h2>
-
-                {selectedBusiness.services.length === 0 ? (
-                  <p className="mt-4 text-sm text-muted-foreground">
-                    هنوز سرویسی اضافه نشده است.
-                  </p>
-                ) : (
-                  <div className="mt-4 space-y-3">
-                    {selectedBusiness.services.map((service) => (
-                      <div key={service.id} className="rounded-xl border p-4">
-                        {editingServiceId === service.id ? (
-                          <div className="space-y-3">
-                            <input
-                              value={editName}
-                              onChange={(event) =>
-                                setEditName(event.target.value)
-                              }
-                              className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-                            />
-
-                            <textarea
-                              value={editDescription}
-                              onChange={(event) =>
-                                setEditDescription(event.target.value)
-                              }
-                              className="min-h-16 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-                            />
-
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                value={editPrice}
-                                onChange={(event) =>
-                                  setEditPrice(event.target.value)
-                                }
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-                              />
-
-                              <input
-                                value={editDuration}
-                                onChange={(event) =>
-                                  setEditDuration(event.target.value)
-                                }
-                                type="number"
-                                min="1"
-                                className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-                              />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => saveEdit(service.id)}
-                                disabled={savingEdit}
-                                className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                              >
-                                {savingEdit ? "در حال ذخیره..." : "ذخیره"}
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={cancelEdit}
-                                className="rounded-lg border px-3 py-2 text-sm font-medium"
-                              >
-                                انصراف
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex items-start justify-between gap-4">
-                              <div>
-                                <h3 className="font-semibold">
-                                  {service.name}
-                                  {!service.active && (
-                                    <span className="mr-2 text-xs font-normal text-muted-foreground">
-                                      (غیرفعال)
-                                    </span>
-                                  )}
-                                </h3>
-
-                                {service.description && (
-                                  <p className="mt-1 text-sm text-muted-foreground">
-                                    {service.description}
-                                  </p>
-                                )}
-                              </div>
-
-                              <div className="text-left text-sm">
-                                <div className="font-semibold">
-                                  {formatPrice(service.price, service.currency)}
-                                </div>
-
-                                <div className="text-muted-foreground">
-                                  {service.durationMinutes} دقیقه
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="mt-3 grid grid-cols-3 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => startEdit(service)}
-                                className="rounded-lg border px-3 py-2 text-xs font-medium"
-                              >
-                                ویرایش
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => toggleActive(service)}
-                                className="rounded-lg border px-3 py-2 text-xs font-medium"
-                              >
-                                {service.active ? "غیرفعال کن" : "فعال کن"}
-                              </button>
-
-                              {confirmDeleteId === service.id ? (
-                                <button
-                                  type="button"
-                                  onClick={() => deleteService(service.id)}
-                                  disabled={deletingId === service.id}
-                                  className="rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground disabled:opacity-50"
-                                >
-                                  {deletingId === service.id
-                                    ? "..."
-                                    : "مطمئنی؟"}
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setConfirmDeleteId(service.id)
-                                  }
-                                  className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive"
-                                >
-                                  حذف
-                                </button>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
+                {isArchived && (
+                  <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                    این کسب‌وکار بایگانی شده و در صفحه‌ی عمومی رزرو دیده نمی‌شود.
                   </div>
                 )}
+
+                {editingBusiness ? (
+                  <div className="space-y-3">
+                    <input
+                      value={editBusinessName}
+                      onChange={(event) =>
+                        setEditBusinessName(event.target.value)
+                      }
+                      className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                    />
+
+                    <textarea
+                      value={editBusinessDescription}
+                      onChange={(event) =>
+                        setEditBusinessDescription(event.target.value)
+                      }
+                      className="min-h-16 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                    />
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["IR", "OTHER"] as CountryCode[]).map((code) => (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() => setEditBusinessCountry(code)}
+                          className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                            editBusinessCountry === code
+                              ? "border-primary bg-primary/10"
+                              : "bg-background"
+                          }`}
+                        >
+                          {COUNTRY_LABELS[code]}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => saveBusinessEdit(selectedBusiness.id)}
+                        disabled={savingBusinessEdit}
+                        className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                      >
+                        {savingBusinessEdit ? "در حال ذخیره..." : "ذخیره"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setEditingBusiness(false)}
+                        className="rounded-lg border px-3 py-2 text-sm font-medium"
+                      >
+                        انصراف
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h2 className="text-xl font-bold">
+                      {selectedBusiness.name}
+                    </h2>
+
+                    {selectedBusiness.description && (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {selectedBusiness.description}
+                      </p>
+                    )}
+
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      کشور:{" "}
+                      {selectedBusiness.country &&
+                      isCountryCode(selectedBusiness.country)
+                        ? COUNTRY_LABELS[selectedBusiness.country]
+                        : "ثبت نشده"}{" "}
+                      — واحد پول: {selectedBusiness.currency}
+                    </p>
+
+                    <div className="mt-4 rounded-xl bg-muted p-4">
+                      <p className="text-xs text-muted-foreground">
+                        لینک رزرو عمومی
+                      </p>
+
+                      <a
+                        href={`/book/${selectedBusiness.slug}`}
+                        className="mt-1 block break-all text-sm font-medium underline"
+                      >
+                        {typeof window !== "undefined"
+                          ? `${window.location.origin}/book/${selectedBusiness.slug}`
+                          : `/book/${selectedBusiness.slug}`}
+                      </a>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      {isArchived ? (
+                        <button
+                          type="button"
+                          onClick={() => reactivateBusiness(selectedBusiness)}
+                          disabled={reactivating}
+                          className="col-span-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                        >
+                          {reactivating ? "در حال بازگردانی..." : "بازگردانی کسب‌وکار"}
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => startEditBusiness(selectedBusiness)}
+                            className="rounded-lg border px-3 py-2 text-sm font-medium"
+                          >
+                            ویرایش کسب‌وکار
+                          </button>
+
+                          {confirmDeleteBusiness ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                deleteBusiness(selectedBusiness.id)
+                              }
+                              disabled={deletingBusiness}
+                              className="rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-50"
+                            >
+                              {deletingBusiness ? "..." : "مطمئنی؟"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteBusiness(true)}
+                              className="rounded-lg border border-destructive/30 px-3 py-2 text-sm font-medium text-destructive"
+                            >
+                              حذف کسب‌وکار
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
-              <WorkingHoursEditor businessId={selectedBusiness.id} />
+              {!isArchived && (
+                <>
+                  <form
+                    onSubmit={createService}
+                    className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm"
+                  >
+                    <div>
+                      <h2 className="text-xl font-bold">افزودن سرویس</h2>
+
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        سرویس‌هایی که مشتری می‌تواند رزرو کند.
+                      </p>
+                    </div>
+
+                    <input
+                      value={serviceName}
+                      onChange={(event) => setServiceName(event.target.value)}
+                      placeholder="مثلاً Haircut"
+                      className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
+                    />
+
+                    <textarea
+                      value={serviceDescription}
+                      onChange={(event) =>
+                        setServiceDescription(event.target.value)
+                      }
+                      placeholder="توضیح سرویس"
+                      className="min-h-20 w-full rounded-xl border bg-background px-4 py-3 outline-none"
+                    />
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        value={servicePrice}
+                        onChange={(event) =>
+                          setServicePrice(event.target.value)
+                        }
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder={`قیمت (${selectedBusiness.currency})`}
+                        className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
+                      />
+
+                      <input
+                        value={serviceDuration}
+                        onChange={(event) =>
+                          setServiceDuration(event.target.value)
+                        }
+                        type="number"
+                        min="1"
+                        placeholder="مدت دقیقه"
+                        className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={savingService}
+                      className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
+                    >
+                      {savingService ? "در حال افزودن..." : "افزودن سرویس"}
+                    </button>
+                  </form>
+
+                  <div className="rounded-2xl border bg-card p-5 shadow-sm">
+                    <h2 className="text-xl font-bold">سرویس‌ها</h2>
+
+                    {selectedBusiness.services.length === 0 ? (
+                      <p className="mt-4 text-sm text-muted-foreground">
+                        هنوز سرویسی اضافه نشده است.
+                      </p>
+                    ) : (
+                      <div className="mt-4 space-y-3">
+                        {selectedBusiness.services.map((service) => (
+                          <div
+                            key={service.id}
+                            className="rounded-xl border p-4"
+                          >
+                            {editingServiceId === service.id ? (
+                              <div className="space-y-3">
+                                <input
+                                  value={editName}
+                                  onChange={(event) =>
+                                    setEditName(event.target.value)
+                                  }
+                                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                />
+
+                                <textarea
+                                  value={editDescription}
+                                  onChange={(event) =>
+                                    setEditDescription(event.target.value)
+                                  }
+                                  className="min-h-16 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                />
+
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input
+                                    value={editPrice}
+                                    onChange={(event) =>
+                                      setEditPrice(event.target.value)
+                                    }
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                  />
+
+                                  <input
+                                    value={editDuration}
+                                    onChange={(event) =>
+                                      setEditDuration(event.target.value)
+                                    }
+                                    type="number"
+                                    min="1"
+                                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                  />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveEdit(service.id)}
+                                    disabled={savingEdit}
+                                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                                  >
+                                    {savingEdit ? "در حال ذخیره..." : "ذخیره"}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={cancelEdit}
+                                    className="rounded-lg border px-3 py-2 text-sm font-medium"
+                                  >
+                                    انصراف
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-start justify-between gap-4">
+                                  <div>
+                                    <h3 className="font-semibold">
+                                      {service.name}
+                                      {!service.active && (
+                                        <span className="mr-2 text-xs font-normal text-muted-foreground">
+                                          (غیرفعال)
+                                        </span>
+                                      )}
+                                    </h3>
+
+                                    {service.description && (
+                                      <p className="mt-1 text-sm text-muted-foreground">
+                                        {service.description}
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  <div className="text-left text-sm">
+                                    <div className="font-semibold">
+                                      {formatPrice(
+                                        service.price,
+                                        service.currency
+                                      )}
+                                    </div>
+
+                                    <div className="text-muted-foreground">
+                                      {service.durationMinutes} دقیقه
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="mt-3 grid grid-cols-3 gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => startEdit(service)}
+                                    className="rounded-lg border px-3 py-2 text-xs font-medium"
+                                  >
+                                    ویرایش
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleActive(service)}
+                                    className="rounded-lg border px-3 py-2 text-xs font-medium"
+                                  >
+                                    {service.active ? "غیرفعال کن" : "فعال کن"}
+                                  </button>
+
+                                  {confirmDeleteId === service.id ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        deleteService(service.id)
+                                      }
+                                      disabled={deletingId === service.id}
+                                      className="rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground disabled:opacity-50"
+                                    >
+                                      {deletingId === service.id
+                                        ? "..."
+                                        : "مطمئنی؟"}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setConfirmDeleteId(service.id)
+                                      }
+                                      className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive"
+                                    >
+                                      حذف
+                                    </button>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <WorkingHoursEditor businessId={selectedBusiness.id} />
+                </>
+              )}
             </>
           )}
         </>
