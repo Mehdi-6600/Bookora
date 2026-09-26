@@ -23,6 +23,28 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "5mb",
     },
   },
+  async headers() {
+    return [
+      {
+        source: "/:locale/app",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, max-age=0",
+          },
+        ],
+      },
+      {
+        source: "/:locale/app/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, max-age=0",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default withNextIntl(nextConfig);
