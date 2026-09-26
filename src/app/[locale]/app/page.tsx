@@ -219,13 +219,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
-      <div className="rounded-2xl border-4 border-red-500 bg-yellow-100 p-4 text-xs text-black">
-        <p><strong>DEBUG</strong></p>
-        <p>businesses.length: {businesses.length}</p>
-        <p>selectedBusiness: {selectedBusiness ? selectedBusiness.id : "null"}</p>
-        <p>selectedBusiness.name: {selectedBusiness ? selectedBusiness.name : "-"}</p>
-      </div>
-
       <div className="rounded-2xl border bg-card p-5 shadow-sm">
         <h1 className="text-2xl font-bold">
           سلام {user.firstName || "دوست"} 👋
@@ -425,15 +418,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 )}
               </div>
 
-              <div className="rounded-xl border-4 border-blue-500 bg-blue-50 p-3 text-xs text-black">
-                DEBUG: رسیدیم به قبل از WorkingHoursEditor
-              </div>
-
               <WorkingHoursEditor businessId={selectedBusiness.id} />
-
-              <div className="rounded-xl border-4 border-green-500 bg-green-50 p-3 text-xs text-black">
-                DEBUG: بعد از WorkingHoursEditor
-              </div>
             </>
           )}
         </>
