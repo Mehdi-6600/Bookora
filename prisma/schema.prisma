@@ -266,6 +266,10 @@ model Subscription {
   status            String    @default("ACTIVE")
   provider          String
   providerPaymentId String?
+  receiptReference  String?
+  receiptNote       String?
+  adminNote         String?
+  reviewedAt        DateTime?
   startedAt         DateTime  @default(now())
   expiresAt         DateTime?
   cancelledAt       DateTime?
