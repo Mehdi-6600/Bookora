@@ -35,13 +35,6 @@ export function validateInitData(initData: string): ValidatedInitData {
     .map(([k, v]) => `${k}=${v}`)
     .join("\n");
 
-  // DEBUG: چاپ طول توکن و کاراکترهای اول
-  console.log("DEBUG TOKEN LENGTH:", env.TELEGRAM_BOT_TOKEN.length);
-  console.log("DEBUG TOKEN FIRST 10:", env.TELEGRAM_BOT_TOKEN.substring(0, 10));
-  console.log("DEBUG TOKEN LAST 5:", env.TELEGRAM_BOT_TOKEN.slice(-5));
-  console.log("DEBUG HASH FROM TG:", hash);
-  console.log("DEBUG DATA CHECK STRING:", dataCheckString.substring(0, 200));
-
   const secretKey = crypto
     .createHmac("sha256", "WebAppData")
     .update(env.TELEGRAM_BOT_TOKEN)
@@ -52,12 +45,8 @@ export function validateInitData(initData: string): ValidatedInitData {
     .update(dataCheckString)
     .digest("hex");
 
-  console.log("DEBUG COMPUTED HASH:", computedHash);
-
   if (computedHash !== hash) {
-    throw new Error(
-      `Invalid initData hash (tokenLength=${env.TELEGRAM_BOT_TOKEN.length}, tokenStart=${env.TELEGRAM_BOT_TOKEN.substring(0, 10)})`
-    );
+    throw new Error("Invalid initData hash");
   }
 
   const authDate = Number(params.get("auth_date") ?? 0);
