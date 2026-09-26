@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
+import { COUNTRY_CURRENCY, isCountryCode } from "@/lib/currency";
 
 const createBusinessSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(1000).nullable().optional(),
+  country: z.string().refine(isCountryCode, "کشور معتبر نیست."),
 });
 
 function createBaseSlug(name: string): string {
@@ -72,6 +74,8 @@ export async function GET() {
         name: business.name,
         slug: business.slug,
         description: business.description,
+        country: business.country,
+        currency: business.currency,
         services: business.services.map((service) => ({
           id: service.id,
           name: service.name,
@@ -132,6 +136,8 @@ export async function POST(req: NextRequest) {
 
     const name = parsed.data.name;
     const description = parsed.data.description || null;
+    const country = parsed.data.country;
+    const currency = COUNTRY_CURRENCY[country];
     const slug = await createUniqueSlug(name);
 
     const business = await prisma.business.create({
@@ -140,6 +146,8 @@ export async function POST(req: NextRequest) {
         name,
         slug,
         description,
+        country,
+        currency,
       },
       include: {
         services: true,
@@ -158,6 +166,8 @@ export async function POST(req: NextRequest) {
           name: business.name,
           slug: business.slug,
           description: business.description,
+          country: business.country,
+          currency: business.currency,
           services: business.services.map((service) => ({
             id: service.id,
             name: service.name,
