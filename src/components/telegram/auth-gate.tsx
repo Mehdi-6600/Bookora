@@ -129,13 +129,9 @@ export function TelegramAuthGate({ children }: Props) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center p-4">
         <div className="w-full max-w-md rounded-2xl border bg-card p-6 text-center shadow-sm">
-          <h1 className="text-xl font-bold">
-            ورود به Bookora
-          </h1>
+          <h1 className="text-xl font-bold">ورود به Bookora</h1>
 
-          <p className="mt-3 text-sm text-muted-foreground">
-            {error}
-          </p>
+          <p className="mt-3 text-sm text-muted-foreground">{error}</p>
         </div>
       </div>
     );
