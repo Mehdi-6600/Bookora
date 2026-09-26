@@ -209,6 +209,21 @@ function Dashboard({ user }: { user: TelegramUser }) {
     );
   }
 
+  console.log(
+    "BUSINESSES:",
+    businesses.length,
+    "SELECTED:",
+    selectedBusiness?.id
+  );
+
+  if (businesses.length > 0 && !selectedBusiness) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-lg font-bold">Loading business...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
       <div className="rounded-2xl border bg-card p-5 shadow-sm">
