@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
+import { SubscriptionPanel } from "@/components/subscription-panel";
 
 type TelegramUser = {
   id: string;
@@ -228,6 +229,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
           مدیریت کسب‌وکار و رزروهای Bookora
         </p>
       </div>
+
+      <SubscriptionPanel />
 
       {message && (
         <div className="rounded-xl border bg-card p-4 text-sm">{message}</div>
