@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 type PaymentMethod = {
   accountHolder: string | null;
@@ -10,6 +11,7 @@ type PaymentMethod = {
 };
 
 export function PaymentMethodPanel({ businessId }: { businessId: string }) {
+  const t = useTranslations("paymentMethod");
   const [data, setData] = useState<PaymentMethod>({
     accountHolder: "",
     bankName: "",
@@ -24,14 +26,9 @@ export function PaymentMethodPanel({ businessId }: { businessId: string }) {
     async function load() {
       try {
         setLoading(true);
-        const response = await fetch(
-          `/api/payment-methods?businessId=${businessId}`,
-          { cache: "no-store" }
-        );
+        const response = await fetch(`/api/payment-methods?businessId=${businessId}`, { cache: "no-store" });
         const result = await response.json();
-        if (response.ok && result.paymentMethod) {
-          setData(result.paymentMethod);
-        }
+        if (response.ok && result.paymentMethod) setData(result.paymentMethod);
       } finally {
         setLoading(false);
       }
@@ -43,22 +40,16 @@ export function PaymentMethodPanel({ businessId }: { businessId: string }) {
     try {
       setSaving(true);
       setMessage(null);
-
       const response = await fetch("/api/payment-methods", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ businessId, ...data }),
       });
-
       const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result?.error || "ذخیره ناموفق بود.");
-      }
-
-      setMessage("ذخیره شد.");
+      if (!response.ok) throw new Error(result?.error || t("saveError"));
+      setMessage(t("saved"));
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "ذخیره ناموفق بود.");
+      setMessage(err instanceof Error ? err.message : t("saveError"));
     } finally {
       setSaving(false);
     }
@@ -67,41 +58,36 @@ export function PaymentMethodPanel({ businessId }: { businessId: string }) {
   return (
     <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
       <div>
-        <h2 className="text-xl font-bold">روش دریافت بیعانه</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          این اطلاعات هنگام رزرو، در صورت نیاز به بیعانه، به مشتری نشان داده
-          می‌شود.
-        </p>
+        <h2 className="text-xl font-bold">{t("title")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
 
-      {message && (
-        <div className="rounded-lg bg-muted p-3 text-sm">{message}</div>
-      )}
+      {message && <div className="rounded-lg bg-muted p-3 text-sm">{message}</div>}
 
       {!loading && (
         <>
           <input
             value={data.accountHolder || ""}
             onChange={(e) => setData({ ...data, accountHolder: e.target.value })}
-            placeholder="نام صاحب حساب"
+            placeholder={t("accountHolderPlaceholder")}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
           />
           <input
             value={data.bankName || ""}
             onChange={(e) => setData({ ...data, bankName: e.target.value })}
-            placeholder="نام بانک"
+            placeholder={t("bankNamePlaceholder")}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
           />
           <input
             value={data.cardNumber || ""}
             onChange={(e) => setData({ ...data, cardNumber: e.target.value })}
-            placeholder="شماره کارت"
+            placeholder={t("cardNumberPlaceholder")}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
           />
           <textarea
             value={data.instructions || ""}
             onChange={(e) => setData({ ...data, instructions: e.target.value })}
-            placeholder="توضیح اضافی برای مشتری (اختیاری)"
+            placeholder={t("instructionsPlaceholder")}
             className="min-h-16 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
           />
 
@@ -111,7 +97,7 @@ export function PaymentMethodPanel({ businessId }: { businessId: string }) {
             disabled={saving}
             className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
-            {saving ? "در حال ذخیره..." : "ذخیره"}
+            {saving ? t("saving") : t("saveButton")}
           </button>
         </>
       )}
