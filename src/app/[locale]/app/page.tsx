@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
 import { SubscriptionPanel } from "@/components/subscription-panel";
 import { TimeOffPanel } from "@/components/time-off-panel";
 import { PaymentMethodPanel } from "@/components/payment-method-panel";
 import { BookingsPanel } from "@/components/bookings-panel";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import {
   COUNTRY_LABELS,
   CountryCode,
@@ -50,13 +52,19 @@ type Business = {
   };
 };
 
-const DEPOSIT_LABELS: Record<string, string> = {
-  NONE: "بدون بیعانه",
-  PERCENTAGE: "درصدی",
-  FIXED: "مبلغ ثابت",
-};
-
 function Dashboard({ user }: { user: TelegramUser }) {
+  const t = useTranslations("dashboard");
+  const tWizard = useTranslations("businessWizard");
+  const tBiz = useTranslations("business");
+  const tSvc = useTranslations("service");
+  const tMsg = useTranslations("messages");
+
+  const depositLabels: Record<string, string> = {
+    NONE: tSvc("depositNone"),
+    PERCENTAGE: tSvc("depositPercentage"),
+    FIXED: tSvc("depositFixed"),
+  };
+
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selectedBusiness, setSelectedBusiness] =
     useState<Business | null>(null);
@@ -122,7 +130,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "خطا در دریافت کسب‌وکارها");
+        throw new Error(data?.error || tMsg("loadBusinessesError"));
       }
 
       const list: Business[] = data.businesses || [];
@@ -141,7 +149,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       }
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "خطا در دریافت اطلاعات"
+        error instanceof Error ? error.message : tMsg("loadDataError")
       );
     } finally {
       setLoading(false);
@@ -150,18 +158,19 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   useEffect(() => {
     loadBusinesses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function createBusiness(event: React.FormEvent) {
     event.preventDefault();
 
     if (!businessCountry) {
-      setMessage("ابتدا کشور کسب‌وکار را انتخاب کنید.");
+      setMessage(tMsg("businessCountryRequired"));
       return;
     }
 
     if (!businessName.trim()) {
-      setMessage("نام کسب‌وکار را وارد کنید.");
+      setMessage(tMsg("businessNameRequired"));
       return;
     }
 
@@ -182,7 +191,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "ساخت کسب‌وکار ناموفق بود.");
+        throw new Error(data?.error || tMsg("businessCreateError"));
       }
 
       setBusinessName("");
@@ -190,10 +199,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setBusinessCountry(null);
       setCreateStep(1);
       await loadBusinesses();
-      setMessage("کسب‌وکار با موفقیت ساخته شد.");
+      setMessage(tMsg("businessCreated"));
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "خطا در ساخت کسب‌وکار"
+        error instanceof Error ? error.message : tMsg("businessCreateError")
       );
     } finally {
       setSavingBusiness(false);
@@ -214,7 +223,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   async function saveBusinessEdit(businessId: string) {
     if (!editBusinessName.trim()) {
-      setMessage("نام کسب‌وکار را وارد کنید.");
+      setMessage(tMsg("businessNameRequired"));
       return;
     }
 
@@ -235,19 +244,19 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "ویرایش کسب‌وکار ناموفق بود.");
+        throw new Error(data?.error || tMsg("businessEditError"));
       }
 
       setEditingBusiness(false);
       await loadBusinesses();
       setMessage(
         data.currencyChanged
-          ? "کسب‌وکار ویرایش شد. واحد پول از حالا تغییر کرد."
-          : "کسب‌وکار ویرایش شد."
+          ? tMsg("businessEditedCurrency")
+          : tMsg("businessEdited")
       );
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "ویرایش کسب‌وکار ناموفق بود."
+        error instanceof Error ? error.message : tMsg("businessEditError")
       );
     } finally {
       setSavingBusinessEdit(false);
@@ -266,20 +275,18 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "حذف کسب‌وکار ناموفق بود.");
+        throw new Error(data?.error || tMsg("businessDeleteError"));
       }
 
       setConfirmDeleteBusiness(false);
       await loadBusinesses();
 
       setMessage(
-        data.archived
-          ? "این کسب‌وکار رزرو داشته، پس به‌جای حذف بایگانی شد."
-          : "کسب‌وکار حذف شد."
+        data.archived ? tMsg("businessArchived") : tMsg("businessDeleted")
       );
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "حذف کسب‌وکار ناموفق بود."
+        error instanceof Error ? error.message : tMsg("businessDeleteError")
       );
     } finally {
       setDeletingBusiness(false);
@@ -308,14 +315,16 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "بازگردانی ناموفق بود.");
+        throw new Error(data?.error || tMsg("businessReactivateError"));
       }
 
       await loadBusinesses();
-      setMessage("کسب‌وکار دوباره فعال شد.");
+      setMessage(tMsg("businessReactivated"));
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "بازگردانی ناموفق بود."
+        error instanceof Error
+          ? error.message
+          : tMsg("businessReactivateError")
       );
     } finally {
       setReactivating(false);
@@ -335,12 +344,12 @@ function Dashboard({ user }: { user: TelegramUser }) {
     event.preventDefault();
 
     if (!selectedBusiness) {
-      setMessage("ابتدا یک کسب‌وکار بسازید.");
+      setMessage(tMsg("businessNeeded"));
       return;
     }
 
     if (!serviceName.trim()) {
-      setMessage("نام سرویس را وارد کنید.");
+      setMessage(tMsg("serviceNameRequired"));
       return;
     }
 
@@ -350,22 +359,25 @@ function Dashboard({ user }: { user: TelegramUser }) {
       serviceDepositType === "NONE" ? 0 : Number(serviceDepositValue || "0");
 
     if (!Number.isFinite(price) || price < 0) {
-      setMessage("قیمت سرویس معتبر نیست.");
+      setMessage(tMsg("servicePriceInvalid"));
       return;
     }
 
     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
-      setMessage("مدت سرویس معتبر نیست.");
+      setMessage(tMsg("serviceDurationInvalid"));
       return;
     }
 
-    if (serviceDepositType === "PERCENTAGE" && (depositValue < 0 || depositValue > 100)) {
-      setMessage("درصد بیعانه باید بین ۰ تا ۱۰۰ باشد.");
+    if (
+      serviceDepositType === "PERCENTAGE" &&
+      (depositValue < 0 || depositValue > 100)
+    ) {
+      setMessage(tMsg("serviceDepositPercentInvalid"));
       return;
     }
 
     if (serviceDepositType === "FIXED" && depositValue < 0) {
-      setMessage("مبلغ بیعانه معتبر نیست.");
+      setMessage(tMsg("serviceDepositFixedInvalid"));
       return;
     }
 
@@ -390,14 +402,16 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "ساخت سرویس ناموفق بود.");
+        throw new Error(data?.error || tMsg("serviceCreateError"));
       }
 
       resetServiceForm();
       await loadBusinesses();
-      setMessage("سرویس با موفقیت اضافه شد.");
+      setMessage(tMsg("serviceCreated"));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "خطا در ساخت سرویس");
+      setMessage(
+        error instanceof Error ? error.message : tMsg("serviceCreateError")
+      );
     } finally {
       setSavingService(false);
     }
@@ -427,22 +441,25 @@ function Dashboard({ user }: { user: TelegramUser }) {
       editDepositType === "NONE" ? 0 : Number(editDepositValue || "0");
 
     if (!editName.trim()) {
-      setMessage("نام سرویس را وارد کنید.");
+      setMessage(tMsg("serviceNameRequired"));
       return;
     }
 
     if (!Number.isFinite(price) || price < 0) {
-      setMessage("قیمت سرویس معتبر نیست.");
+      setMessage(tMsg("servicePriceInvalid"));
       return;
     }
 
     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
-      setMessage("مدت سرویس معتبر نیست.");
+      setMessage(tMsg("serviceDurationInvalid"));
       return;
     }
 
-    if (editDepositType === "PERCENTAGE" && (depositValue < 0 || depositValue > 100)) {
-      setMessage("درصد بیعانه باید بین ۰ تا ۱۰۰ باشد.");
+    if (
+      editDepositType === "PERCENTAGE" &&
+      (depositValue < 0 || depositValue > 100)
+    ) {
+      setMessage(tMsg("serviceDepositPercentInvalid"));
       return;
     }
 
@@ -466,15 +483,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "ویرایش سرویس ناموفق بود.");
+        throw new Error(data?.error || tMsg("serviceEditError"));
       }
 
       setEditingServiceId(null);
       await loadBusinesses();
-      setMessage("سرویس با موفقیت ویرایش شد.");
+      setMessage(tMsg("serviceEdited"));
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "ویرایش سرویس ناموفق بود."
+        error instanceof Error ? error.message : tMsg("serviceEditError")
       );
     } finally {
       setSavingEdit(false);
@@ -502,13 +519,13 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "تغییر وضعیت ناموفق بود.");
+        throw new Error(data?.error || tMsg("serviceToggleError"));
       }
 
       await loadBusinesses();
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "تغییر وضعیت ناموفق بود."
+        error instanceof Error ? error.message : tMsg("serviceToggleError")
       );
     }
   }
@@ -525,20 +542,18 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "حذف سرویس ناموفق بود.");
+        throw new Error(data?.error || tMsg("serviceDeleteError"));
       }
 
       setConfirmDeleteId(null);
       await loadBusinesses();
 
       setMessage(
-        data.deactivated
-          ? "این سرویس رزرو داشته، پس به‌جای حذف غیرفعال شد."
-          : "سرویس حذف شد."
+        data.deactivated ? tMsg("serviceDeactivated") : tMsg("serviceDeleted")
       );
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "حذف سرویس ناموفق بود."
+        error instanceof Error ? error.message : tMsg("serviceDeleteError")
       );
     } finally {
       setDeletingId(null);
@@ -564,16 +579,14 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     } catch {
-      setMessage("کپی خودکار ممکن نشد؛ لینک را دستی انتخاب و کپی کنید.");
+      setMessage(tMsg("copyFailed"));
     }
   }
 
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-sm text-muted-foreground">
-          در حال بارگذاری...
-        </div>
+        <div className="text-sm text-muted-foreground">{t("loading")}</div>
       </div>
     );
   }
@@ -581,7 +594,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
   if (businesses.length > 0 && !selectedBusiness) {
     return (
       <div className="p-8 text-center">
-        <p className="text-lg font-bold">Loading business...</p>
+        <p className="text-lg font-bold">{t("loading")}</p>
       </div>
     );
   }
@@ -606,22 +619,26 @@ function Dashboard({ user }: { user: TelegramUser }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">
-              سلام {user.firstName || "دوست"} 👋
+              {t("greeting", { name: user.firstName || t("friend") })}
             </h1>
 
             <p className="mt-2 text-sm text-muted-foreground">
-              مدیریت کسب‌وکار و رزروهای Bookora
+              {t("subtitle")}
             </p>
           </div>
 
-          {user.isAdmin && (
-            <a
-              href="/fa/admin"
-              className="shrink-0 rounded-lg border px-3 py-2 text-xs font-medium"
-            >
-              پنل ادمین
-            </a>
-          )}
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <LocaleSwitcher />
+
+            {user.isAdmin && (
+              <a
+                href="/fa/admin"
+                className="rounded-lg border px-3 py-2 text-xs font-medium"
+              >
+                {t("adminPanel")}
+              </a>
+            )}
+          </div>
         </div>
       </div>
 
@@ -639,10 +656,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
           {createStep === 1 ? (
             <>
               <div>
-                <h2 className="text-xl font-bold">کشور کسب‌وکار شما کجاست؟</h2>
+                <h2 className="text-xl font-bold">
+                  {tWizard("countryQuestion")}
+                </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  بر اساس این انتخاب، واحد پول، تقویم نمایش‌داده‌شده به
-                  مشتری‌ها و روش پرداخت اشتراک شما تعیین می‌شود.
+                  {tWizard("countryHelp")}
                 </p>
               </div>
 
@@ -657,11 +675,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     }}
                     className="rounded-xl border bg-background p-4 text-right"
                   >
-                    <div className="font-semibold">{COUNTRY_LABELS[code]}</div>
+                    <div className="font-semibold">
+                      {code === "IR"
+                        ? tWizard("countryIR")
+                        : tWizard("countryOther")}
+                    </div>
                     <div className="mt-1 text-xs text-muted-foreground">
                       {code === "IR"
-                        ? "واحد پول: تومان — تقویم: شمسی — پرداخت اشتراک: کارت‌به‌کارت"
-                        : "واحد پول: دلار — تقویم: میلادی — پرداخت اشتراک: Telegram Stars"}
+                        ? tWizard("hintIR")
+                        : tWizard("hintOther")}
                     </div>
                   </button>
                 ))}
@@ -670,24 +692,30 @@ function Dashboard({ user }: { user: TelegramUser }) {
           ) : (
             <form onSubmit={createBusiness} className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold">اطلاعات کسب‌وکار</h2>
+                <h2 className="text-xl font-bold">{tWizard("infoTitle")}</h2>
                 <button
                   type="button"
                   onClick={() => setCreateStep(1)}
                   className="text-xs text-muted-foreground underline"
                 >
-                  تغییر کشور
+                  {tWizard("changeCountry")}
                 </button>
               </div>
 
               <p className="text-sm text-muted-foreground">
-                کشور انتخابی: {businessCountry ? COUNTRY_LABELS[businessCountry] : ""}
+                {tWizard("selectedCountry", {
+                  country: businessCountry
+                    ? businessCountry === "IR"
+                      ? tWizard("countryIR")
+                      : tWizard("countryOther")
+                    : "",
+                })}
               </p>
 
               <input
                 value={businessName}
                 onChange={(event) => setBusinessName(event.target.value)}
-                placeholder="مثلاً Mehdi Barber"
+                placeholder={tWizard("namePlaceholder")}
                 className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
               />
 
@@ -696,7 +724,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 onChange={(event) =>
                   setBusinessDescription(event.target.value)
                 }
-                placeholder="توضیح کوتاه"
+                placeholder={tWizard("descPlaceholder")}
                 className="min-h-24 w-full rounded-xl border bg-background px-4 py-3 outline-none"
               />
 
@@ -705,7 +733,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 disabled={savingBusiness}
                 className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
               >
-                {savingBusiness ? "در حال ساخت..." : "ساخت کسب‌وکار"}
+                {savingBusiness
+                  ? tWizard("creating")
+                  : tWizard("createButton")}
               </button>
             </form>
           )}
@@ -714,7 +744,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         <>
           <div className="rounded-2xl border bg-card p-5 shadow-sm">
             <label className="mb-2 block text-sm font-medium">
-              کسب‌وکار
+              {tBiz("selectLabel")}
             </label>
 
             <select
@@ -734,7 +764,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
               {businesses.map((business) => (
                 <option key={business.id} value={business.id}>
                   {business.name}
-                  {business.status === "ARCHIVED" ? " (بایگانی)" : ""}
+                  {business.status === "ARCHIVED"
+                    ? ` ${tBiz("archivedTag")}`
+                    : ""}
                 </option>
               ))}
             </select>
@@ -745,7 +777,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
               <div className="rounded-2xl border bg-card p-5 shadow-sm">
                 {isArchived && (
                   <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                    این کسب‌وکار بایگانی شده و در صفحه‌ی عمومی رزرو دیده نمی‌شود.
+                    {tBiz("archivedBanner")}
                   </div>
                 )}
 
@@ -779,7 +811,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                               : "bg-background"
                           }`}
                         >
-                          {COUNTRY_LABELS[code]}
+                          {code === "IR"
+                            ? tWizard("countryIR")
+                            : tWizard("countryOther")}
                         </button>
                       ))}
                     </div>
@@ -791,7 +825,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         disabled={savingBusinessEdit}
                         className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                       >
-                        {savingBusinessEdit ? "در حال ذخیره..." : "ذخیره"}
+                        {savingBusinessEdit
+                          ? tSvc("saving")
+                          : tSvc("saveButton")}
                       </button>
 
                       <button
@@ -799,7 +835,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         onClick={() => setEditingBusiness(false)}
                         className="rounded-lg border px-3 py-2 text-sm font-medium"
                       >
-                        انصراف
+                        {tSvc("cancelButton")}
                       </button>
                     </div>
                   </div>
@@ -816,16 +852,18 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     )}
 
                     <p className="mt-2 text-xs text-muted-foreground">
-                      کشور:{" "}
+                      {tBiz("countryLabel")}:{" "}
                       {selectedBusinessCountry
-                        ? COUNTRY_LABELS[selectedBusinessCountry]
-                        : "ثبت نشده"}{" "}
-                      — واحد پول: {selectedBusiness.currency}
+                        ? selectedBusinessCountry === "IR"
+                          ? tWizard("countryIR")
+                          : tWizard("countryOther")
+                        : tBiz("notSet")}{" "}
+                      — {tBiz("currencyLabel")}: {selectedBusiness.currency}
                     </p>
 
                     <div className="mt-4 rounded-xl bg-muted p-4">
                       <p className="text-xs text-muted-foreground">
-                        لینک رزرو عمومی
+                        {tBiz("bookingLinkLabel")}
                       </p>
 
                       <p className="mt-1 break-all text-sm font-medium">
@@ -838,7 +876,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           onClick={() => copyBookingLink(bookingUrl)}
                           className="rounded-lg border px-3 py-2 text-xs font-medium"
                         >
-                          {linkCopied ? "کپی شد ✅" : "کپی لینک"}
+                          {linkCopied ? tBiz("copied") : tBiz("copyLink")}
                         </button>
 
                         <a
@@ -847,7 +885,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           rel="noopener noreferrer"
                           className="rounded-lg border px-3 py-2 text-center text-xs font-medium"
                         >
-                          باز کردن صفحه
+                          {tBiz("openPage")}
                         </a>
                       </div>
                     </div>
@@ -860,7 +898,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           disabled={reactivating}
                           className="col-span-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                         >
-                          {reactivating ? "در حال بازگردانی..." : "بازگردانی کسب‌وکار"}
+                          {reactivating
+                            ? tBiz("reactivating")
+                            : tBiz("reactivateButton")}
                         </button>
                       ) : (
                         <>
@@ -869,7 +909,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                             onClick={() => startEditBusiness(selectedBusiness)}
                             className="rounded-lg border px-3 py-2 text-sm font-medium"
                           >
-                            ویرایش کسب‌وکار
+                            {tBiz("editButton")}
                           </button>
 
                           {confirmDeleteBusiness ? (
@@ -881,7 +921,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                               disabled={deletingBusiness}
                               className="rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-50"
                             >
-                              {deletingBusiness ? "..." : "مطمئنی؟"}
+                              {deletingBusiness
+                                ? tBiz("deleting")
+                                : tBiz("confirmDelete")}
                             </button>
                           ) : (
                             <button
@@ -889,7 +931,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                               onClick={() => setConfirmDeleteBusiness(true)}
                               className="rounded-lg border border-destructive/30 px-3 py-2 text-sm font-medium text-destructive"
                             >
-                              حذف کسب‌وکار
+                              {tBiz("deleteButton")}
                             </button>
                           )}
                         </>
@@ -906,17 +948,19 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm"
                   >
                     <div>
-                      <h2 className="text-xl font-bold">افزودن سرویس</h2>
+                      <h2 className="text-xl font-bold">
+                        {tSvc("addTitle")}
+                      </h2>
 
                       <p className="mt-1 text-sm text-muted-foreground">
-                        سرویس‌هایی که مشتری می‌تواند رزرو کند.
+                        {tSvc("addDesc")}
                       </p>
                     </div>
 
                     <input
                       value={serviceName}
                       onChange={(event) => setServiceName(event.target.value)}
-                      placeholder="مثلاً Haircut"
+                      placeholder={tSvc("namePlaceholder")}
                       className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
                     />
 
@@ -925,7 +969,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       onChange={(event) =>
                         setServiceDescription(event.target.value)
                       }
-                      placeholder="توضیح سرویس"
+                      placeholder={tSvc("descPlaceholder")}
                       className="min-h-20 w-full rounded-xl border bg-background px-4 py-3 outline-none"
                     />
 
@@ -938,7 +982,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         type="number"
                         min="0"
                         step="0.01"
-                        placeholder={`قیمت (${selectedBusiness.currency})`}
+                        placeholder={tSvc("pricePlaceholder", {
+                          currency: selectedBusiness.currency,
+                        })}
                         className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
                       />
 
@@ -949,13 +995,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         }
                         type="number"
                         min="1"
-                        placeholder="مدت دقیقه"
+                        placeholder={tSvc("durationPlaceholder")}
                         className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
                       />
                     </div>
 
                     <div>
-                      <p className="mb-2 text-sm font-medium">بیعانه</p>
+                      <p className="mb-2 text-sm font-medium">
+                        {tSvc("depositLabel")}
+                      </p>
                       <div className="grid grid-cols-3 gap-2">
                         {(["NONE", "PERCENTAGE", "FIXED"] as const).map(
                           (type) => (
@@ -969,7 +1017,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   : "bg-background"
                               }`}
                             >
-                              {DEPOSIT_LABELS[type]}
+                              {depositLabels[type]}
                             </button>
                           )
                         )}
@@ -986,8 +1034,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           step="0.01"
                           placeholder={
                             serviceDepositType === "PERCENTAGE"
-                              ? "درصد بیعانه (مثلاً 30)"
-                              : `مبلغ ثابت بیعانه (${selectedBusiness.currency})`
+                              ? tSvc("depositPercentPlaceholder")
+                              : tSvc("depositFixedPlaceholder", {
+                                  currency: selectedBusiness.currency,
+                                })
                           }
                           className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
                         />
@@ -999,16 +1049,16 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       disabled={savingService}
                       className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
                     >
-                      {savingService ? "در حال افزودن..." : "افزودن سرویس"}
+                      {savingService ? tSvc("adding") : tSvc("addButton")}
                     </button>
                   </form>
 
                   <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                    <h2 className="text-xl font-bold">سرویس‌ها</h2>
+                    <h2 className="text-xl font-bold">{tSvc("listTitle")}</h2>
 
                     {selectedBusiness.services.length === 0 ? (
                       <p className="mt-4 text-sm text-muted-foreground">
-                        هنوز سرویسی اضافه نشده است.
+                        {tSvc("empty")}
                       </p>
                     ) : (
                       <div className="mt-4 space-y-3">
@@ -1075,7 +1125,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                             : "bg-background"
                                         }`}
                                       >
-                                        {DEPOSIT_LABELS[type]}
+                                        {depositLabels[type]}
                                       </button>
                                     ))}
                                   </div>
@@ -1101,7 +1151,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     disabled={savingEdit}
                                     className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                                   >
-                                    {savingEdit ? "در حال ذخیره..." : "ذخیره"}
+                                    {savingEdit
+                                      ? tSvc("saving")
+                                      : tSvc("saveButton")}
                                   </button>
 
                                   <button
@@ -1109,7 +1161,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     onClick={cancelEdit}
                                     className="rounded-lg border px-3 py-2 text-sm font-medium"
                                   >
-                                    انصراف
+                                    {tSvc("cancelButton")}
                                   </button>
                                 </div>
                               </div>
@@ -1121,7 +1173,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                       {service.name}
                                       {!service.active && (
                                         <span className="mr-2 text-xs font-normal text-muted-foreground">
-                                          (غیرفعال)
+                                          {tSvc("inactiveTag")}
                                         </span>
                                       )}
                                     </h3>
@@ -1134,13 +1186,19 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
                                     {service.depositType !== "NONE" && (
                                       <p className="mt-1 text-xs text-primary">
-                                        بیعانه: {DEPOSIT_LABELS[service.depositType]}{" "}
-                                        {service.depositType === "PERCENTAGE"
-                                          ? `${service.depositValue}%`
-                                          : formatPrice(
-                                              service.depositValue,
-                                              service.currency
-                                            )}
+                                        {tSvc("depositInfo", {
+                                          type: depositLabels[
+                                            service.depositType
+                                          ],
+                                          value:
+                                            service.depositType ===
+                                            "PERCENTAGE"
+                                              ? `${service.depositValue}%`
+                                              : formatPrice(
+                                                  service.depositValue,
+                                                  service.currency
+                                                ),
+                                        })}
                                       </p>
                                     )}
                                   </div>
@@ -1154,7 +1212,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     </div>
 
                                     <div className="text-muted-foreground">
-                                      {service.durationMinutes} دقیقه
+                                      {tSvc("minutes", {
+                                        count: service.durationMinutes,
+                                      })}
                                     </div>
                                   </div>
                                 </div>
@@ -1165,7 +1225,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     onClick={() => startEdit(service)}
                                     className="rounded-lg border px-3 py-2 text-xs font-medium"
                                   >
-                                    ویرایش
+                                    {tSvc("editButton")}
                                   </button>
 
                                   <button
@@ -1173,7 +1233,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     onClick={() => toggleActive(service)}
                                     className="rounded-lg border px-3 py-2 text-xs font-medium"
                                   >
-                                    {service.active ? "غیرفعال کن" : "فعال کن"}
+                                    {service.active
+                                      ? tSvc("deactivate")
+                                      : tSvc("activate")}
                                   </button>
 
                                   {confirmDeleteId === service.id ? (
@@ -1187,7 +1249,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     >
                                       {deletingId === service.id
                                         ? "..."
-                                        : "مطمئنی؟"}
+                                        : tSvc("confirmDelete")}
                                     </button>
                                   ) : (
                                     <button
@@ -1197,7 +1259,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                       }
                                       className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive"
                                     >
-                                      حذف
+                                      {tSvc("deleteButton")}
                                     </button>
                                   )}
                                 </div>
