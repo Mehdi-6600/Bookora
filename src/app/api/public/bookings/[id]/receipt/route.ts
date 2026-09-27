@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { notifyUser } from "@/lib/telegram/notify";
 
 const receiptSchema = z.object({
   customerPhone: z.string().trim().min(3).max(30),
@@ -31,9 +32,12 @@ export async function POST(
       );
     }
 
-    // شماره تلفن به‌عنوان تأیید هویت سبک استفاده می‌شود چون مشتری Login ندارد.
     const booking = await prisma.booking.findFirst({
       where: { id, customerPhone: parsed.data.customerPhone },
+      include: {
+        business: { include: { owner: { select: { telegramId: true } } } },
+        service: { select: { name: true } },
+      },
     });
 
     if (!booking) {
@@ -58,6 +62,16 @@ export async function POST(
       where: { id: payment.id },
       data: { transactionReference: parsed.data.transactionReference },
     });
+
+    void notifyUser(
+      booking.business.owner.telegramId,
+      `💳 رسید پرداخت جدید\n` +
+        `کسب‌وکار: ${booking.business.name}\n` +
+        `سرویس: ${booking.service.name}\n` +
+        `مشتری: ${booking.customerName}\n` +
+        `کد رهگیری: ${parsed.data.transactionReference}\n` +
+        `برای تأیید به بخش «رزروها» در Bookora مراجعه کنید.`
+    );
 
     return NextResponse.json({ submitted: true });
   } catch (error) {
