@@ -14,6 +14,7 @@ export async function GET(
         name: true,
         description: true,
         currency: true,
+        country: true,
         services: {
           where: { active: true },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
@@ -41,6 +42,7 @@ export async function GET(
         name: business.name,
         description: business.description,
         currency: business.currency,
+        country: business.country,
         services: business.services.map((s) => ({
           id: s.id,
           name: s.name,
