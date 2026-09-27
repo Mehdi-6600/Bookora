@@ -1,15 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 
-type TimeOff = {
-  id: string;
-  startAt: string;
-  endAt: string;
-  reason: string | null;
-};
+type TimeOff = { id: string; startAt: string; endAt: string; reason: string | null };
 
 export function TimeOffPanel({ businessId }: { businessId: string }) {
+  const t = useTranslations("timeOff");
+  const locale = useLocale();
   const [items, setItems] = useState<TimeOff[]>([]);
   const [loading, setLoading] = useState(true);
   const [startAt, setStartAt] = useState("");
@@ -21,9 +19,7 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
   async function load() {
     try {
       setLoading(true);
-      const response = await fetch(`/api/time-off?businessId=${businessId}`, {
-        cache: "no-store",
-      });
+      const response = await fetch(`/api/time-off?businessId=${businessId}`, { cache: "no-store" });
       const data = await response.json();
       if (response.ok) setItems(data.timeOffs);
     } finally {
@@ -33,18 +29,17 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
 
   async function add() {
     if (!startAt || !endAt) {
-      setError("تاریخ شروع و پایان را وارد کنید.");
+      setError(t("requiredError"));
       return;
     }
-
     try {
       setSaving(true);
       setError(null);
-
       const response = await fetch("/api/time-off", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -55,19 +50,14 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
           reason: reason.trim() || null,
         }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "ثبت تعطیلی ناموفق بود.");
-      }
-
+      if (!response.ok) throw new Error(data?.error || t("addError"));
       setStartAt("");
       setEndAt("");
       setReason("");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ثبت تعطیلی ناموفق بود.");
+      setError(err instanceof Error ? err.message : t("addError"));
     } finally {
       setSaving(false);
     }
@@ -81,10 +71,8 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
   return (
     <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
       <div>
-        <h2 className="text-xl font-bold">تعطیلات و مرخصی</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          بازه‌هایی که کسب‌وکار قابل رزرو نیست.
-        </p>
+        <h2 className="text-xl font-bold">{t("title")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
 
       {error && (
@@ -111,7 +99,7 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
       <input
         value={reason}
         onChange={(e) => setReason(e.target.value)}
-        placeholder="دلیل (اختیاری)"
+        placeholder={t("reasonPlaceholder")}
         className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
       />
 
@@ -121,31 +109,26 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
         disabled={saving}
         className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
       >
-        {saving ? "در حال ثبت..." : "افزودن تعطیلی"}
+        {saving ? t("adding") : t("addButton")}
       </button>
 
       {!loading && items.length > 0 && (
         <div className="space-y-2">
           {items.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center justify-between rounded-lg border p-3 text-sm"
-            >
+            <div key={item.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
               <div>
                 <p>
-                  {new Date(item.startAt).toLocaleString("fa-IR")} تا{" "}
-                  {new Date(item.endAt).toLocaleString("fa-IR")}
+                  {new Date(item.startAt).toLocaleString(locale)} {t("toLabel")}{" "}
+                  {new Date(item.endAt).toLocaleString(locale)}
                 </p>
-                {item.reason && (
-                  <p className="text-muted-foreground">{item.reason}</p>
-                )}
+                {item.reason && <p className="text-muted-foreground">{item.reason}</p>}
               </div>
               <button
                 type="button"
                 onClick={() => remove(item.id)}
                 className="rounded-lg border border-destructive/30 px-2 py-1 text-xs text-destructive"
               >
-                حذف
+                {t("deleteButton")}
               </button>
             </div>
           ))}
