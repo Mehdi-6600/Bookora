@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { formatPrice } from "@/lib/currency";
 
 type Booking = {
@@ -17,6 +18,8 @@ type Booking = {
 };
 
 export function BookingsPanel({ businessId }: { businessId: string }) {
+  const t = useTranslations("bookingsPanel");
+  const locale = useLocale();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
@@ -24,9 +27,7 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
   async function load() {
     try {
       setLoading(true);
-      const response = await fetch(`/api/bookings?businessId=${businessId}`, {
-        cache: "no-store",
-      });
+      const response = await fetch(`/api/bookings?businessId=${businessId}`, { cache: "no-store" });
       const data = await response.json();
       if (response.ok) setBookings(data.bookings);
     } finally {
@@ -36,13 +37,10 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
 
-  async function review(
-    bookingId: string,
-    paymentId: string,
-    action: "approve" | "reject"
-  ) {
+  async function review(bookingId: string, paymentId: string, action: "approve" | "reject") {
     try {
       setReviewingId(paymentId);
       await fetch(`/api/bookings/${bookingId}/payments/${paymentId}/review`, {
@@ -59,17 +57,17 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
   if (loading) {
     return (
       <section className="rounded-2xl border bg-card p-5 shadow-sm text-sm text-muted-foreground">
-        در حال بارگذاری رزروها...
+        {t("loading")}
       </section>
     );
   }
 
   return (
     <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
-      <h2 className="text-xl font-bold">رزروها</h2>
+      <h2 className="text-xl font-bold">{t("title")}</h2>
 
       {bookings.length === 0 ? (
-        <p className="text-sm text-muted-foreground">هنوز رزروی ثبت نشده.</p>
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
       ) : (
         <div className="space-y-3">
           {bookings.map((b) => (
@@ -78,23 +76,20 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
                 {b.serviceName} — {b.customerName}
               </p>
               <p className="mt-1 text-muted-foreground">
-                {new Date(b.startAt).toLocaleString("fa-IR")} — {b.customerPhone}
+                {new Date(b.startAt).toLocaleString(locale)} — {b.customerPhone}
               </p>
               <p className="mt-1 text-muted-foreground">
-                وضعیت: {b.status} / پرداخت: {b.paymentStatus}
+                {t("statusLine", { status: b.status, paymentStatus: b.paymentStatus })}
               </p>
 
               {Number(b.depositDue) > 0 && (
-                <p className="mt-1">
-                  بیعانه: {formatPrice(b.depositDue, b.currency)}
-                </p>
+                <p className="mt-1">{t("depositLabel", { amount: formatPrice(b.depositDue, b.currency) })}</p>
               )}
 
               {b.payment && b.payment.status === "PENDING" && (
                 <div className="mt-3 rounded-lg bg-muted p-3">
                   <p className="text-xs text-muted-foreground">
-                    کد رهگیری ارسالی:{" "}
-                    {b.payment.transactionReference || "هنوز ارسال نشده"}
+                    {t("receiptLabel", { ref: b.payment.transactionReference || t("receiptNotSent") })}
                   </p>
 
                   {b.payment.transactionReference && (
@@ -105,7 +100,7 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
                         disabled={reviewingId === b.payment.id}
                         className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
                       >
-                        تأیید پرداخت
+                        {t("approveButton")}
                       </button>
                       <button
                         type="button"
@@ -113,7 +108,7 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
                         disabled={reviewingId === b.payment.id}
                         className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive disabled:opacity-50"
                       >
-                        رد
+                        {t("rejectButton")}
                       </button>
                     </div>
                   )}
