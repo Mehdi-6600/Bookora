@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { formatPrice } from "@/lib/currency";
 
@@ -17,8 +17,27 @@ type BusinessInfo = {
   name: string;
   description: string | null;
   currency: string;
+  country: string | null;
   services: Service[];
 };
+
+function toISODate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function buildNextDays(count: number): Date[] {
+  const days: Date[] = [];
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  for (let i = 0; i < count; i += 1) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + i);
+    days.push(d);
+  }
+
+  return days;
+}
 
 export default function PublicBookingPage() {
   const params = useParams<{ slug: string }>();
@@ -31,9 +50,9 @@ export default function PublicBookingPage() {
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(
     null
   );
-  const [date, setDate] = useState<string>(() =>
-    new Date().toISOString().slice(0, 10)
-  );
+
+  const nextDays = useMemo(() => buildNextDays(14), []);
+  const [date, setDate] = useState<string>(() => toISODate(nextDays[0]));
   const [slots, setSlots] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -43,6 +62,8 @@ export default function PublicBookingPage() {
   const [customerEmail, setCustomerEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+
+  const locale = business?.country === "IR" ? "fa-IR" : "en-US";
 
   useEffect(() => {
     async function load() {
@@ -217,13 +238,30 @@ export default function PublicBookingPage() {
 
       <div className="space-y-2">
         <p className="text-sm font-medium">انتخاب تاریخ</p>
-        <input
-          type="date"
-          value={date}
-          min={new Date().toISOString().slice(0, 10)}
-          onChange={(e) => setDate(e.target.value)}
-          className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-        />
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {nextDays.map((d) => {
+            const iso = toISODate(d);
+            const label = d.toLocaleDateString(locale, {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            });
+            return (
+              <button
+                key={iso}
+                type="button"
+                onClick={() => setDate(iso)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-xs whitespace-nowrap ${
+                  date === iso
+                    ? "border-primary bg-primary/10 font-medium"
+                    : "bg-background"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -238,7 +276,7 @@ export default function PublicBookingPage() {
           <div className="grid grid-cols-3 gap-2">
             {slots.map((slot) => {
               const time = new Date(slot);
-              const label = time.toLocaleTimeString("fa-IR", {
+              const label = time.toLocaleTimeString(locale, {
                 hour: "2-digit",
                 minute: "2-digit",
               });
