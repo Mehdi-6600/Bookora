@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { formatPrice } from "@/lib/currency";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 
 type Service = {
   id: string;
@@ -49,6 +51,8 @@ function buildNextDays(count: number): Date[] {
 }
 
 export default function PublicBookingPage() {
+  const t = useTranslations("publicBooking");
+  const tSvc = useTranslations("service");
   const params = useParams<{ slug: string }>();
   const slug = params.slug;
 
@@ -95,7 +99,7 @@ export default function PublicBookingPage() {
         const data = await response.json();
 
         if (!response.ok) {
-          throw new Error(data?.error || "کسب‌وکار پیدا نشد.");
+          throw new Error(data?.error || t("notFound"));
         }
 
         setBusiness(data.business);
@@ -104,13 +108,14 @@ export default function PublicBookingPage() {
           setSelectedServiceId(data.business.services[0].id);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "خطا در بارگذاری");
+        setError(err instanceof Error ? err.message : t("notFound"));
       } finally {
         setLoading(false);
       }
     }
 
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   useEffect(() => {
@@ -130,25 +135,26 @@ export default function PublicBookingPage() {
         const data = await response.json();
 
         if (!response.ok) {
-          throw new Error(data?.error || "خطا در دریافت زمان‌ها");
+          throw new Error(data?.error || t("slotsError"));
         }
 
         setSlots(data.slots || []);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "خطا در دریافت زمان‌ها");
+        setError(err instanceof Error ? err.message : t("slotsError"));
       } finally {
         setLoadingSlots(false);
       }
     }
 
     loadSlots();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedServiceId, date, slug]);
 
   async function submitBooking() {
     if (!selectedServiceId || !selectedSlot) return;
 
     if (!customerName.trim() || !customerPhone.trim()) {
-      setError("نام و شماره تلفن را وارد کنید.");
+      setError(t("nameRequired"));
       return;
     }
 
@@ -171,14 +177,14 @@ export default function PublicBookingPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "ثبت رزرو ناموفق بود.");
+        throw new Error(data?.error || t("bookingError"));
       }
 
       setConfirmedBookingId(data.booking.id);
       setDepositDue(data.booking.depositDue);
       setPaymentMethod(data.paymentMethod);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ثبت رزرو ناموفق بود.");
+      setError(err instanceof Error ? err.message : t("bookingError"));
     } finally {
       setSubmitting(false);
     }
@@ -186,7 +192,7 @@ export default function PublicBookingPage() {
 
   async function submitReceipt() {
     if (!confirmedBookingId || !receiptRef.trim()) {
-      setError("کد رهگیری یا شماره تراکنش را وارد کنید.");
+      setError(t("receiptRequired"));
       return;
     }
 
@@ -209,12 +215,12 @@ export default function PublicBookingPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "ثبت رسید ناموفق بود.");
+        throw new Error(data?.error || t("receiptError"));
       }
 
       setReceiptSubmitted(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ثبت رسید ناموفق بود.");
+      setError(err instanceof Error ? err.message : t("receiptError"));
     } finally {
       setSubmittingReceipt(false);
     }
@@ -223,7 +229,7 @@ export default function PublicBookingPage() {
   if (loading) {
     return (
       <div className="p-8 text-center text-sm text-muted-foreground">
-        در حال بارگذاری...
+        {t("loading")}
       </div>
     );
   }
@@ -244,9 +250,9 @@ export default function PublicBookingPage() {
     if (depositDue <= 0) {
       return (
         <div className="mx-auto max-w-md space-y-4 p-6 text-center">
-          <h1 className="text-xl font-bold">رزرو شما ثبت شد ✅</h1>
+          <h1 className="text-xl font-bold">{t("confirmed")}</h1>
           <p className="text-sm text-muted-foreground">
-            {business.name} منتظر شماست.
+            {t("confirmedDesc", { name: business.name })}
           </p>
         </div>
       );
@@ -255,9 +261,9 @@ export default function PublicBookingPage() {
     if (receiptSubmitted) {
       return (
         <div className="mx-auto max-w-md space-y-4 p-6 text-center">
-          <h1 className="text-xl font-bold">رسید شما ثبت شد ✅</h1>
+          <h1 className="text-xl font-bold">{t("receiptSubmitted")}</h1>
           <p className="text-sm text-muted-foreground">
-            بعد از تأیید {business.name}، رزرو شما نهایی می‌شود.
+            {t("receiptSubmittedDesc", { name: business.name })}
           </p>
         </div>
       );
@@ -265,11 +271,14 @@ export default function PublicBookingPage() {
 
     return (
       <div className="mx-auto max-w-md space-y-4 p-4 py-8">
-        <h1 className="text-xl font-bold">پرداخت بیعانه</h1>
+        <h1 className="text-xl font-bold">{t("depositTitle")}</h1>
         <p className="text-sm text-muted-foreground">
-          برای نهایی‌شدن رزرو، مبلغ{" "}
-          {formatPrice(depositDue, selectedService?.currency || business.currency)}{" "}
-          را واریز کنید.
+          {t("depositDesc", {
+            amount: formatPrice(
+              depositDue,
+              selectedService?.currency || business.currency
+            ),
+          })}
         </p>
 
         {error && (
@@ -280,24 +289,29 @@ export default function PublicBookingPage() {
 
         {paymentMethod ? (
           <div className="space-y-1 rounded-lg bg-muted p-3 text-sm">
-            {paymentMethod.cardNumber && <p>شماره کارت: {paymentMethod.cardNumber}</p>}
-            {paymentMethod.accountHolder && <p>به نام: {paymentMethod.accountHolder}</p>}
-            {paymentMethod.bankName && <p>بانک: {paymentMethod.bankName}</p>}
+            {paymentMethod.cardNumber && (
+              <p>{t("cardNumber", { value: paymentMethod.cardNumber })}</p>
+            )}
+            {paymentMethod.accountHolder && (
+              <p>{t("accountHolder", { value: paymentMethod.accountHolder })}</p>
+            )}
+            {paymentMethod.bankName && (
+              <p>{t("bankName", { value: paymentMethod.bankName })}</p>
+            )}
             {paymentMethod.instructions && (
-              <p className="text-muted-foreground">{paymentMethod.instructions}</p>
+              <p className="text-muted-foreground">
+                {paymentMethod.instructions}
+              </p>
             )}
           </div>
         ) : (
-          <p className="text-sm text-destructive">
-            اطلاعات پرداخت هنوز توسط کسب‌وکار تنظیم نشده. برای هماهنگی مستقیم
-            تماس بگیرید.
-          </p>
+          <p className="text-sm text-destructive">{t("paymentInfoMissing")}</p>
         )}
 
         <input
           value={receiptRef}
           onChange={(e) => setReceiptRef(e.target.value)}
-          placeholder="کد رهگیری یا شماره تراکنش"
+          placeholder={t("receiptPlaceholder")}
           className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
         />
 
@@ -307,7 +321,7 @@ export default function PublicBookingPage() {
           disabled={submittingReceipt}
           className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
-          {submittingReceipt ? "در حال ثبت..." : "ثبت پرداخت"}
+          {submittingReceipt ? t("submitting") : t("submitReceipt")}
         </button>
       </div>
     );
@@ -315,13 +329,17 @@ export default function PublicBookingPage() {
 
   return (
     <div className="mx-auto max-w-md space-y-6 p-4 py-8">
-      <div>
-        <h1 className="text-2xl font-bold">{business.name}</h1>
-        {business.description && (
-          <p className="mt-1 text-sm text-muted-foreground">
-            {business.description}
-          </p>
-        )}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">{business.name}</h1>
+          {business.description && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {business.description}
+            </p>
+          )}
+        </div>
+
+        <LocaleSwitcher />
       </div>
 
       {error && (
@@ -331,7 +349,7 @@ export default function PublicBookingPage() {
       )}
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">انتخاب سرویس</p>
+        <p className="text-sm font-medium">{t("selectService")}</p>
         <div className="space-y-2">
           {business.services.map((service) => (
             <button
@@ -347,9 +365,9 @@ export default function PublicBookingPage() {
               <div className="font-semibold">{service.name}</div>
               <div className="mt-1 text-sm text-muted-foreground">
                 {formatPrice(service.price, service.currency)} —{" "}
-                {service.durationMinutes} دقیقه
+                {tSvc("minutes", { count: service.durationMinutes })}
                 {service.depositType !== "NONE" && (
-                  <span> — نیاز به بیعانه</span>
+                  <span> — {t("requiresDeposit")}</span>
                 )}
               </div>
             </button>
@@ -358,7 +376,7 @@ export default function PublicBookingPage() {
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">انتخاب تاریخ</p>
+        <p className="text-sm font-medium">{t("selectDate")}</p>
         <div className="flex gap-2 overflow-x-auto pb-1">
           {nextDays.map((d) => {
             const iso = toISODate(d);
@@ -386,13 +404,11 @@ export default function PublicBookingPage() {
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">زمان‌های آزاد</p>
+        <p className="text-sm font-medium">{t("availableSlots")}</p>
         {loadingSlots ? (
-          <p className="text-sm text-muted-foreground">در حال بارگذاری...</p>
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
         ) : slots.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            زمان آزادی برای این روز نیست.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("noSlots")}</p>
         ) : (
           <div className="grid grid-cols-3 gap-2">
             {slots.map((slot) => {
@@ -422,23 +438,23 @@ export default function PublicBookingPage() {
 
       {selectedSlot && (
         <div className="space-y-3 rounded-xl border p-4">
-          <p className="text-sm font-medium">اطلاعات شما</p>
+          <p className="text-sm font-medium">{t("yourInfo")}</p>
           <input
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
-            placeholder="نام و نام خانوادگی"
+            placeholder={t("namePlaceholder")}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
           />
           <input
             value={customerPhone}
             onChange={(e) => setCustomerPhone(e.target.value)}
-            placeholder="شماره تلفن"
+            placeholder={t("phonePlaceholder")}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
           />
           <input
             value={customerEmail}
             onChange={(e) => setCustomerEmail(e.target.value)}
-            placeholder="ایمیل (اختیاری)"
+            placeholder={t("emailPlaceholder")}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
           />
           <button
@@ -448,12 +464,15 @@ export default function PublicBookingPage() {
             className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
             {submitting
-              ? "در حال ثبت..."
-              : `تأیید رزرو — ${
-                  selectedService
-                    ? formatPrice(selectedService.price, selectedService.currency)
-                    : ""
-                }`}
+              ? t("confirming")
+              : t("confirmButton", {
+                  price: selectedService
+                    ? formatPrice(
+                        selectedService.price,
+                        selectedService.currency
+                      )
+                    : "",
+                })}
           </button>
         </div>
       )}
