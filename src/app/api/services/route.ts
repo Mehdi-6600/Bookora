@@ -3,13 +3,25 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 
-const createServiceSchema = z.object({
-  businessId: z.string().min(1),
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(1000).nullable().optional(),
-  price: z.coerce.number().finite().min(0).max(99999999.99),
-  durationMinutes: z.coerce.number().int().min(1).max(1440),
-});
+const depositSchema = z
+  .object({
+    depositType: z.enum(["NONE", "PERCENTAGE", "FIXED"]).default("NONE"),
+    depositValue: z.coerce.number().finite().min(0).default(0),
+  })
+  .refine(
+    (d) => d.depositType !== "PERCENTAGE" || d.depositValue <= 100,
+    { message: "درصد بیعانه نمی‌تواند بیشتر از ۱۰۰ باشد.", path: ["depositValue"] }
+  );
+
+const createServiceSchema = z
+  .object({
+    businessId: z.string().min(1),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(1000).nullable().optional(),
+    price: z.coerce.number().finite().min(0).max(99999999.99),
+    durationMinutes: z.coerce.number().int().min(1).max(1440),
+  })
+  .and(depositSchema);
 
 export async function GET(req: NextRequest) {
   try {
@@ -47,6 +59,8 @@ export async function GET(req: NextRequest) {
         currency: service.currency,
         durationMinutes: service.durationMinutes,
         active: service.active,
+        depositType: service.depositType,
+        depositValue: service.depositValue.toString(),
       })),
     });
   } catch (error) {
@@ -99,6 +113,8 @@ export async function POST(req: NextRequest) {
       description,
       price,
       durationMinutes,
+      depositType,
+      depositValue,
     } = parsed.data;
 
     const business = await prisma.business.findFirst({
@@ -141,6 +157,8 @@ export async function POST(req: NextRequest) {
         durationMinutes,
         sortOrder: (lastService?.sortOrder ?? -1) + 1,
         active: true,
+        depositType,
+        depositValue,
       },
     });
 
@@ -155,6 +173,8 @@ export async function POST(req: NextRequest) {
           currency: service.currency,
           durationMinutes: service.durationMinutes,
           active: service.active,
+          depositType: service.depositType,
+          depositValue: service.depositValue.toString(),
         },
       },
       { status: 201 }
