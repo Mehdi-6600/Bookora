@@ -3,13 +3,23 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 
-const updateServiceSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(1000).nullable().optional(),
-  price: z.coerce.number().finite().min(0).max(99999999.99),
-  durationMinutes: z.coerce.number().int().min(1).max(1440),
-  active: z.boolean().optional(),
-});
+const updateServiceSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(1000).nullable().optional(),
+    price: z.coerce.number().finite().min(0).max(99999999.99),
+    durationMinutes: z.coerce.number().int().min(1).max(1440),
+    active: z.boolean().optional(),
+    depositType: z.enum(["NONE", "PERCENTAGE", "FIXED"]).optional(),
+    depositValue: z.coerce.number().finite().min(0).optional(),
+  })
+  .refine(
+    (d) =>
+      d.depositType !== "PERCENTAGE" ||
+      d.depositValue === undefined ||
+      d.depositValue <= 100,
+    { message: "درصد بیعانه نمی‌تواند بیشتر از ۱۰۰ باشد.", path: ["depositValue"] }
+  );
 
 export async function PUT(
   req: NextRequest,
@@ -55,7 +65,15 @@ export async function PUT(
       return NextResponse.json({ error: "سرویس پیدا نشد." }, { status: 404 });
     }
 
-    const { name, description, price, durationMinutes, active } = parsed.data;
+    const {
+      name,
+      description,
+      price,
+      durationMinutes,
+      active,
+      depositType,
+      depositValue,
+    } = parsed.data;
 
     const service = await prisma.service.update({
       where: { id },
@@ -65,6 +83,8 @@ export async function PUT(
         price,
         durationMinutes,
         ...(active !== undefined ? { active } : {}),
+        ...(depositType !== undefined ? { depositType } : {}),
+        ...(depositValue !== undefined ? { depositValue } : {}),
       },
     });
 
@@ -78,6 +98,8 @@ export async function PUT(
         currency: service.currency,
         durationMinutes: service.durationMinutes,
         active: service.active,
+        depositType: service.depositType,
+        depositValue: service.depositValue.toString(),
       },
     });
   } catch (error) {
