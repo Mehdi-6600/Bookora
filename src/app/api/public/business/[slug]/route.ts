@@ -25,6 +25,8 @@ export async function GET(
             price: true,
             currency: true,
             durationMinutes: true,
+            depositType: true,
+            depositValue: true,
           },
         },
       },
@@ -50,6 +52,8 @@ export async function GET(
           price: s.price.toString(),
           currency: s.currency,
           durationMinutes: s.durationMinutes,
+          depositType: s.depositType,
+          depositValue: s.depositValue.toString(),
         })),
       },
     });
