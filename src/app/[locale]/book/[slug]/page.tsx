@@ -11,6 +11,8 @@ type Service = {
   price: string;
   currency: string;
   durationMinutes: number;
+  depositType: string;
+  depositValue: string;
 };
 
 type BusinessInfo = {
@@ -19,6 +21,13 @@ type BusinessInfo = {
   currency: string;
   country: string | null;
   services: Service[];
+};
+
+type PaymentMethodInfo = {
+  accountHolder: string | null;
+  bankName: string | null;
+  cardNumber: string | null;
+  instructions: string | null;
 };
 
 function toISODate(d: Date): string {
@@ -61,7 +70,16 @@ export default function PublicBookingPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
+
+  const [confirmedBookingId, setConfirmedBookingId] = useState<string | null>(
+    null
+  );
+  const [depositDue, setDepositDue] = useState(0);
+  const [paymentMethod, setPaymentMethod] =
+    useState<PaymentMethodInfo | null>(null);
+  const [receiptRef, setReceiptRef] = useState("");
+  const [submittingReceipt, setSubmittingReceipt] = useState(false);
+  const [receiptSubmitted, setReceiptSubmitted] = useState(false);
 
   const locale = business?.country === "IR" ? "fa-IR" : "en-US";
 
@@ -156,11 +174,49 @@ export default function PublicBookingPage() {
         throw new Error(data?.error || "ثبت رزرو ناموفق بود.");
       }
 
-      setConfirmed(true);
+      setConfirmedBookingId(data.booking.id);
+      setDepositDue(data.booking.depositDue);
+      setPaymentMethod(data.paymentMethod);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ثبت رزرو ناموفق بود.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function submitReceipt() {
+    if (!confirmedBookingId || !receiptRef.trim()) {
+      setError("کد رهگیری یا شماره تراکنش را وارد کنید.");
+      return;
+    }
+
+    try {
+      setSubmittingReceipt(true);
+      setError(null);
+
+      const response = await fetch(
+        `/api/public/bookings/${confirmedBookingId}/receipt`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customerPhone: customerPhone.trim(),
+            transactionReference: receiptRef.trim(),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "ثبت رسید ناموفق بود.");
+      }
+
+      setReceiptSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ثبت رسید ناموفق بود.");
+    } finally {
+      setSubmittingReceipt(false);
     }
   }
 
@@ -180,20 +236,82 @@ export default function PublicBookingPage() {
 
   if (!business) return null;
 
-  if (confirmed) {
-    return (
-      <div className="mx-auto max-w-md space-y-4 p-6 text-center">
-        <h1 className="text-xl font-bold">رزرو شما ثبت شد ✅</h1>
-        <p className="text-sm text-muted-foreground">
-          {business.name} منتظر شماست.
-        </p>
-      </div>
-    );
-  }
-
   const selectedService = business.services.find(
     (s) => s.id === selectedServiceId
   );
+
+  if (confirmedBookingId) {
+    if (depositDue <= 0) {
+      return (
+        <div className="mx-auto max-w-md space-y-4 p-6 text-center">
+          <h1 className="text-xl font-bold">رزرو شما ثبت شد ✅</h1>
+          <p className="text-sm text-muted-foreground">
+            {business.name} منتظر شماست.
+          </p>
+        </div>
+      );
+    }
+
+    if (receiptSubmitted) {
+      return (
+        <div className="mx-auto max-w-md space-y-4 p-6 text-center">
+          <h1 className="text-xl font-bold">رسید شما ثبت شد ✅</h1>
+          <p className="text-sm text-muted-foreground">
+            بعد از تأیید {business.name}، رزرو شما نهایی می‌شود.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mx-auto max-w-md space-y-4 p-4 py-8">
+        <h1 className="text-xl font-bold">پرداخت بیعانه</h1>
+        <p className="text-sm text-muted-foreground">
+          برای نهایی‌شدن رزرو، مبلغ{" "}
+          {formatPrice(depositDue, selectedService?.currency || business.currency)}{" "}
+          را واریز کنید.
+        </p>
+
+        {error && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+
+        {paymentMethod ? (
+          <div className="space-y-1 rounded-lg bg-muted p-3 text-sm">
+            {paymentMethod.cardNumber && <p>شماره کارت: {paymentMethod.cardNumber}</p>}
+            {paymentMethod.accountHolder && <p>به نام: {paymentMethod.accountHolder}</p>}
+            {paymentMethod.bankName && <p>بانک: {paymentMethod.bankName}</p>}
+            {paymentMethod.instructions && (
+              <p className="text-muted-foreground">{paymentMethod.instructions}</p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-destructive">
+            اطلاعات پرداخت هنوز توسط کسب‌وکار تنظیم نشده. برای هماهنگی مستقیم
+            تماس بگیرید.
+          </p>
+        )}
+
+        <input
+          value={receiptRef}
+          onChange={(e) => setReceiptRef(e.target.value)}
+          placeholder="کد رهگیری یا شماره تراکنش"
+          className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+        />
+
+        <button
+          type="button"
+          onClick={submitReceipt}
+          disabled={submittingReceipt}
+          className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {submittingReceipt ? "در حال ثبت..." : "ثبت پرداخت"}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-md space-y-6 p-4 py-8">
@@ -230,6 +348,9 @@ export default function PublicBookingPage() {
               <div className="mt-1 text-sm text-muted-foreground">
                 {formatPrice(service.price, service.currency)} —{" "}
                 {service.durationMinutes} دقیقه
+                {service.depositType !== "NONE" && (
+                  <span> — نیاز به بیعانه</span>
+                )}
               </div>
             </button>
           ))}
