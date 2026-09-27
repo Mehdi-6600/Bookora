@@ -4,6 +4,8 @@ import { format } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { prisma } from "@/lib/prisma";
 import { computeAvailableSlots } from "@/lib/availability";
+import { formatPrice } from "@/lib/currency";
+import { notifyUser } from "@/lib/telegram/notify";
 
 const createBookingSchema = z.object({
   serviceId: z.string().min(1),
@@ -53,6 +55,7 @@ export async function POST(
 
     const business = await prisma.business.findFirst({
       where: { slug, status: "ACTIVE" },
+      include: { owner: { select: { telegramId: true } } },
     });
 
     if (!business) {
@@ -214,6 +217,22 @@ export async function POST(
           where: { businessId: business.id },
         });
       }
+
+      // اطلاع‌رسانی فوری به صاحب کسب‌وکار در تلگرام — عدم موفقیت این بخش
+      // هرگز ثبت رزرو را Fail نمی‌کند (notifyUser خودش خطا را می‌بلعد).
+      const localTime = toZonedTime(startAt, business.timezone);
+      const timeLabel = format(localTime, "yyyy-MM-dd HH:mm");
+
+      void notifyUser(
+        business.owner.telegramId,
+        `📅 رزرو جدید در ${business.name}\n` +
+          `سرویس: ${service.name}\n` +
+          `مشتری: ${parsed.data.customerName} (${parsed.data.customerPhone})\n` +
+          `زمان: ${timeLabel}\n` +
+          (requiresDeposit
+            ? `بیعانه: ${formatPrice(depositDue, business.currency)} (در انتظار پرداخت)`
+            : `مبلغ: ${formatPrice(price, business.currency)}`)
+      );
 
       return NextResponse.json(
         {
