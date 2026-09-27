@@ -8,9 +8,6 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ============================================
-// USER (Business Owner - via Telegram)
-// ============================================
 model User {
   id              String   @id @default(cuid())
   telegramId      String   @unique
@@ -29,9 +26,6 @@ model User {
   @@map("users")
 }
 
-// ============================================
-// BUSINESS
-// ============================================
 model Business {
   id          String   @id @default(cuid())
   ownerId     String
@@ -69,9 +63,6 @@ model Business {
   @@map("businesses")
 }
 
-// ============================================
-// SERVICE
-// ============================================
 model Service {
   id              String   @id @default(cuid())
   businessId      String
@@ -82,6 +73,8 @@ model Service {
   durationMinutes Int
   active          Boolean  @default(true)
   sortOrder       Int      @default(0)
+  depositType     String   @default("NONE")
+  depositValue    Decimal  @default(0) @db.Decimal(10, 2)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -93,9 +86,6 @@ model Service {
   @@map("services")
 }
 
-// ============================================
-// WORKING HOURS
-// ============================================
 model WorkingHour {
   id          String   @id @default(cuid())
   businessId  String
@@ -115,9 +105,6 @@ model WorkingHour {
   @@map("working_hours")
 }
 
-// ============================================
-// TIME OFF
-// ============================================
 model TimeOff {
   id          String   @id @default(cuid())
   businessId  String
@@ -134,9 +121,6 @@ model TimeOff {
   @@map("time_offs")
 }
 
-// ============================================
-// BOOKING
-// ============================================
 model Booking {
   id                String    @id @default(cuid())
   businessId        String
@@ -178,9 +162,6 @@ model Booking {
   @@map("bookings")
 }
 
-// ============================================
-// PAYMENT
-// ============================================
 model Payment {
   id                    String    @id @default(cuid())
   bookingId             String
@@ -203,9 +184,6 @@ model Payment {
   @@map("payments")
 }
 
-// ============================================
-// SPECIAL OFFER
-// ============================================
 model SpecialOffer {
   id                    String    @id @default(cuid())
   businessId            String
@@ -232,9 +210,6 @@ model SpecialOffer {
   @@map("special_offers")
 }
 
-// ============================================
-// PAYMENT METHOD (Business's own payment info)
-// ============================================
 model PaymentMethod {
   id            String   @id @default(cuid())
   businessId    String
@@ -255,9 +230,6 @@ model PaymentMethod {
   @@map("payment_methods")
 }
 
-// ============================================
-// SUBSCRIPTION (Bookora's own subscription)
-// ============================================
 model Subscription {
   id                String    @id @default(cuid())
   userId            String
@@ -285,9 +257,6 @@ model Subscription {
   @@map("subscriptions")
 }
 
-// ============================================
-// ADMIN SETTING (Bookora's manual payment info for Iran)
-// ============================================
 model AdminSetting {
   id            String   @id @default(cuid())
   key           String   @unique
