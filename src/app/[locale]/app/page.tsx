@@ -501,6 +501,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   const isArchived = selectedBusiness?.status === "ARCHIVED";
 
+  const selectedBusinessCountry: CountryCode | null =
+    selectedBusiness?.country && isCountryCode(selectedBusiness.country)
+      ? selectedBusiness.country
+      : null;
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
       <div className="rounded-2xl border bg-card p-5 shadow-sm">
@@ -513,7 +518,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </p>
       </div>
 
-      <SubscriptionPanel />
+      <SubscriptionPanel
+        businessId={selectedBusiness?.id ?? null}
+        country={selectedBusinessCountry}
+      />
 
       {message && (
         <div className="rounded-xl border bg-card p-4 text-sm">{message}</div>
@@ -688,9 +696,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
                     <p className="mt-2 text-xs text-muted-foreground">
                       کشور:{" "}
-                      {selectedBusiness.country &&
-                      isCountryCode(selectedBusiness.country)
-                        ? COUNTRY_LABELS[selectedBusiness.country]
+                      {selectedBusinessCountry
+                        ? COUNTRY_LABELS[selectedBusinessCountry]
                         : "ثبت نشده"}{" "}
                       — واحد پول: {selectedBusiness.currency}
                     </p>
