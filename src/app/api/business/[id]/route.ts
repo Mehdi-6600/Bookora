@@ -60,8 +60,6 @@ export async function PUT(
     const countryChanged = existing.country !== country;
     const currency = countryChanged ? COUNTRY_CURRENCY[country] : undefined;
 
-    // فقط از حالت ARCHIVED می‌توان با درخواست صریح reactivate به ACTIVE برگشت.
-    // خودِ ویرایش عادی هرگز باعث تغییر status نمی‌شود.
     const status =
       reactivate && existing.status === "ARCHIVED" ? "ACTIVE" : undefined;
 
@@ -82,6 +80,24 @@ export async function PUT(
       },
     });
 
+    // ارز خود Business عوض شد؛ برای جلوگیری از ناسازگاری نمایشی (سرویس قدیمی با
+    // ارز قدیمی نمایش داده شود درحالی‌که Business ارز جدید دارد)، ارز همه‌ی
+    // سرویس‌های این Business هم به‌روزرسانی می‌شود. این کار مبلغ قیمت را تغییر
+    // نمی‌دهد و رزروهای گذشته (که ارز خودشان را جدا ذخیره کرده‌اند) دست‌نخورده می‌مانند.
+    if (currency) {
+      await prisma.service.updateMany({
+        where: { businessId: id },
+        data: { currency },
+      });
+    }
+
+    const refreshedServices = currency
+      ? await prisma.service.findMany({
+          where: { businessId: id },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        })
+      : business.services;
+
     return NextResponse.json({
       business: {
         id: business.id,
@@ -91,7 +107,7 @@ export async function PUT(
         country: business.country,
         currency: business.currency,
         status: business.status,
-        services: business.services.map((service) => ({
+        services: refreshedServices.map((service) => ({
           id: service.id,
           name: service.name,
           description: service.description,
@@ -99,6 +115,8 @@ export async function PUT(
           currency: service.currency,
           durationMinutes: service.durationMinutes,
           active: service.active,
+          depositType: service.depositType,
+          depositValue: service.depositValue.toString(),
         })),
         _count: { bookings: business._count.bookings },
       },
