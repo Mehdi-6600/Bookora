@@ -58,12 +58,12 @@ export async function POST(req: NextRequest) {
     const bot = getBot();
 
     const invoiceLink = await bot.api.createInvoiceLink(
-      plan.titleFa,
-      plan.titleFa,
+      plan.titleEn,
+      plan.titleEn,
       buildInvoicePayload(plan.code, user.id),
       "",
       "XTR",
-      [{ label: plan.titleFa, amount: plan.starsPrice }]
+      [{ label: plan.titleEn, amount: plan.starsPrice }]
     );
 
     return NextResponse.json({ invoiceLink });
