@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
 import { SubscriptionPanel } from "@/components/subscription-panel";
+import { TimeOffPanel } from "@/components/time-off-panel";
 import {
   COUNTRY_LABELS,
   CountryCode,
@@ -1000,6 +1001,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   </div>
 
                   <WorkingHoursEditor businessId={selectedBusiness.id} />
+
+                  <TimeOffPanel businessId={selectedBusiness.id} />
                 </>
               )}
             </>
