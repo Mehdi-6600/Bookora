@@ -509,13 +509,26 @@ function Dashboard({ user }: { user: TelegramUser }) {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
       <div className="rounded-2xl border bg-card p-5 shadow-sm">
-        <h1 className="text-2xl font-bold">
-          سلام {user.firstName || "دوست"} 👋
-        </h1>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">
+              سلام {user.firstName || "دوست"} 👋
+            </h1>
 
-        <p className="mt-2 text-sm text-muted-foreground">
-          مدیریت کسب‌وکار و رزروهای Bookora
-        </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              مدیریت کسب‌وکار و رزروهای Bookora
+            </p>
+          </div>
+
+          {user.isAdmin && (
+            <a
+              href="/fa/admin"
+              className="shrink-0 rounded-lg border px-3 py-2 text-xs font-medium"
+            >
+              پنل ادمین
+            </a>
+          )}
+        </div>
       </div>
 
       <SubscriptionPanel
