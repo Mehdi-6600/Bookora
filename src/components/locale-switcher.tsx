@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocale } from "next-intl";
-import { useParams, usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
 
 const LOCALE_LABELS: Record<string, string> = {
@@ -14,26 +14,11 @@ export function LocaleSwitcher() {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
-  const params = useParams();
 
   function switchTo(nextLocale: string) {
-    const segments = pathname.split("/").filter(Boolean);
-
-    // اگر بخش اول مسیر یکی از locale های موجود باشد، جایگزین می‌شود؛
-    // در غیر این صورت (مثلاً روی defaultLocale بدون پیشوند) locale جدید اضافه می‌شود.
-    if (routing.locales.includes(segments[0] as (typeof routing.locales)[number])) {
-      segments[0] = nextLocale;
-    } else {
-      segments.unshift(nextLocale);
-    }
-
-    const newPath =
-      "/" +
-      segments
-        .filter((seg, index) => !(index === 0 && seg === routing.defaultLocale))
-        .join("/");
-
-    router.push(newPath || "/");
+    // pathname اینجا از next-intl گرفته شده و از قبل بدون پیشوند locale است؛
+    // router.replace خودش پیشوند مناسب (یا نبود پیشوند برای en) و Cookie را مدیریت می‌کند.
+    router.replace(pathname, { locale: nextLocale });
   }
 
   return (
