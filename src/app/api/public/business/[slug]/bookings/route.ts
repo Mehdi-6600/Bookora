@@ -13,6 +13,20 @@ const createBookingSchema = z.object({
   customerEmail: z.string().trim().email().nullable().optional(),
 });
 
+function computeDeposit(
+  depositType: string,
+  depositValue: number,
+  price: number
+): number {
+  if (depositType === "PERCENTAGE") {
+    return Math.round(((price * depositValue) / 100) * 100) / 100;
+  }
+  if (depositType === "FIXED") {
+    return Math.min(depositValue, price);
+  }
+  return 0;
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
@@ -70,7 +84,6 @@ export async function POST(
       );
     }
 
-    // Re-validate کامل سمت سرور — قیمت، ساعت کاری و تداخل هرگز از client قبول نمی‌شود.
     const localDate = toZonedTime(startAt, business.timezone);
     const dateStr = format(localDate, "yyyy-MM-dd");
     const dayOfWeek = localDate.getDay();
@@ -134,8 +147,16 @@ export async function POST(
       );
     }
 
+    const price = Number(service.price);
+    const depositDue = computeDeposit(
+      service.depositType,
+      Number(service.depositValue),
+      price
+    );
+    const requiresDeposit = depositDue > 0;
+
     try {
-      const booking = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
         const conflict = await tx.booking.findFirst({
           where: {
             businessId: business.id,
@@ -149,7 +170,7 @@ export async function POST(
           throw new Error("SLOT_TAKEN");
         }
 
-        return tx.booking.create({
+        const booking = await tx.booking.create({
           data: {
             businessId: business.id,
             serviceId: service.id,
@@ -159,16 +180,60 @@ export async function POST(
             startAt,
             endAt,
             timezone: business.timezone,
-            status: "CONFIRMED",
-            servicePrice: service.price,
-            finalPrice: service.price,
+            status: requiresDeposit ? "PENDING_PAYMENT" : "CONFIRMED",
+            servicePrice: price,
+            finalPrice: price,
+            depositType: service.depositType,
+            depositValue: service.depositValue,
+            depositDue,
+            remainingAmount: price - depositDue,
             currency: business.currency,
-            paymentStatus: "PENDING",
+            paymentStatus: requiresDeposit ? "PENDING" : "NOT_REQUIRED",
           },
         });
+
+        if (requiresDeposit) {
+          await tx.payment.create({
+            data: {
+              bookingId: booking.id,
+              type: "DEPOSIT",
+              amount: depositDue,
+              currency: business.currency,
+              status: "PENDING",
+            },
+          });
+        }
+
+        return booking;
       });
 
-      return NextResponse.json({ booking: { id: booking.id } }, { status: 201 });
+      let paymentMethod = null;
+
+      if (requiresDeposit) {
+        paymentMethod = await prisma.paymentMethod.findFirst({
+          where: { businessId: business.id },
+        });
+      }
+
+      return NextResponse.json(
+        {
+          booking: {
+            id: result.id,
+            requiresDeposit,
+            depositDue,
+            currency: business.currency,
+          },
+          paymentMethod: paymentMethod
+            ? {
+                accountHolder: paymentMethod.accountHolder,
+                bankName: paymentMethod.bankName,
+                cardNumber: paymentMethod.cardNumber,
+                instructions: paymentMethod.instructions,
+              }
+            : null,
+        },
+        { status: 201 }
+      );
     } catch (txError) {
       if (txError instanceof Error && txError.message === "SLOT_TAKEN") {
         return NextResponse.json(
