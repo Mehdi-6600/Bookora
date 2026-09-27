@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 type WorkingHour = {
   dayOfWeek: number;
@@ -10,16 +11,6 @@ type WorkingHour = {
   breakStart: string | null;
   breakEnd: string | null;
 };
-
-const DAY_LABELS = [
-  "یکشنبه",
-  "دوشنبه",
-  "سه‌شنبه",
-  "چهارشنبه",
-  "پنجشنبه",
-  "جمعه",
-  "شنبه",
-];
 
 const DEFAULT_DAY: WorkingHour = {
   dayOfWeek: 0,
@@ -39,17 +30,11 @@ function buildDefaultWeek(): WorkingHour[] {
 }
 
 function mergeWithDefaults(loaded: WorkingHour[]): WorkingHour[] {
-  const map = new Map(
-    loaded.map((day) => [day.dayOfWeek, day])
-  );
+  const map = new Map(loaded.map((day) => [day.dayOfWeek, day]));
 
   return buildDefaultWeek().map((defaultDay) => {
     const existing = map.get(defaultDay.dayOfWeek);
-
-    if (!existing) {
-      return defaultDay;
-    }
-
+    if (!existing) return defaultDay;
     return {
       dayOfWeek: defaultDay.dayOfWeek,
       enabled: existing.enabled,
@@ -65,57 +50,11 @@ function isValidTime(value: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-function validateDays(days: WorkingHour[]): string | null {
-  if (days.length !== 7) {
-    return "اطلاعات هفت روز هفته کامل نیست.";
-  }
+export function WorkingHoursEditor({ businessId }: { businessId: string }) {
+  const t = useTranslations("workingHours");
+  const dayLabels = [0, 1, 2, 3, 4, 5, 6].map((i) => t(`days.${i}`));
 
-  for (const day of days) {
-    if (!isValidTime(day.openTime) || !isValidTime(day.closeTime)) {
-      return `ساعت کاری ${DAY_LABELS[day.dayOfWeek]} معتبر نیست.`;
-    }
-
-    if (day.enabled && day.openTime >= day.closeTime) {
-      return `ساعت شروع ${DAY_LABELS[day.dayOfWeek]} باید قبل از ساعت پایان باشد.`;
-    }
-
-    if (day.breakStart && !isValidTime(day.breakStart)) {
-      return `شروع زمان استراحت ${DAY_LABELS[day.dayOfWeek]} معتبر نیست.`;
-    }
-
-    if (day.breakEnd && !isValidTime(day.breakEnd)) {
-      return `پایان زمان استراحت ${DAY_LABELS[day.dayOfWeek]} معتبر نیست.`;
-    }
-
-    if (day.breakStart && day.breakEnd) {
-      if (day.breakStart >= day.breakEnd) {
-        return `زمان استراحت ${DAY_LABELS[day.dayOfWeek]} معتبر نیست.`;
-      }
-
-      if (
-        day.enabled &&
-        (day.breakStart < day.openTime ||
-          day.breakEnd > day.closeTime)
-      ) {
-        return `زمان استراحت ${DAY_LABELS[day.dayOfWeek]} باید داخل ساعات کاری باشد.`;
-      }
-    }
-  }
-
-  return null;
-}
-
-export function WorkingHoursEditor({
-  businessId,
-  onSaved,
-}: {
-  businessId: string;
-  onSaved?: () => void;
-}) {
-  const [days, setDays] = useState<WorkingHour[]>(
-    buildDefaultWeek()
-  );
-
+  const [days, setDays] = useState<WorkingHour[]>(buildDefaultWeek());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -124,171 +63,101 @@ export function WorkingHoursEditor({
   useEffect(() => {
     if (!businessId) {
       setLoading(false);
-      setError("شناسه کسب‌وکار موجود نیست.");
       return;
     }
-
     let cancelled = false;
 
-    async function loadWorkingHours() {
+    async function load() {
       try {
         setLoading(true);
         setError(null);
-
         const response = await fetch(
-          `/api/working-hours?businessId=${encodeURIComponent(
-            businessId
-          )}`,
-          {
-            method: "GET",
-            cache: "no-store",
-          }
+          `/api/working-hours?businessId=${encodeURIComponent(businessId)}`,
+          { cache: "no-store" }
         );
-
         let data: unknown = null;
-
         try {
           data = await response.json();
         } catch {
           data = null;
         }
-
         if (!response.ok) {
           const apiError =
-            typeof data === "object" &&
-            data !== null &&
-            "error" in data &&
-            typeof data.error === "string"
+            typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
               ? data.error
-              : "خطا در دریافت ساعت کاری.";
-
+              : t("loading");
           throw new Error(apiError);
         }
-
-        if (cancelled) {
-          return;
-        }
-
+        if (cancelled) return;
         const workingHours =
-          typeof data === "object" &&
-          data !== null &&
-          "workingHours" in data &&
-          Array.isArray(data.workingHours)
+          typeof data === "object" && data !== null && "workingHours" in data && Array.isArray(data.workingHours)
             ? data.workingHours
             : [];
-
-        setDays(
-          mergeWithDefaults(
-            workingHours as WorkingHour[]
-          )
-        );
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setError(
-          error instanceof Error
-            ? error.message
-            : "خطا در دریافت ساعت کاری."
-        );
+        setDays(mergeWithDefaults(workingHours as WorkingHour[]));
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : t("loading"));
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     }
 
-    loadWorkingHours();
-
+    load();
     return () => {
       cancelled = true;
     };
-  }, [businessId]);
+  }, [businessId, t]);
 
-  function updateDay(
-    index: number,
-    patch: Partial<WorkingHour>
-  ) {
+  function updateDay(index: number, patch: Partial<WorkingHour>) {
     setDays((current) =>
-      current.map((day, currentIndex) =>
-        currentIndex === index
-          ? { ...day, ...patch }
-          : day
-      )
+      current.map((day, i) => (i === index ? { ...day, ...patch } : day))
     );
-
     setMessage(null);
     setError(null);
   }
 
+  function validateDays(list: WorkingHour[]): string | null {
+    for (const day of list) {
+      if (!isValidTime(day.openTime) || !isValidTime(day.closeTime)) {
+        return `${dayLabels[day.dayOfWeek]}`;
+      }
+    }
+    return null;
+  }
+
   async function save() {
     const validationError = validateDays(days);
-
     if (validationError) {
       setError(validationError);
-      setMessage(null);
       return;
     }
-
     try {
       setSaving(true);
       setError(null);
       setMessage(null);
-
       const response = await fetch("/api/working-hours", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          businessId,
-          days,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ businessId, days }),
       });
-
       let data: unknown = null;
-
       try {
         data = await response.json();
       } catch {
         data = null;
       }
-
       if (!response.ok) {
         const apiError =
-          typeof data === "object" &&
-          data !== null &&
-          "error" in data &&
-          typeof data.error === "string"
+          typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
             ? data.error
-            : "ذخیره ساعت کاری ناموفق بود.";
-
+            : t("saved");
         throw new Error(apiError);
       }
-
-      if (
-        typeof data === "object" &&
-        data !== null &&
-        "workingHours" in data &&
-        Array.isArray(data.workingHours)
-      ) {
-        setDays(
-          mergeWithDefaults(
-            data.workingHours as WorkingHour[]
-          )
-        );
+      if (typeof data === "object" && data !== null && "workingHours" in data && Array.isArray(data.workingHours)) {
+        setDays(mergeWithDefaults(data.workingHours as WorkingHour[]));
       }
-
-      setMessage("ساعت کاری با موفقیت ذخیره شد.");
-
-      onSaved?.();
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "ذخیره ساعت کاری ناموفق بود."
-      );
+      setMessage(t("saved"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("saved"));
     } finally {
       setSaving(false);
     }
@@ -297,98 +166,64 @@ export function WorkingHoursEditor({
   return (
     <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
       <div>
-        <h2 className="text-xl font-bold">
-          ساعت کاری
-        </h2>
-
-        <p className="mt-1 text-sm text-muted-foreground">
-          روزها و ساعت‌هایی که مشتری می‌تواند رزرو کند.
-        </p>
-
+        <h2 className="text-xl font-bold">{t("title")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("subtitle")}</p>
         <p className="mt-2 text-xs text-muted-foreground">
-          Business ID: {businessId}
+          {t("businessId", { id: businessId })}
         </p>
       </div>
 
       {loading && (
         <div className="rounded-xl border bg-background p-3 text-sm text-muted-foreground">
-          در حال دریافت ساعت کاری...
+          {t("loading")}
         </div>
       )}
 
       {error && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-          <p className="text-sm text-destructive">
-            {error}
-          </p>
+          <p className="text-sm text-destructive">{error}</p>
         </div>
       )}
 
       {message && (
-        <div className="rounded-xl border bg-background p-3 text-sm">
-          {message}
-        </div>
+        <div className="rounded-xl border bg-background p-3 text-sm">{message}</div>
       )}
 
       <div className="space-y-3">
         {days.map((day, index) => (
-          <div
-            key={day.dayOfWeek}
-            className="rounded-xl border bg-background p-4"
-          >
+          <div key={day.dayOfWeek} className="rounded-xl border bg-background p-4">
             <div className="flex items-center justify-between gap-3">
               <label className="flex items-center gap-2 text-sm font-medium">
                 <input
                   type="checkbox"
                   checked={day.enabled}
-                  onChange={(event) =>
-                    updateDay(index, {
-                      enabled: event.target.checked,
-                    })
-                  }
+                  onChange={(e) => updateDay(index, { enabled: e.target.checked })}
                   className="h-4 w-4"
                 />
-
-                {DAY_LABELS[day.dayOfWeek]}
+                {dayLabels[day.dayOfWeek]}
               </label>
-
               <span className="text-xs text-muted-foreground">
-                {day.enabled ? "فعال" : "تعطیل"}
+                {day.enabled ? t("active") : t("closed")}
               </span>
             </div>
 
             {day.enabled && (
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <label className="block text-xs">
-                  <span className="mb-1 block text-muted-foreground">
-                    شروع
-                  </span>
-
+                  <span className="mb-1 block text-muted-foreground">{t("start")}</span>
                   <input
                     type="time"
                     value={day.openTime}
-                    onChange={(event) =>
-                      updateDay(index, {
-                        openTime: event.target.value,
-                      })
-                    }
+                    onChange={(e) => updateDay(index, { openTime: e.target.value })}
                     className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
                   />
                 </label>
-
                 <label className="block text-xs">
-                  <span className="mb-1 block text-muted-foreground">
-                    پایان
-                  </span>
-
+                  <span className="mb-1 block text-muted-foreground">{t("end")}</span>
                   <input
                     type="time"
                     value={day.closeTime}
-                    onChange={(event) =>
-                      updateDay(index, {
-                        closeTime: event.target.value,
-                      })
-                    }
+                    onChange={(e) => updateDay(index, { closeTime: e.target.value })}
                     className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
                   />
                 </label>
@@ -404,9 +239,7 @@ export function WorkingHoursEditor({
         disabled={saving || loading || !businessId}
         className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
       >
-        {saving
-          ? "در حال ذخیره..."
-          : "ذخیره ساعت کاری"}
+        {saving ? t("saving") : t("saveButton")}
       </button>
     </section>
   );
