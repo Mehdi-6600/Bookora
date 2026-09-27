@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { PLANS, PlanCode } from "@/lib/subscription/plans";
 import { MANUAL_PAYMENT_SETTING_KEYS } from "@/lib/admin-settings";
@@ -17,14 +18,22 @@ type PendingSubscription = {
   userName: string;
 };
 
-const SETTING_LABELS: Record<string, string> = {
-  payment_card_number: "شماره کارت",
-  payment_card_holder: "نام صاحب حساب",
-  payment_bank_name: "نام بانک",
-  payment_instructions: "توضیحات پرداخت",
-};
-
 function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
+  const t = useTranslations("admin");
+  const tSub = useTranslations("subscription");
+
+  const planLabels: Record<PlanCode, string> = {
+    PRO_MONTHLY: tSub("planMonthly"),
+    PRO_YEARLY: tSub("planYearly"),
+  };
+
+  const settingLabels: Record<string, string> = {
+    payment_card_number: t("settingLabels.payment_card_number"),
+    payment_card_holder: t("settingLabels.payment_card_holder"),
+    payment_bank_name: t("settingLabels.payment_bank_name"),
+    payment_instructions: t("settingLabels.payment_instructions"),
+  };
+
   const [settings, setSettings] = useState<SettingRow[]>(
     MANUAL_PAYMENT_SETTING_KEYS.map((key) => ({ key, value: "" }))
   );
@@ -40,14 +49,9 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   async function loadSettings() {
     try {
       setLoadingSettings(true);
-      const response = await fetch("/api/admin/settings", {
-        cache: "no-store",
-      });
+      const response = await fetch("/api/admin/settings", { cache: "no-store" });
       const data = await response.json();
-
-      if (response.ok) {
-        setSettings(data.settings);
-      }
+      if (response.ok) setSettings(data.settings);
     } finally {
       setLoadingSettings(false);
     }
@@ -56,14 +60,9 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   async function loadPending() {
     try {
       setLoadingPending(true);
-      const response = await fetch("/api/admin/subscriptions", {
-        cache: "no-store",
-      });
+      const response = await fetch("/api/admin/subscriptions", { cache: "no-store" });
       const data = await response.json();
-
-      if (response.ok) {
-        setPending(data.subscriptions);
-      }
+      if (response.ok) setPending(data.subscriptions);
     } finally {
       setLoadingPending(false);
     }
@@ -80,22 +79,16 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     try {
       setSavingSettings(true);
       setMessage(null);
-
       const response = await fetch("/api/admin/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "ذخیره ناموفق بود.");
-      }
-
-      setMessage("تنظیمات ذخیره شد.");
+      if (!response.ok) throw new Error(data?.error || t("saveError"));
+      setMessage(t("saved"));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "ذخیره ناموفق بود.");
+      setMessage(error instanceof Error ? error.message : t("saveError"));
     } finally {
       setSavingSettings(false);
     }
@@ -105,55 +98,43 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     try {
       setReviewingId(id);
       setMessage(null);
-
       const response = await fetch(`/api/admin/subscriptions/${id}/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "بررسی ناموفق بود.");
-      }
-
+      if (!response.ok) throw new Error(data?.error || t("reviewError"));
       await loadPending();
-      setMessage(action === "approve" ? "اشتراک فعال شد." : "درخواست رد شد.");
+      setMessage(action === "approve" ? t("approved") : t("rejected"));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "بررسی ناموفق بود.");
+      setMessage(error instanceof Error ? error.message : t("reviewError"));
     } finally {
       setReviewingId(null);
     }
   }
 
   if (!isAdmin) {
-    return (
-      <div className="p-8 text-center text-sm text-muted-foreground">
-        دسترسی ندارید.
-      </div>
-    );
+    return <div className="p-8 text-center text-sm text-muted-foreground">{t("noAccess")}</div>;
   }
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
-      <h1 className="text-2xl font-bold">پنل ادمین</h1>
+      <h1 className="text-2xl font-bold">{t("title")}</h1>
 
-      {message && (
-        <div className="rounded-xl border bg-card p-4 text-sm">{message}</div>
-      )}
+      {message && <div className="rounded-xl border bg-card p-4 text-sm">{message}</div>}
 
       <section className="space-y-3 rounded-2xl border bg-card p-5 shadow-sm">
-        <h2 className="text-xl font-bold">اطلاعات پرداخت کارت‌به‌کارت</h2>
+        <h2 className="text-xl font-bold">{t("paymentInfoTitle")}</h2>
 
         {loadingSettings ? (
-          <p className="text-sm text-muted-foreground">در حال بارگذاری...</p>
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
         ) : (
           <>
             {settings.map((setting, index) => (
               <div key={setting.key}>
                 <label className="mb-1 block text-xs text-muted-foreground">
-                  {SETTING_LABELS[setting.key] || setting.key}
+                  {settingLabels[setting.key] || setting.key}
                 </label>
                 <input
                   value={setting.value}
@@ -173,40 +154,32 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
               disabled={savingSettings}
               className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
-              {savingSettings ? "در حال ذخیره..." : "ذخیره تنظیمات"}
+              {savingSettings ? t("saving") : t("saveButton")}
             </button>
           </>
         )}
       </section>
 
       <section className="space-y-3 rounded-2xl border bg-card p-5 shadow-sm">
-        <h2 className="text-xl font-bold">
-          درخواست‌های در انتظار تأیید ({pending.length})
-        </h2>
+        <h2 className="text-xl font-bold">{t("pendingTitle", { count: pending.length })}</h2>
 
         {loadingPending ? (
-          <p className="text-sm text-muted-foreground">در حال بارگذاری...</p>
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
         ) : pending.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            درخواست در انتظاری وجود ندارد.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("pendingEmpty")}</p>
         ) : (
           <div className="space-y-3">
             {pending.map((sub) => (
               <div key={sub.id} className="rounded-xl border p-4 text-sm">
                 <p className="font-semibold">
-                  {sub.userName} — {sub.businessName || "بدون کسب‌وکار"}
+                  {sub.userName} — {sub.businessName || t("noBusiness")}
                 </p>
-                <p className="mt-1">
-                  پلن: {PLANS[sub.plan as PlanCode]?.titleFa || sub.plan}
-                </p>
+                <p className="mt-1">{t("planLabel", { plan: planLabels[sub.plan as PlanCode] || sub.plan })}</p>
                 <p className="mt-1 text-muted-foreground">
-                  کد رهگیری: {sub.receiptReference}
+                  {t("receiptLabel", { ref: sub.receiptReference || "" })}
                 </p>
                 {sub.receiptNote && (
-                  <p className="mt-1 text-muted-foreground">
-                    یادداشت: {sub.receiptNote}
-                  </p>
+                  <p className="mt-1 text-muted-foreground">{t("noteLabel", { note: sub.receiptNote })}</p>
                 )}
 
                 <div className="mt-3 grid grid-cols-2 gap-2">
@@ -216,7 +189,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                     disabled={reviewingId === sub.id}
                     className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
                   >
-                    تأیید
+                    {t("approveButton")}
                   </button>
                   <button
                     type="button"
@@ -224,7 +197,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                     disabled={reviewingId === sub.id}
                     className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive disabled:opacity-50"
                   >
-                    رد
+                    {t("rejectButton")}
                   </button>
                 </div>
               </div>
@@ -239,9 +212,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
 export default function AdminPage() {
   return (
     <main className="min-h-screen px-4">
-      <TelegramAuthGate>
-        {(user) => <AdminDashboard isAdmin={user.isAdmin} />}
-      </TelegramAuthGate>
+      <TelegramAuthGate>{(user) => <AdminDashboard isAdmin={user.isAdmin} />}</TelegramAuthGate>
     </main>
   );
 }
