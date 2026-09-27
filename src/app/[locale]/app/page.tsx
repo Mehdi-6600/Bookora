@@ -55,9 +55,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [savingService, setSavingService] = useState(false);
 
+  const [createStep, setCreateStep] = useState<1 | 2>(1);
   const [businessName, setBusinessName] = useState("");
   const [businessDescription, setBusinessDescription] = useState("");
-  const [businessCountry, setBusinessCountry] = useState<CountryCode>("IR");
+  const [businessCountry, setBusinessCountry] =
+    useState<CountryCode | null>(null);
 
   const [editingBusiness, setEditingBusiness] = useState(false);
   const [editBusinessName, setEditBusinessName] = useState("");
@@ -84,6 +86,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const [message, setMessage] = useState<string | null>(null);
 
@@ -133,6 +137,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
   async function createBusiness(event: React.FormEvent) {
     event.preventDefault();
 
+    if (!businessCountry) {
+      setMessage("ابتدا کشور کسب‌وکار را انتخاب کنید.");
+      return;
+    }
+
     if (!businessName.trim()) {
       setMessage("نام کسب‌وکار را وارد کنید.");
       return;
@@ -160,6 +169,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
       setBusinessName("");
       setBusinessDescription("");
+      setBusinessCountry(null);
+      setCreateStep(1);
       await loadBusinesses();
       setMessage("کسب‌وکار با موفقیت ساخته شد.");
     } catch (error) {
@@ -482,6 +493,29 @@ function Dashboard({ user }: { user: TelegramUser }) {
     }
   }
 
+  async function copyBookingLink(url: string) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = url;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      setMessage("کپی خودکار ممکن نشد؛ لینک را دستی انتخاب و کپی کنید.");
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -506,6 +540,13 @@ function Dashboard({ user }: { user: TelegramUser }) {
     selectedBusiness?.country && isCountryCode(selectedBusiness.country)
       ? selectedBusiness.country
       : null;
+
+  const bookingUrl =
+    typeof window !== "undefined" && selectedBusiness
+      ? `${window.location.origin}/book/${selectedBusiness.slug}`
+      : selectedBusiness
+      ? `/book/${selectedBusiness.slug}`
+      : "";
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
@@ -542,67 +583,81 @@ function Dashboard({ user }: { user: TelegramUser }) {
       )}
 
       {businesses.length === 0 ? (
-        <form
-          onSubmit={createBusiness}
-          className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm"
-        >
-          <div>
-            <h2 className="text-xl font-bold">اولین کسب‌وکارت را بساز</h2>
+        <div className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
+          {createStep === 1 ? (
+            <>
+              <div>
+                <h2 className="text-xl font-bold">کشور کسب‌وکار شما کجاست؟</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  بر اساس این انتخاب، واحد پول، تقویم نمایش‌داده‌شده به
+                  مشتری‌ها و روش پرداخت اشتراک شما تعیین می‌شود.
+                </p>
+              </div>
 
-            <p className="mt-1 text-sm text-muted-foreground">
-              نام و کشور کسب‌وکار را وارد کن.
-            </p>
-          </div>
-
-          <input
-            value={businessName}
-            onChange={(event) => setBusinessName(event.target.value)}
-            placeholder="مثلاً Mehdi Barber"
-            className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-          />
-
-          <textarea
-            value={businessDescription}
-            onChange={(event) => setBusinessDescription(event.target.value)}
-            placeholder="توضیح کوتاه"
-            className="min-h-24 w-full rounded-xl border bg-background px-4 py-3 outline-none"
-          />
-
-          <div>
-            <p className="mb-2 text-sm font-medium">کشور کسب‌وکار</p>
-
-            <div className="grid grid-cols-2 gap-3">
-              {(["IR", "OTHER"] as CountryCode[]).map((code) => (
+              <div className="grid grid-cols-1 gap-3">
+                {(["IR", "OTHER"] as CountryCode[]).map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => {
+                      setBusinessCountry(code);
+                      setCreateStep(2);
+                    }}
+                    className="rounded-xl border bg-background p-4 text-right"
+                  >
+                    <div className="font-semibold">{COUNTRY_LABELS[code]}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {code === "IR"
+                        ? "واحد پول: تومان — تقویم: شمسی — پرداخت اشتراک: کارت‌به‌کارت"
+                        : "واحد پول: دلار — تقویم: میلادی — پرداخت اشتراک: Telegram Stars"}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <form onSubmit={createBusiness} className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold">اطلاعات کسب‌وکار</h2>
                 <button
-                  key={code}
                   type="button"
-                  onClick={() => setBusinessCountry(code)}
-                  className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-                    businessCountry === code
-                      ? "border-primary bg-primary/10"
-                      : "bg-background"
-                  }`}
+                  onClick={() => setCreateStep(1)}
+                  className="text-xs text-muted-foreground underline"
                 >
-                  {COUNTRY_LABELS[code]}
+                  تغییر کشور
                 </button>
-              ))}
-            </div>
+              </div>
 
-            <p className="mt-2 text-xs text-muted-foreground">
-              {businessCountry === "IR"
-                ? "قیمت خدمات به تومان نمایش داده می‌شود."
-                : "قیمت خدمات به دلار نمایش داده می‌شود."}
-            </p>
-          </div>
+              <p className="text-sm text-muted-foreground">
+                کشور انتخابی: {businessCountry ? COUNTRY_LABELS[businessCountry] : ""}
+              </p>
 
-          <button
-            type="submit"
-            disabled={savingBusiness}
-            className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
-          >
-            {savingBusiness ? "در حال ساخت..." : "ساخت کسب‌وکار"}
-          </button>
-        </form>
+              <input
+                value={businessName}
+                onChange={(event) => setBusinessName(event.target.value)}
+                placeholder="مثلاً Mehdi Barber"
+                className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
+              />
+
+              <textarea
+                value={businessDescription}
+                onChange={(event) =>
+                  setBusinessDescription(event.target.value)
+                }
+                placeholder="توضیح کوتاه"
+                className="min-h-24 w-full rounded-xl border bg-background px-4 py-3 outline-none"
+              />
+
+              <button
+                type="submit"
+                disabled={savingBusiness}
+                className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {savingBusiness ? "در حال ساخت..." : "ساخت کسب‌وکار"}
+              </button>
+            </form>
+          )}
+        </div>
       ) : (
         <>
           <div className="rounded-2xl border bg-card p-5 shadow-sm">
@@ -721,14 +776,28 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         لینک رزرو عمومی
                       </p>
 
-                      <a
-                        href={`/book/${selectedBusiness.slug}`}
-                        className="mt-1 block break-all text-sm font-medium underline"
-                      >
-                        {typeof window !== "undefined"
-                          ? `${window.location.origin}/book/${selectedBusiness.slug}`
-                          : `/book/${selectedBusiness.slug}`}
-                      </a>
+                      <p className="mt-1 break-all text-sm font-medium">
+                        {bookingUrl}
+                      </p>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => copyBookingLink(bookingUrl)}
+                          className="rounded-lg border px-3 py-2 text-xs font-medium"
+                        >
+                          {linkCopied ? "کپی شد ✅" : "کپی لینک"}
+                        </button>
+
+                        <a
+                          href={`/book/${selectedBusiness.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-lg border px-3 py-2 text-center text-xs font-medium"
+                        >
+                          باز کردن صفحه
+                        </a>
+                      </div>
                     </div>
 
                     <div className="mt-4 grid grid-cols-2 gap-2">
