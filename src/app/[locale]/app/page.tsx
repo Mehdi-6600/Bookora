@@ -5,6 +5,8 @@ import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
 import { SubscriptionPanel } from "@/components/subscription-panel";
 import { TimeOffPanel } from "@/components/time-off-panel";
+import { PaymentMethodPanel } from "@/components/payment-method-panel";
+import { BookingsPanel } from "@/components/bookings-panel";
 import {
   COUNTRY_LABELS,
   CountryCode,
@@ -30,6 +32,8 @@ type Service = {
   currency: string;
   durationMinutes: number;
   active: boolean;
+  depositType: string;
+  depositValue: string;
 };
 
 type Business = {
@@ -44,6 +48,12 @@ type Business = {
   _count?: {
     bookings: number;
   };
+};
+
+const DEPOSIT_LABELS: Record<string, string> = {
+  NONE: "بدون بیعانه",
+  PERCENTAGE: "درصدی",
+  FIXED: "مبلغ ثابت",
 };
 
 function Dashboard({ user }: { user: TelegramUser }) {
@@ -75,6 +85,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [serviceDescription, setServiceDescription] = useState("");
   const [servicePrice, setServicePrice] = useState("");
   const [serviceDuration, setServiceDuration] = useState("60");
+  const [serviceDepositType, setServiceDepositType] = useState<
+    "NONE" | "PERCENTAGE" | "FIXED"
+  >("NONE");
+  const [serviceDepositValue, setServiceDepositValue] = useState("");
 
   const [editingServiceId, setEditingServiceId] = useState<string | null>(
     null
@@ -83,6 +97,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [editDescription, setEditDescription] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editDuration, setEditDuration] = useState("");
+  const [editDepositType, setEditDepositType] = useState<
+    "NONE" | "PERCENTAGE" | "FIXED"
+  >("NONE");
+  const [editDepositValue, setEditDepositValue] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -224,7 +242,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       await loadBusinesses();
       setMessage(
         data.currencyChanged
-          ? "کسب‌وکار ویرایش شد. واحد پول سرویس‌های جدید از حالا تغییر می‌کند."
+          ? "کسب‌وکار ویرایش شد. واحد پول از حالا تغییر کرد."
           : "کسب‌وکار ویرایش شد."
       );
     } catch (error) {
@@ -304,6 +322,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
     }
   }
 
+  function resetServiceForm() {
+    setServiceName("");
+    setServiceDescription("");
+    setServicePrice("");
+    setServiceDuration("60");
+    setServiceDepositType("NONE");
+    setServiceDepositValue("");
+  }
+
   async function createService(event: React.FormEvent) {
     event.preventDefault();
 
@@ -319,6 +346,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
     const price = Number(servicePrice);
     const durationMinutes = Number(serviceDuration);
+    const depositValue =
+      serviceDepositType === "NONE" ? 0 : Number(serviceDepositValue || "0");
 
     if (!Number.isFinite(price) || price < 0) {
       setMessage("قیمت سرویس معتبر نیست.");
@@ -327,6 +356,16 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
       setMessage("مدت سرویس معتبر نیست.");
+      return;
+    }
+
+    if (serviceDepositType === "PERCENTAGE" && (depositValue < 0 || depositValue > 100)) {
+      setMessage("درصد بیعانه باید بین ۰ تا ۱۰۰ باشد.");
+      return;
+    }
+
+    if (serviceDepositType === "FIXED" && depositValue < 0) {
+      setMessage("مبلغ بیعانه معتبر نیست.");
       return;
     }
 
@@ -343,6 +382,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
           description: serviceDescription.trim() || null,
           price,
           durationMinutes,
+          depositType: serviceDepositType,
+          depositValue,
         }),
       });
 
@@ -352,11 +393,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         throw new Error(data?.error || "ساخت سرویس ناموفق بود.");
       }
 
-      setServiceName("");
-      setServiceDescription("");
-      setServicePrice("");
-      setServiceDuration("60");
-
+      resetServiceForm();
       await loadBusinesses();
       setMessage("سرویس با موفقیت اضافه شد.");
     } catch (error) {
@@ -372,6 +409,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
     setEditDescription(service.description || "");
     setEditPrice(service.price);
     setEditDuration(String(service.durationMinutes));
+    setEditDepositType(
+      (service.depositType as "NONE" | "PERCENTAGE" | "FIXED") || "NONE"
+    );
+    setEditDepositValue(service.depositValue);
     setConfirmDeleteId(null);
   }
 
@@ -382,6 +423,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
   async function saveEdit(serviceId: string) {
     const price = Number(editPrice);
     const durationMinutes = Number(editDuration);
+    const depositValue =
+      editDepositType === "NONE" ? 0 : Number(editDepositValue || "0");
 
     if (!editName.trim()) {
       setMessage("نام سرویس را وارد کنید.");
@@ -398,6 +441,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
       return;
     }
 
+    if (editDepositType === "PERCENTAGE" && (depositValue < 0 || depositValue > 100)) {
+      setMessage("درصد بیعانه باید بین ۰ تا ۱۰۰ باشد.");
+      return;
+    }
+
     try {
       setSavingEdit(true);
       setMessage(null);
@@ -410,6 +458,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
           description: editDescription.trim() || null,
           price,
           durationMinutes,
+          depositType: editDepositType,
+          depositValue,
         }),
       });
 
@@ -444,6 +494,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
           price: Number(service.price),
           durationMinutes: service.durationMinutes,
           active: !service.active,
+          depositType: service.depositType,
+          depositValue: Number(service.depositValue),
         }),
       });
 
@@ -902,6 +954,46 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       />
                     </div>
 
+                    <div>
+                      <p className="mb-2 text-sm font-medium">بیعانه</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(["NONE", "PERCENTAGE", "FIXED"] as const).map(
+                          (type) => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => setServiceDepositType(type)}
+                              className={`rounded-lg border px-2 py-2 text-xs font-medium ${
+                                serviceDepositType === type
+                                  ? "border-primary bg-primary/10"
+                                  : "bg-background"
+                              }`}
+                            >
+                              {DEPOSIT_LABELS[type]}
+                            </button>
+                          )
+                        )}
+                      </div>
+
+                      {serviceDepositType !== "NONE" && (
+                        <input
+                          value={serviceDepositValue}
+                          onChange={(event) =>
+                            setServiceDepositValue(event.target.value)
+                          }
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder={
+                            serviceDepositType === "PERCENTAGE"
+                              ? "درصد بیعانه (مثلاً 30)"
+                              : `مبلغ ثابت بیعانه (${selectedBusiness.currency})`
+                          }
+                          className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                        />
+                      )}
+                    </div>
+
                     <button
                       type="submit"
                       disabled={savingService}
@@ -966,6 +1058,42 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   />
                                 </div>
 
+                                <div>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    {(
+                                      ["NONE", "PERCENTAGE", "FIXED"] as const
+                                    ).map((type) => (
+                                      <button
+                                        key={type}
+                                        type="button"
+                                        onClick={() =>
+                                          setEditDepositType(type)
+                                        }
+                                        className={`rounded-lg border px-2 py-2 text-xs font-medium ${
+                                          editDepositType === type
+                                            ? "border-primary bg-primary/10"
+                                            : "bg-background"
+                                        }`}
+                                      >
+                                        {DEPOSIT_LABELS[type]}
+                                      </button>
+                                    ))}
+                                  </div>
+
+                                  {editDepositType !== "NONE" && (
+                                    <input
+                                      value={editDepositValue}
+                                      onChange={(event) =>
+                                        setEditDepositValue(event.target.value)
+                                      }
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                    />
+                                  )}
+                                </div>
+
                                 <div className="grid grid-cols-2 gap-2">
                                   <button
                                     type="button"
@@ -1001,6 +1129,18 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     {service.description && (
                                       <p className="mt-1 text-sm text-muted-foreground">
                                         {service.description}
+                                      </p>
+                                    )}
+
+                                    {service.depositType !== "NONE" && (
+                                      <p className="mt-1 text-xs text-primary">
+                                        بیعانه: {DEPOSIT_LABELS[service.depositType]}{" "}
+                                        {service.depositType === "PERCENTAGE"
+                                          ? `${service.depositValue}%`
+                                          : formatPrice(
+                                              service.depositValue,
+                                              service.currency
+                                            )}
                                       </p>
                                     )}
                                   </div>
@@ -1068,6 +1208,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       </div>
                     )}
                   </div>
+
+                  <BookingsPanel businessId={selectedBusiness.id} />
+
+                  <PaymentMethodPanel businessId={selectedBusiness.id} />
 
                   <WorkingHoursEditor businessId={selectedBusiness.id} />
 
