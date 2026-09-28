@@ -302,6 +302,16 @@
     "rejectButton": "رفض",
     "reviewError": "فشلت المراجعة.",
     "approved": "تم تفعيل الاشتراك.",
-    "rejected": "تم رفض الطلب."
+    "rejected": "تم رفض الطلب.",
+    "filterPending": "قيد الانتظار",
+    "filterApproved": "مقبول",
+    "filterRejected": "مرفوض",
+    "filterEmptyApproved": "لا توجد طلبات مقبولة.",
+    "filterEmptyRejected": "لا توجد طلبات مرفوضة.",
+    "submittedAt": "أُرسل {date}",
+    "reviewedAt": "تمت المراجعة {date}",
+    "adminNote": "ملاحظة الإدارة: {note}",
+    "viewBusiness": "فتح النشاط",
+    "rejectNotePlaceholder": "سبب الرفض (اختياري)"
   }
 }
