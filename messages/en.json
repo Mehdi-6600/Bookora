@@ -324,6 +324,17 @@
     "statLast7d": "Last 7 days",
     "statActive": "Active",
     "statArchived": "Archived",
-    "statTotal": "Total"
+    "statTotal": "Total",
+    "tabRequests": "Requests",
+    "tabBusinesses": "Businesses",
+    "bizTitle": "Businesses",
+    "bizSearchPlaceholder": "Search by name, slug, or owner name",
+    "bizEmpty": "No businesses match the current filter.",
+    "bizFilterAll": "All",
+    "bizFilterActive": "Active",
+    "bizFilterArchived": "Archived",
+    "bizServices": "Services",
+    "bizBookings": "Bookings",
+    "bizOwner": "Owner"
   }
 }
