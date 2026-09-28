@@ -8,6 +8,7 @@ import {
   Clock,
   CreditCard,
   Crown,
+  Loader2,
   Sparkles,
   Star,
   X,
@@ -79,17 +80,14 @@ export function SubscriptionPanel({
 
   const [subscription, setSubscription] = useState<SubscriptionStatus>(null);
   const [pending, setPending] = useState<PendingSubscription>(null);
-  const [preference, setPreference] = useState<PaymentPreference | null>(
-    null
-  );
+  const [preference, setPreference] = useState<PaymentPreference | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState<PlanCode | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [okMessage, setOkMessage] = useState<string | null>(null);
 
   const [manualPlan, setManualPlan] = useState<PlanCode | null>(null);
-  const [manualInfo, setManualInfo] = useState<ManualInstructions | null>(
-    null
-  );
+  const [manualInfo, setManualInfo] = useState<ManualInstructions | null>(null);
   const [manualLoading, setManualLoading] = useState(false);
   const [receiptReference, setReceiptReference] = useState("");
   const [receiptNote, setReceiptNote] = useState("");
@@ -98,8 +96,6 @@ export function SubscriptionPanel({
   const [savingPreference, setSavingPreference] = useState(false);
   const [preferenceMessage, setPreferenceMessage] = useState(false);
 
-  // روش پرداخت مؤثر دقیقاً با منطق backend یکی است:
-  // src/lib/subscription/payment-method.ts — کپی نمی‌شود، import می‌شود.
   const effectiveMethod = resolvePaymentMethod(preference ?? "AUTO", country);
 
   const planLabels: Record<PlanCode, string> = {
@@ -136,7 +132,9 @@ export function SubscriptionPanel({
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("loadError"));
+      const text = err instanceof Error ? err.message : t("loadError");
+      console.error("[subscription] loadStatus failed:", text);
+      setError(text);
     } finally {
       setLoading(false);
     }
@@ -153,6 +151,7 @@ export function SubscriptionPanel({
     const previous = preference;
     setPreference(next);
     setPreferenceMessage(false);
+    setError(null);
 
     try {
       setSavingPreference(true);
@@ -170,20 +169,33 @@ export function SubscriptionPanel({
       }
 
       setPreferenceMessage(true);
-    } catch {
+    } catch (err) {
+      const text = err instanceof Error ? err.message : t("loadError");
+      console.error("[subscription] updatePreference failed:", text);
       setPreference(previous);
-      setError(t("loadError"));
+      setError(text);
     } finally {
       setSavingPreference(false);
     }
   }
 
   async function subscribeWithStars(plan: PlanCode) {
-    if (!businessId) return;
+    setOkMessage(null);
+
+    if (!businessId) {
+      console.error("[subscription] subscribeWithStars: businessId is null");
+      setError(t("needBusiness"));
+      return;
+    }
 
     try {
       setCheckingOut(plan);
       setError(null);
+
+      console.log(
+        "[subscription] subscribeWithStars start",
+        JSON.stringify({ plan, businessId })
+      );
 
       const response = await fetch("/api/subscription/checkout", {
         method: "POST",
@@ -193,36 +205,62 @@ export function SubscriptionPanel({
 
       const data = await response.json();
 
+      console.log(
+        "[subscription] checkout response",
+        response.status,
+        JSON.stringify(data)
+      );
+
       if (!response.ok) {
         throw new Error(data?.error || t("checkoutError"));
       }
 
+      if (!data || typeof data.invoiceLink !== "string" || !data.invoiceLink) {
+        throw new Error(t("checkoutError"));
+      }
+
       const webApp = getTelegramWebApp();
 
-      if (!webApp?.openInvoice) {
+      if (!webApp) {
+        console.error("[subscription] Telegram.WebApp is unavailable");
+        setError(t("telegramOnly"));
+        return;
+      }
+
+      if (typeof webApp.openInvoice !== "function") {
+        console.error("[subscription] Telegram.WebApp.openInvoice is missing");
         setError(t("telegramOnly"));
         return;
       }
 
       webApp.openInvoice(data.invoiceLink, (status) => {
+        console.log("[subscription] invoice status:", status);
         if (status === "paid") {
           loadStatus();
         }
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("checkoutError"));
+      const text = err instanceof Error ? err.message : t("checkoutError");
+      console.error("[subscription] subscribeWithStars failed:", text);
+      setError(text);
     } finally {
       setCheckingOut(null);
     }
   }
 
   async function openManualPayment(plan: PlanCode) {
+    setOkMessage(null);
     setManualPlan(plan);
     setError(null);
     setReceiptReference("");
     setReceiptNote("");
+    setManualInfo(null);
 
-    if (manualInfo) return;
+    if (!businessId) {
+      console.error("[subscription] openManualPayment: businessId is null");
+      setError(t("needBusiness"));
+      return;
+    }
 
     try {
       setManualLoading(true);
@@ -239,14 +277,24 @@ export function SubscriptionPanel({
 
       setManualInfo(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("loadError"));
+      const text = err instanceof Error ? err.message : t("loadError");
+      console.error("[subscription] openManualPayment failed:", text);
+      setError(text);
     } finally {
       setManualLoading(false);
     }
   }
 
   async function submitReceipt() {
-    if (!businessId || !manualPlan) return;
+    setOkMessage(null);
+
+    if (!businessId || !manualPlan) {
+      console.error(
+        "[subscription] submitReceipt: missing businessId or manualPlan"
+      );
+      setError(t("needBusiness"));
+      return;
+    }
 
     if (receiptReference.trim().length < 3) {
       setError(t("receiptRequired"));
@@ -276,8 +324,11 @@ export function SubscriptionPanel({
 
       setManualPlan(null);
       await loadStatus();
+      setOkMessage(t("submittedNotice"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("submitError"));
+      const text = err instanceof Error ? err.message : t("submitError");
+      console.error("[subscription] submitReceipt failed:", text);
+      setError(text);
     } finally {
       setSubmittingReceipt(false);
     }
@@ -285,11 +336,13 @@ export function SubscriptionPanel({
 
   if (!businessId || !country) {
     return (
-      <section className="rounded-2xl border bg-card p-5 shadow-sm">
+      <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
         <div className="flex items-start gap-3">
           <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
           <div>
-            <h2 className="text-xl font-bold">{t("title")}</h2>
+            <h2 className="text-lg font-semibold tracking-tight">
+              {t("title")}
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {t("needBusiness")}
             </p>
@@ -304,37 +357,48 @@ export function SubscriptionPanel({
   return (
     <section
       id="subscription-panel"
-      className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm"
+      className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft"
     >
       <div className="flex items-start gap-3">
         <Sparkles className="mt-1 h-5 w-5 shrink-0 text-primary" />
         <div>
-          <h2 className="text-xl font-bold">{t("title")}</h2>
+          <h2 className="text-lg font-semibold tracking-tight">
+            {t("title")}
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {effectiveMethod === "MANUAL" ? t("subtitleIR") : t("subtitleOther")}
+            {effectiveMethod === "MANUAL"
+              ? t("subtitleIR")
+              : t("subtitleOther")}
           </p>
         </div>
       </div>
 
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Clock className="h-4 w-4 animate-pulse" />
+        <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
           {t("checkingStatus")}
         </div>
       )}
 
       {error && (
-        <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           <X className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
+      {okMessage && (
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-400">
+          <Check className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{okMessage}</span>
+        </div>
+      )}
+
       {!loading && subscription && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4">
+        <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
           <Crown className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div className="text-sm">
-            <p className="font-semibold text-amber-900">
+            <p className="font-semibold text-amber-900 dark:text-amber-400">
               {t("activePlan", {
                 plan:
                   planLabels[subscription.plan as PlanCode] ||
@@ -342,7 +406,7 @@ export function SubscriptionPanel({
               })}
             </p>
             {subscription.expiresAt && (
-              <p className="mt-1 flex items-center gap-1.5 text-amber-800">
+              <p className="mt-1 flex items-center gap-1.5 text-amber-800 dark:text-amber-400/90">
                 <CalendarDays className="h-4 w-4" />
                 {t("expiresAt", {
                   date: new Date(subscription.expiresAt).toLocaleDateString(
@@ -356,7 +420,7 @@ export function SubscriptionPanel({
       )}
 
       {!loading && !subscription && pending && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+        <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-400">
           <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <span>
             {t("pendingNotice", {
@@ -367,7 +431,7 @@ export function SubscriptionPanel({
       )}
 
       {!loading && !subscription && !pending && (
-        <div className="flex items-start gap-3 rounded-xl bg-muted p-4">
+        <div className="mt-4 flex items-start gap-3 rounded-xl bg-muted/40 p-4">
           <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
           <div className="text-sm">
             <p className="font-semibold">{t("compareFreeTitle")}</p>
@@ -379,14 +443,14 @@ export function SubscriptionPanel({
       )}
 
       {preferenceMessage && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-300/60 bg-emerald-50 p-3 text-sm text-emerald-800">
+        <div className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-400">
           <Check className="h-4 w-4 shrink-0" />
           {t("preferenceSaved")}
         </div>
       )}
 
       {!loading && (
-        <div className="space-y-2">
+        <div className="mt-4 space-y-2">
           <p className="text-sm font-medium">{t("preferenceLabel")}</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {PREFERENCE_OPTIONS.map((option) => (
@@ -395,11 +459,11 @@ export function SubscriptionPanel({
                 type="button"
                 disabled={savingPreference}
                 onClick={() => updatePreference(option.value)}
-                className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${
+                className={
                   preference === option.value
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "bg-background hover:bg-muted"
-                }`}
+                    ? "ring-focus rounded-xl border border-primary bg-primary/10 px-3 py-2.5 text-sm font-medium text-primary transition-colors disabled:opacity-50"
+                    : "ring-focus rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
+                }
               >
                 {t(option.labelKey)}
               </button>
@@ -409,58 +473,64 @@ export function SubscriptionPanel({
       )}
 
       {!loading && showPlans && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {Object.values(PLANS).map((plan) => (
-            <div
-              key={plan.code}
-              className="flex flex-col rounded-xl border bg-background p-4"
-            >
-              <div className="flex items-center gap-2">
-                <Crown className="h-4 w-4 text-amber-600" />
-                <div className="font-semibold">{planLabels[plan.code]}</div>
-              </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {Object.values(PLANS).map((plan) => {
+            const isCheckingOut = checkingOut === plan.code;
+            const disabled = checkingOut !== null || submittingReceipt;
 
-              <div className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
-                {effectiveMethod === "MANUAL" ? (
-                  <>
-                    <CreditCard className="h-4 w-4" />
-                    {t("priceManual", {
-                      price: formatToman(plan.manualPriceToman, locale),
-                    })}
-                  </>
-                ) : (
-                  <>
-                    <Star className="h-4 w-4 text-amber-500" />
-                    {t("starsPayment", { stars: plan.starsPrice })}
-                  </>
-                )}
-              </div>
-
-              <button
-                type="button"
-                disabled={checkingOut !== null || submittingReceipt}
-                onClick={() =>
-                  effectiveMethod === "MANUAL"
-                    ? openManualPayment(plan.code)
-                    : subscribeWithStars(plan.code)
-                }
-                className="mt-4 w-full rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-50"
+            return (
+              <div
+                key={plan.code}
+                className="flex flex-col rounded-xl border border-border/60 bg-background p-4"
               >
-                {checkingOut === plan.code
-                  ? t("connecting")
-                  : t("selectButton")}
-              </button>
-            </div>
-          ))}
+                <div className="flex items-center gap-2">
+                  <Crown className="h-4 w-4 text-amber-600" />
+                  <div className="font-semibold">{planLabels[plan.code]}</div>
+                </div>
+
+                <div className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
+                  {effectiveMethod === "MANUAL" ? (
+                    <>
+                      <CreditCard className="h-4 w-4" />
+                      {t("priceManual", {
+                        price: formatToman(plan.manualPriceToman, locale),
+                      })}
+                    </>
+                  ) : (
+                    <>
+                      <Star className="h-4 w-4 text-amber-500" />
+                      {t("starsPayment", { stars: plan.starsPrice })}
+                    </>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() =>
+                    effectiveMethod === "MANUAL"
+                      ? openManualPayment(plan.code)
+                      : subscribeWithStars(plan.code)
+                  }
+                  className="ring-focus mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {isCheckingOut && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  {isCheckingOut ? t("connecting") : t("selectButton")}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
       {!loading && !subscription && (
-        <div className="space-y-3 rounded-xl border bg-background p-4">
+        <div className="mt-4 space-y-3 rounded-xl border border-border/60 bg-background p-4">
           <h3 className="text-sm font-semibold">{t("compareTitle")}</h3>
 
-          <div className="grid grid-cols-1 gap-3 xs:grid-cols-2 sm:grid-cols-2">
-            <div className="rounded-xl bg-muted p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-muted/40 p-4">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-muted-foreground" />
                 <p className="font-semibold">{t("compareFreeTitle")}</p>
@@ -477,14 +547,14 @@ export function SubscriptionPanel({
               </ul>
             </div>
 
-            <div className="rounded-xl border border-amber-300/60 bg-amber-50 p-4">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
               <div className="flex items-center gap-2">
                 <Crown className="h-4 w-4 text-amber-600" />
-                <p className="font-semibold text-amber-900">
+                <p className="font-semibold text-amber-900 dark:text-amber-400">
                   {t("compareProTitle")}
                 </p>
               </div>
-              <ul className="mt-3 space-y-2 text-sm text-amber-900">
+              <ul className="mt-3 space-y-2 text-sm text-amber-900 dark:text-amber-400">
                 <li className="flex items-start gap-2">
                   <Check className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                   {t("compareProBusiness")}
@@ -504,7 +574,7 @@ export function SubscriptionPanel({
       )}
 
       {manualPlan && (
-        <div className="space-y-3 rounded-xl border p-4">
+        <div className="mt-4 space-y-3 rounded-xl border border-border/60 bg-background p-4">
           <div className="flex items-center justify-between gap-2">
             <h3 className="flex items-center gap-2 font-semibold">
               <CreditCard className="h-4 w-4" />
@@ -513,31 +583,32 @@ export function SubscriptionPanel({
             <button
               type="button"
               onClick={() => setManualPlan(null)}
-              className="rounded-lg p-1 text-muted-foreground hover:bg-muted"
               aria-label={t("cancelButton")}
+              className="ring-focus rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
           {manualLoading && (
-            <p className="text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
               {t("manualLoading")}
-            </p>
+            </div>
           )}
 
-          {manualInfo && !manualInfo.configured && (
+          {!manualLoading && manualInfo && !manualInfo.configured && (
             <p className="flex items-start gap-2 text-sm text-destructive">
               <X className="mt-0.5 h-4 w-4 shrink-0" />
               {t("manualNotConfigured")}
             </p>
           )}
 
-          {manualInfo && manualInfo.configured && (
-            <div className="space-y-1 rounded-lg bg-muted p-3 text-sm">
+          {!manualLoading && manualInfo && manualInfo.configured && (
+            <div className="space-y-1 rounded-lg bg-muted/40 p-3 text-sm">
               <p className="flex items-center gap-2">
                 <CreditCard className="h-4 w-4 shrink-0 text-muted-foreground" />
-                {t("cardNumber", { value: manualInfo.cardNumber })}
+                {t("cardNumber", { value: manualInfo.cardNumber || "" })}
               </p>
               {manualInfo.cardHolder && (
                 <p className="flex items-center gap-2">
@@ -559,38 +630,45 @@ export function SubscriptionPanel({
             </div>
           )}
 
-          <input
-            value={receiptReference}
-            onChange={(event) => setReceiptReference(event.target.value)}
-            placeholder={t("receiptPlaceholder")}
-            className="w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none"
-          />
+          {!manualLoading && manualInfo && manualInfo.configured && (
+            <>
+              <input
+                value={receiptReference}
+                onChange={(event) => setReceiptReference(event.target.value)}
+                placeholder={t("receiptPlaceholder")}
+                className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm outline-none"
+              />
 
-          <textarea
-            value={receiptNote}
-            onChange={(event) => setReceiptNote(event.target.value)}
-            placeholder={t("notePlaceholder")}
-            className="min-h-16 w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none"
-          />
+              <textarea
+                value={receiptNote}
+                onChange={(event) => setReceiptNote(event.target.value)}
+                placeholder={t("notePlaceholder")}
+                className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm outline-none"
+              />
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={submitReceipt}
-              disabled={submittingReceipt}
-              className="rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {submittingReceipt ? t("submitting") : t("submitButton")}
-            </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={submitReceipt}
+                  disabled={submittingReceipt}
+                  className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {submittingReceipt && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  {submittingReceipt ? t("submitting") : t("submitButton")}
+                </button>
 
-            <button
-              type="button"
-              onClick={() => setManualPlan(null)}
-              className="rounded-lg border px-3 py-2.5 text-sm font-medium"
-            >
-              {t("cancelButton")}
-            </button>
-          </div>
+                <button
+                  type="button"
+                  onClick={() => setManualPlan(null)}
+                  className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
+                >
+                  {t("cancelButton")}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </section>
