@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { isPlanCode } from "@/lib/subscription/plans";
+import { isPaymentPreference, resolvePaymentMethod } from "@/lib/subscription/payment-method";
 
 const submitSchema = z.object({
   businessId: z.string().min(1),
@@ -14,13 +15,9 @@ const submitSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     let body: unknown;
-
     try {
       body = await req.json();
     } catch {
@@ -28,13 +25,9 @@ export async function POST(req: NextRequest) {
     }
 
     const parsed = submitSchema.safeParse(body);
-
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          error: "اطلاعات ارسالی معتبر نیست.",
-          details: parsed.error.flatten(),
-        },
+        { error: "اطلاعات ارسالی معتبر نیست.", details: parsed.error.flatten() },
         { status: 400 }
       );
     }
@@ -43,17 +36,23 @@ export async function POST(req: NextRequest) {
       where: { id: parsed.data.businessId, ownerId: user.id },
       select: { id: true, country: true },
     });
-
     if (!business) {
-      return NextResponse.json(
-        { error: "کسب‌وکار پیدا نشد." },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
     }
 
-    if (business.country !== "IR") {
+    const userRecord = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { paymentPreference: true },
+    });
+    const preference =
+      userRecord?.paymentPreference && isPaymentPreference(userRecord.paymentPreference)
+        ? userRecord.paymentPreference
+        : "AUTO";
+    const method = resolvePaymentMethod(preference, business.country);
+
+    if (method !== "MANUAL") {
       return NextResponse.json(
-        { error: "این مسیر فقط برای کسب‌وکار ایرانی است." },
+        { error: "روش پرداخت شما روی Telegram Stars تنظیم شده است." },
         { status: 400 }
       );
     }
@@ -71,21 +70,11 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(
-      {
-        subscription: {
-          id: subscription.id,
-          plan: subscription.plan,
-          status: subscription.status,
-        },
-      },
+      { subscription: { id: subscription.id, plan: subscription.plan, status: subscription.status } },
       { status: 201 }
     );
   } catch (error) {
     console.error("POST /api/subscription/manual/submit failed:", error);
-
-    return NextResponse.json(
-      { error: "ثبت درخواست پرداخت ناموفق بود." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "ثبت درخواست پرداخت ناموفق بود." }, { status: 500 });
   }
 }
