@@ -9,6 +9,7 @@ import { TimeOffPanel } from "@/components/time-off-panel";
 import { PaymentMethodPanel } from "@/components/payment-method-panel";
 import { BookingsPanel } from "@/components/bookings-panel";
 import { LocaleSwitcher } from "@/components/locale-switcher";
+import { Link } from "@/i18n/navigation";
 import {
   COUNTRY_LABELS,
   CountryCode,
@@ -52,6 +53,12 @@ type Business = {
   };
 };
 
+const DEPOSIT_LABELS_KEYS = {
+  NONE: "depositNone",
+  PERCENTAGE: "depositPercentage",
+  FIXED: "depositFixed",
+} as const;
+
 function Dashboard({ user }: { user: TelegramUser }) {
   const t = useTranslations("dashboard");
   const tWizard = useTranslations("businessWizard");
@@ -60,9 +67,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const tMsg = useTranslations("messages");
 
   const depositLabels: Record<string, string> = {
-    NONE: tSvc("depositNone"),
-    PERCENTAGE: tSvc("depositPercentage"),
-    FIXED: tSvc("depositFixed"),
+    NONE: tSvc(DEPOSIT_LABELS_KEYS.NONE),
+    PERCENTAGE: tSvc(DEPOSIT_LABELS_KEYS.PERCENTAGE),
+    FIXED: tSvc(DEPOSIT_LABELS_KEYS.FIXED),
   };
 
   const [businesses, setBusinesses] = useState<Business[]>([]);
@@ -631,12 +638,12 @@ function Dashboard({ user }: { user: TelegramUser }) {
             <LocaleSwitcher />
 
             {user.isAdmin && (
-              <a
-                href="/fa/admin"
+              <Link
+                href="/admin"
                 className="rounded-lg border px-3 py-2 text-xs font-medium"
               >
                 {t("adminPanel")}
-              </a>
+              </Link>
             )}
           </div>
         </div>
