@@ -1,26 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import {
+  Building2,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  CreditCard,
+  ExternalLink,
+  FileText,
+  Hash,
+  Loader2,
+  Receipt,
+  RotateCcw,
+  ShieldCheck,
+  StickyNote,
+  User as UserIcon,
+  X,
+  XCircle,
+} from "lucide-react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { PLANS, PlanCode } from "@/lib/subscription/plans";
 import { MANUAL_PAYMENT_SETTING_KEYS } from "@/lib/admin-settings";
 
 type SettingRow = { key: string; value: string };
 
-type PendingSubscription = {
+type SubscriptionStatus = "PENDING" | "ACTIVE" | "REJECTED";
+
+type SubscriptionRow = {
   id: string;
   plan: string;
+  status: string;
   receiptReference: string | null;
   receiptNote: string | null;
+  adminNote: string | null;
   createdAt: string;
+  reviewedAt: string | null;
   businessName: string | null;
+  businessSlug: string | null;
   userName: string;
 };
+
+type FilterKey = "PENDING" | "ACTIVE" | "REJECTED";
+
+const FILTERS: FilterKey[] = ["PENDING", "ACTIVE", "REJECTED"];
+
+function formatDate(value: string, locale: string): string {
+  try {
+    const date = new Date(value);
+    const numberingLocale =
+      locale === "fa" ? "fa-IR" : locale === "ar" ? "ar-EG" : "en-US";
+    return new Intl.DateTimeFormat(numberingLocale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return value;
+  }
+}
 
 function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const t = useTranslations("admin");
   const tSub = useTranslations("subscription");
+  const locale = useLocale();
 
   const planLabels: Record<PlanCode, string> = {
     PRO_MONTHLY: tSub("planMonthly"),
@@ -40,16 +86,25 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
 
-  const [pending, setPending] = useState<PendingSubscription[]>([]);
-  const [loadingPending, setLoadingPending] = useState(true);
+  const [filter, setFilter] = useState<FilterKey>("PENDING");
+  const [rows, setRows] = useState<SubscriptionRow[]>([]);
+  const [loadingRows, setLoadingRows] = useState(true);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
 
-  const [message, setMessage] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
+
+  const [message, setMessage] = useState<{
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
 
   async function loadSettings() {
     try {
       setLoadingSettings(true);
-      const response = await fetch("/api/admin/settings", { cache: "no-store" });
+      const response = await fetch("/api/admin/settings", {
+        cache: "no-store",
+      });
       const data = await response.json();
       if (response.ok) setSettings(data.settings);
     } finally {
@@ -57,23 +112,34 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  async function loadPending() {
-    try {
-      setLoadingPending(true);
-      const response = await fetch("/api/admin/subscriptions", { cache: "no-store" });
-      const data = await response.json();
-      if (response.ok) setPending(data.subscriptions);
-    } finally {
-      setLoadingPending(false);
-    }
-  }
+  const loadRows = useCallback(
+    async (which: FilterKey) => {
+      try {
+        setLoadingRows(true);
+        const response = await fetch(
+          `/api/admin/subscriptions?status=${which}`,
+          { cache: "no-store" }
+        );
+        const data = await response.json();
+        if (response.ok) setRows(data.subscriptions || []);
+      } finally {
+        setLoadingRows(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (isAdmin) {
       loadSettings();
-      loadPending();
     }
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      loadRows(filter);
+    }
+  }, [isAdmin, filter, loadRows]);
 
   async function saveSettings() {
     try {
@@ -86,54 +152,135 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || t("saveError"));
-      setMessage(t("saved"));
+      setMessage({ kind: "ok", text: t("saved") });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : t("saveError"));
+      setMessage({
+        kind: "err",
+        text: error instanceof Error ? error.message : t("saveError"),
+      });
     } finally {
       setSavingSettings(false);
     }
   }
 
-  async function review(id: string, action: "approve" | "reject") {
+  async function review(
+    id: string,
+    action: "approve" | "reject",
+    note?: string
+  ) {
     try {
       setReviewingId(id);
       setMessage(null);
       const response = await fetch(`/api/admin/subscriptions/${id}/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({
+          action,
+          note: note && note.trim() ? note.trim() : null,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || t("reviewError"));
-      await loadPending();
-      setMessage(action === "approve" ? t("approved") : t("rejected"));
+      setRejectingId(null);
+      setRejectNote("");
+      await loadRows(filter);
+      setMessage({
+        kind: "ok",
+        text: action === "approve" ? t("approved") : t("rejected"),
+      });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : t("reviewError"));
+      setMessage({
+        kind: "err",
+        text: error instanceof Error ? error.message : t("reviewError"),
+      });
     } finally {
       setReviewingId(null);
     }
   }
 
   if (!isAdmin) {
-    return <div className="p-8 text-center text-sm text-muted-foreground">{t("noAccess")}</div>;
+    return (
+      <div className="mx-auto flex min-h-[60vh] w-full max-w-3xl items-center justify-center px-4">
+        <div className="rounded-2xl border border-border/60 bg-card p-6 text-center shadow-soft">
+          <ShieldCheck className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">{t("noAccess")}</p>
+        </div>
+      </div>
+    );
   }
 
+  const filterLabels: Record<FilterKey, string> = {
+    PENDING: t("filterPending"),
+    ACTIVE: t("filterApproved"),
+    REJECTED: t("filterRejected"),
+  };
+
+  const filterEmpty: Record<FilterKey, string> = {
+    PENDING: t("pendingEmpty"),
+    ACTIVE: t("filterEmptyApproved"),
+    REJECTED: t("filterEmptyRejected"),
+  };
+
+  const pendingCount =
+    filter === "PENDING" ? rows.length : undefined;
+
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
-      <h1 className="text-2xl font-bold">{t("title")}</h1>
+    <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
+      {/* Header */}
+      <header className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground">
+            <ShieldCheck className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              {t("title")}
+            </h1>
+          </div>
+        </div>
+      </header>
 
-      {message && <div className="rounded-xl border bg-card p-4 text-sm">{message}</div>}
+      {/* Message */}
+      {message && (
+        <div
+          className={`flex items-start gap-2 rounded-xl border p-3.5 text-sm shadow-soft ${
+            message.kind === "ok"
+              ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400"
+              : "border-destructive/30 bg-destructive/5 text-destructive"
+          }`}
+        >
+          {message.kind === "ok" ? (
+            <Check className="mt-0.5 h-4 w-4 shrink-0" />
+          ) : (
+            <X className="mt-0.5 h-4 w-4 shrink-0" />
+          )}
+          <span>{message.text}</span>
+        </div>
+      )}
 
-      <section className="space-y-3 rounded-2xl border bg-card p-5 shadow-sm">
-        <h2 className="text-xl font-bold">{t("paymentInfoTitle")}</h2>
+      {/* Payment settings */}
+      <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
+        <header className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <CreditCard className="h-4 w-4" />
+          </span>
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">
+              {t("paymentInfoTitle")}
+            </h2>
+          </div>
+        </header>
 
         {loadingSettings ? (
-          <p className="text-sm text-muted-foreground">{t("loading")}</p>
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t("loading")}
+          </div>
         ) : (
-          <>
+          <div className="mt-4 space-y-3">
             {settings.map((setting, index) => (
               <div key={setting.key}>
-                <label className="mb-1 block text-xs text-muted-foreground">
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {settingLabels[setting.key] || setting.key}
                 </label>
                 <input
@@ -143,7 +290,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                     next[index] = { ...setting, value: event.target.value };
                     setSettings(next);
                   }}
-                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                  className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
                 />
               </div>
             ))}
@@ -152,67 +299,275 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
               type="button"
               onClick={saveSettings}
               disabled={savingSettings}
-              className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             >
+              {savingSettings && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
               {savingSettings ? t("saving") : t("saveButton")}
             </button>
-          </>
-        )}
-      </section>
-
-      <section className="space-y-3 rounded-2xl border bg-card p-5 shadow-sm">
-        <h2 className="text-xl font-bold">{t("pendingTitle", { count: pending.length })}</h2>
-
-        {loadingPending ? (
-          <p className="text-sm text-muted-foreground">{t("loading")}</p>
-        ) : pending.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("pendingEmpty")}</p>
-        ) : (
-          <div className="space-y-3">
-            {pending.map((sub) => (
-              <div key={sub.id} className="rounded-xl border p-4 text-sm">
-                <p className="font-semibold">
-                  {sub.userName} — {sub.businessName || t("noBusiness")}
-                </p>
-                <p className="mt-1">{t("planLabel", { plan: planLabels[sub.plan as PlanCode] || sub.plan })}</p>
-                <p className="mt-1 text-muted-foreground">
-                  {t("receiptLabel", { ref: sub.receiptReference || "" })}
-                </p>
-                {sub.receiptNote && (
-                  <p className="mt-1 text-muted-foreground">{t("noteLabel", { note: sub.receiptNote })}</p>
-                )}
-
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => review(sub.id, "approve")}
-                    disabled={reviewingId === sub.id}
-                    className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
-                  >
-                    {t("approveButton")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => review(sub.id, "reject")}
-                    disabled={reviewingId === sub.id}
-                    className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive disabled:opacity-50"
-                  >
-                    {t("rejectButton")}
-                  </button>
-                </div>
-              </div>
-            ))}
           </div>
         )}
       </section>
+
+      {/* Subscriptions with filter */}
+      <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
+        <header className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+              <Receipt className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">
+                {t("pendingTitle", { count: pendingCount ?? rows.length })}
+              </h2>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => loadRows(filter)}
+            disabled={loadingRows}
+            className="ring-focus rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            aria-label={t("loading")}
+          >
+            <RotateCcw
+              className={`h-4 w-4 ${loadingRows ? "animate-spin" : ""}`}
+            />
+          </button>
+        </header>
+
+        {/* Filter pills */}
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {FILTERS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              className={`ring-focus rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                filter === key
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border/60 bg-background hover:bg-muted"
+              }`}
+            >
+              {filterLabels[key]}
+            </button>
+          ))}
+        </div>
+
+        {loadingRows ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t("loading")}
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center">
+            <CheckCircle2 className="h-5 w-5 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              {filterEmpty[filter]}
+            </p>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {rows.map((sub) => {
+              const planLabel =
+                planLabels[sub.plan as PlanCode] || sub.plan;
+              const isPending = sub.status === "PENDING";
+              const statusBadge =
+                sub.status === "ACTIVE"
+                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : sub.status === "REJECTED"
+                  ? "bg-destructive/10 text-destructive <"
+                  : "bg-amber-500/span10 text-amber-700>
+ dark:text-amber-400";
+
+                                       return (
+                < {article
+                  key={sub.idt}
+                  className="rounded-xl border border("-border/60 bg-background p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="truncate font-semibold">
+                          {sub.userName}
+                        </h3>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge}`}
+                        >
+                          {filterLabels[
+                            sub.status as FilterKey
+                          ] || sub.status}
+                        </span>
+                      </div>
+
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <Building2 className="h-3 w-3" />
+                          {sub.businessName || t("noBusiness")}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <CreditCard className="h-3 w-3" />
+                          {planLabel}
+                        </span>
+                      </div>
+                    </div>
+
+                    {sub.businessSlug && (
+                      <a
+                        href={`/book/${sub.businessSlug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ring-focus shrink-0 rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted"
+                        aria-label={t("viewBusiness")}
+                        title={t("viewBusiness")}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                  </div>
+
+                  <dl className="mt-3 space-y-1.5 text-xs">
+                    <div className="flex items-start gap-2 text-muted-foreground">
+                      <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        {t("submittedAt", {
+                          date: formatDate(sub.createdAt, locale),
+                        })}
+                      </span>
+                    </div>
+
+                    {sub.receiptReference && (
+                      <div className="flex items-start gap-2 text-muted-foreground">
+                        <Hash className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span className="break-all">
+                          {t("receiptLabel", { ref: sub.receiptReference })}
+                        </span>
+                      </div>
+                    )}
+
+                    {sub.receiptNote && (
+                      <div className="flex items-start gap-2 text-muted-foreground">
+                        <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span className="break-words">
+                          {t("noteLabel", { note: sub.receiptNote })}
+                        </span>
+                      </div>
+                    )}
+
+                    {sub.reviewedAt && (
+                      <div className="flex items-start gap-2 text-muted-foreground">
+                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                       reviewedAt", {
+                            date: formatDate(sub.reviewedAt, locale),
+                          })}
+                        </span>
+                      </div>
+                    )}
+
+                    {sub.adminNote && (
+                      <div className="flex items-start gap-2 text-muted-foreground">
+                        <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span className="break-words">
+                          {t("adminNote", { note: sub.adminNote })}
+                        </span>
+                      </div>
+                    )}
+                  </dl>
+
+                  {isPending && (
+                    <>
+                      {rejectingId === sub.id ? (
+                        <div className="mt-3 space-y-2">
+                          <input
+                            value={rejectNote}
+                            onChange={(event) =>
+                              setRejectNote(event.target.value)
+                            }
+                            placeholder={t("rejectNotePlaceholder")}
+                            className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                review(sub.id, "reject", rejectNote)
+                              }
+                              disabled={reviewingId === sub.id}
+                              className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                            >
+                              {reviewingId === sub.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <XCircle className="h-3.5 w-3.5" />
+                              )}
+                              {t("rejectButton")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRejectingId(null);
+                                setRejectNote("");
+                              }}
+                              className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                            >
+                              {tSub("cancelButton")}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => review(sub.id, "approve")}
+                            disabled={reviewingId === sub.id}
+                            className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                          >
+                            {reviewingId === sub.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            )}
+                            {t("approveButton")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRejectingId(sub.id);
+                              setRejectNote("");
+                            }}
+                            disabled={reviewingId === sub.id}
+                            className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                            {t("rejectButton")}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Footer info (icon-only legend, subtle) */}
+      <div className="flex items-center justify-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
+        <UserIcon className="h-3 w-3" />
+        <span>Bookora Admin</span>
+      </div>
     </div>
   );
 }
 
 export default function AdminPage() {
   return (
-    <main className="min-h-screen px-4">
-      <TelegramAuthGate>{(user) => <AdminDashboard isAdmin={user.isAdmin} />}</TelegramAuthGate>
+    <main className="min-h-screen">
+      <TelegramAuthGate>
+        {(user) => <AdminDashboard isAdmin={user.isAdmin} />}
+      </TelegramAuthGate>
     </main>
   );
 }
