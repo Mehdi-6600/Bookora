@@ -335,6 +335,9 @@
     "bizFilterArchived": "بایگانی",
     "bizServices": "سرویس",
     "bizBookings": "رزرو",
-    "bizOwner": "مالک"
+    "bizOwner": "مالک",
+    "adminViewBanner": "حالت ادمین — شما در حال ویرایش کسب‌وکار هستید",
+    "backToAdmin": "بازگشت به پنل ادمین",
+    "enterPanelButton": "ورود به پنل"
   }
 }
