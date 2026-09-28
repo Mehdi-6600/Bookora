@@ -24,9 +24,12 @@ function computeDeposit(
   depositValue: number,
   price: number
 ): number {
-  if (depositType === "PERCENTAGE")
+  if (depositType === "PERCENTAGE") {
     return Math.round(((price * depositValue) / 100) * 100) / 100;
-  if (depositType === "FIXED") return Math.min(depositValue, price);
+  }
+  if (depositType === "FIXED") {
+    return Math.min(depositValue, price);
+  }
   return 0;
 }
 
@@ -86,9 +89,8 @@ export async function POST(
     }
 
     const startAt = new Date(parsed.data.startAt);
-    const endAt = new Date(
-      startAt.getTime() + service.durationMinutes * 60000
-    );
+    const durationMs = service.durationMinutes * 60000;
+    const endAt = new Date(startAt.getTime() + durationMs);
 
     if (startAt.getTime() <= Date.now()) {
       return NextResponse.json(
@@ -99,9 +101,6 @@ export async function POST(
 
     const localDate = toZonedTime(startAt, business.timezone);
     const dateStr = format(localDate, "yyyy-MM-dd");
-    // FIX: getUTCDay روی Date برگشته از toZonedTime، روز هفته در
-    // timezone کسب‌وکار را می‌دهد. getDay روز هفته در timezone سرور
-    // (UTC در Vercel) را می‌داد و باعث جابه‌جایی روزها می‌شد.
     const dayOfWeek = localDate.getUTCDay();
 
     const workingHour = await prisma.workingHour.findUnique({
@@ -128,34 +127,39 @@ export async function POST(
       business.timezone
     );
 
-    const [timeOffs, existingBookings] = await Promise.all([
-      prisma.timeOff.findMany({
-        where: {
-          businessId: business.id,
-          startAt: { lte: dayEnd },
-          endAt: { gte: dayStart },
-        },
-      }),
-      prisma.booking.findMany({
-        where: {
-          businessId: business.id,
-          status: { not: "CANCELLED" },
-          startAt: { lte: dayEnd },
-          endAt: { gte: dayStart },
-        },
-      }),
-    ]);
+    const timeOffs = await prisma.timeOff.findMany({
+      where: {
+        businessId: business.id,
+        startAt: { lte: dayEnd },
+        endAt: { gte: dayStart },
+      },
+    });
 
-    const busyRanges = [
-      ...timeOffs.map((t) => ({ start: t },
-.startAt, end: t.endAt      })),
-      ...existingBookings.map((b) => ({ start: b.startAt, end: b.endAt })),
-    ];
+    const existingBookings = await prisma.booking.findMany({
+      where: {
+        businessId: business.id,
+        status: { not: "CANCELLED" },
+        startAt: { lte: dayEnd },
+        endAt: { gte: dayStart },
+      },
+    });
+
+    const timeOffRanges = timeOffs.map((t) => ({
+      start: t.startAt,
+      end: t.endAt,
+    }));
+
+    const bookingRanges = existingBookings.map((b) => ({
+      start: b.startAt,
+      end: b.endAt,
+    }));
+
+    const busyRanges = [...timeOffRanges, ...bookingRanges];
 
     const validSlots = computeAvailableSlots({
       dateStr,
-      timezone: business.time datazone:,
-      openTime: workingHour.openTime {,
+      timezone: business.timezone,
+      openTime: workingHour.openTime,
       closeTime: workingHour.closeTime,
       breakStart: workingHour.breakStart,
       breakEnd: workingHour.breakEnd,
@@ -163,9 +167,10 @@ export async function POST(
       busyRanges,
     });
 
-    const isValid = validSlots.some(
-      (slot) => Math.abs(slot.getTime() - startAt.getTime()) < 1000
-    );
+    const isValid = validSlots.some((slot) => {
+      return Math.abs(slot.getTime() - startAt.getTime()) < 1000;
+    });
+
     if (!isValid) {
       return NextResponse.json(
         { error: "این زمان دیگر آزاد نیست، لطفاً زمان دیگری انتخاب کنید." },
@@ -174,12 +179,15 @@ export async function POST(
     }
 
     const price = Number(service.price);
+    const depositValue = Number(service.depositValue);
     const depositDue = computeDeposit(
       service.depositType,
-      Number(service.depositValue),
+      depositValue,
       price
     );
     const requiresDeposit = depositDue > 0;
+
+    let createdBookingId: string | null = null;
 
     try {
       const result = await prisma.$transaction(async (tx) => {
@@ -191,7 +199,16 @@ export async function POST(
             endAt: { gt: startAt },
           },
         });
-        if (conflict) throw new Error("SLOT_TAKEN");
+        if (conflict) {
+          throw new Error("SLOT_TAKEN");
+        }
+
+        const initialStatus = requiresDeposit
+          ? "PENDING_PAYMENT"
+          : "CONFIRMED";
+        const initialPaymentStatus = requiresDeposit
+          ? "PENDING"
+          : "NOT_REQUIRED";
 
         const booking = await tx.booking.create({
           data: {
@@ -203,7 +220,7 @@ export async function POST(
             startAt,
             endAt,
             timezone: business.timezone,
-            status: requiresDeposit ? "PENDING_PAYMENT" : "CONFIRMED",
+            status: initialStatus,
             servicePrice: price,
             finalPrice: price,
             depositType: service.depositType,
@@ -211,7 +228,7 @@ export async function POST(
             depositDue,
             remainingAmount: price - depositDue,
             currency: business.currency,
-            paymentStatus: requiresDeposit ? "PENDING" : "NOT_REQUIRED",
+            paymentStatus: initialPaymentStatus,
           },
         });
 
@@ -230,6 +247,8 @@ export async function POST(
         return booking;
       });
 
+      createdBookingId = result.id;
+
       let paymentMethod = null;
       if (requiresDeposit) {
         paymentMethod = await prisma.paymentMethod.findFirst({
@@ -237,45 +256,57 @@ export async function POST(
         });
       }
 
-      // فقط رزروهای بدون بیعانه بلافاصله به صاحب کسب‌وکار اطلاع داده می‌شوند.
-      // رزروهای دارای بیعانه، فقط پس از ثبت receipt توسط مشتری پیام می‌فرستند.
       if (!requiresDeposit) {
         const localTime = toZonedTime(startAt, business.timezone);
         const timeLabel = format(localTime, "yyyy-MM-dd HH:mm");
+        const priceLabel = formatPrice(price, business.currency);
+
+        const lines = [
+          `📅 رزرو جدید در ${business.name}`,
+          `سرویس: ${service.name}`,
+          `مشتری: ${parsed.data.customerName} (${parsed.data.customerPhone})`,
+          `زمان: ${timeLabel}`,
+          `مبلغ: ${priceLabel}`,
+        ];
 
         void notifyUser(
           business.owner.telegramId,
-          `📅 رزرو جدید در ${business.name}\n` +
-            `سرویس: ${service.name}\n` +
-            `مشتری: ${parsed.data.customerName} (${parsed.data.customerPhone})\n` +
-            `زمان: ${timeLabel}\n` +
-            `مبلغ: ${formatPrice(price, business.currency)}`
+          lines.join("\n")
         );
       }
 
+      const bookingPayload = {
+        id: result.id,
+        requiresDeposit,
+        depositDue,
+        currency: business.currency,
+      };
+
+      const paymentMethodPayload = paymentMethod
+        ? {
+            accountHolder: paymentMethod.accountHolder,
+            bankName: paymentMethod.bankName,
+            cardNumber: paymentMethod.cardNumber,
+            instructions: paymentMethod.instructions,
+          }
+        : null;
+
       return NextResponse.json(
         {
-          booking: {
-            id: result.id,
-            requiresDeposit,
-            depositDue,
-            currency: business.currency,
-          },
-          paymentMethod: paymentMethod
-            ? {
-                accountHolder: paymentMethod.accountHolder,
-                bankName: paymentMethod.bankName,
-                cardNumber: paymentMethod.cardNumber,
-                instructions: paymentMethod.instructions,
-              }
-            : null,
+          booking: bookingPayload,
+          paymentMethod: paymentMethodPayload,
         },
         { status: 201 }
       );
     } catch (txError) {
-      if (txError instanceof Error && txError.message === "SLOT_TAKEN") {
+      if (
+        txError instanceof Error &&
+        txError.message === "SLOT_TAKEN"
+      ) {
         return NextResponse.json(
-          { error: "این زمان همین الان توسط شخص دیگری رزرو شد." },
+          {
+            error: "این زمان همین الان توسط شخص دیگری رزرو شد.",
+          },
           { status: 409 }
         );
       }
