@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
+import { serviceOwnerFilter, isPriceOnlyAdminEdit } from "@/lib/auth/ownership";
 
 const updateServiceSchema = z
   .object({
@@ -54,10 +55,7 @@ export async function PUT(
     }
 
     const existing = await prisma.service.findFirst({
-      where: {
-        id,
-        business: { ownerId: user.id },
-      },
+      where: { id, ...serviceOwnerFilter(user) },
       select: { id: true },
     });
 
@@ -65,6 +63,30 @@ export async function PUT(
       return NextResponse.json({ error: "سرویس پیدا نشد." }, { status: 404 });
     }
 
+    // ---- Admin: فقط price قابل تغییر است ----
+    if (isPriceOnlyAdminEdit(user)) {
+      const service = await prisma.service.update({
+        where: { id },
+        data: { price: parsed.data.price },
+      });
+
+      return NextResponse.json({
+        service: {
+          id: service.id,
+          businessId: service.businessId,
+          name: service.name,
+          description: service.description,
+          price: service.price.toString(),
+          currency: service.currency,
+          durationMinutes: service.durationMinutes,
+          active: service.active,
+          depositType: service.depositType,
+          depositValue: service.depositValue.toString(),
+        },
+      });
+    }
+
+    // ---- کاربر عادی: رفتار قبلی ----
     const {
       name,
       description,
@@ -122,6 +144,14 @@ export async function DELETE(
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // ---- Admin: حذف مسدود است ----
+    if (user.isAdmin) {
+      return NextResponse.json(
+        { error: "ادمین اجازه‌ی حذف سرویس را ندارد." },
+        { status: 403 }
+      );
     }
 
     const existing = await prisma.service.findFirst({
