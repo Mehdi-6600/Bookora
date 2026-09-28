@@ -44,12 +44,24 @@ export async function POST(
     }
 
     const booking = await prisma.booking.findFirst({
-      where: { id, customerPhone: parsed.data.customerPhone },
+      where: {
+        id,
+        customerPhone: parsed.data.customerPhone,
+      },
       include: {
-        business: { include: { owner: { select: { telegramId: true } } } },
-        service: { select: { name: true } },
+        business: {
+          include: {
+            owner: {
+              select: { telegramId: true },
+            },
+          },
+        },
+        service: {
+          select: { name: true },
+        },
       },
     });
+
     if (!booking) {
       return NextResponse.json(
         { error: "رزرو پیدا نشد یا شماره تلفن اشتباه است." },
@@ -57,10 +69,11 @@ export async function POST(
       );
     }
 
-    // FIX: دیگر فیلتر status=PENDING را در کوئری نمی‌گذاریم تا
-    // اگر پرداخت قبلاً رد/تأیید شده بود، پیام واضح‌تری به کاربر بدهیم.
     const payment = await prisma.payment.findFirst({
-      where: { bookingId: booking.id, type: "DEPOSIT" },
+      where: {
+        bookingId: booking.id,
+        type: "DEPOSIT",
+      },
     });
 
     if (!payment) {
@@ -81,23 +94,37 @@ export async function POST(
     }
 
     await prisma.payment.update({
-      where: { id: payment.id transactionReference: parsed.data.transactionReference },
+      where: { id: payment.id },
+      data: {
+        transactionReference: parsed.data.transactionReference,
+      },
     });
 
-    // پیام به صاحب کسب‌وکار: مشتری receipt فرستاده و منتظر تأیید است.
     const localTime = toZonedTime(booking.startAt, booking.timezone);
     const timeLabel = format(localTime, "yyyy-MM-dd HH:mm");
+    const amountLabel = formatPrice(
+      Number(payment.amount),
+      payment.currency
+    );
+    const customerLabel =
+      booking.customerName + " (" + booking.customerPhone + ")";
+
+    const lines = [
+      "💳 بیعانه پرداخت شد — در انتظار تأیید شما",
+      "",
+      `کسب‌وکار: ${booking.business.name}`,
+      `سرویس: ${booking.service.name}`,
+      `مشتری: ${customerLabel}`,
+      `زمان نوبت: ${timeLabel}`,
+      `مبلغ بیعانه: ${amountLabel}`,
+      `کد واریز / شناسه پرداخت: ${parsed.data.transactionReference}`,
+      "",
+      "برای تأیید یا رد، به بخش «رزروها» در Bookora مراجعه کنید.",
+    ];
 
     void notifyUser(
       booking.business.owner.telegramId,
-      `💳 بیعانه پرداخت شد — در انتظار تأیید شما\n\n` +
-        `کسب‌وکار: ${booking.business.name}\n` +
-        `سرویس: ${booking.service.name}\n` +
-        `مشتری: ${booking.customerName} (${booking.customerPhone})\n` +
-        `زمان نوبت: ${timeLabel}\n` +
-        `مبلغ بیعانه: ${formatPrice(Number(payment.amount), payment.currency)}\n` +
-        `کد واریز / شناسه پرداخت: ${parsed.data.transactionReference}\n\n` +
-        `برای تأیید یا رد، به بخش «رزروها» در Bookora مراجعه کنید.`
+      lines.join("\n")
     );
 
     return NextResponse.json({ submitted: true });
