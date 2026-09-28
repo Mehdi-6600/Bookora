@@ -312,6 +312,18 @@
     "reviewedAt": "تمت المراجعة {date}",
     "adminNote": "ملاحظة الإدارة: {note}",
     "viewBusiness": "فتح النشاط",
-    "rejectNotePlaceholder": "سبب الرفض (اختياري)"
+    "rejectNotePlaceholder": "سبب الرفض (اختياري)",
+    "statsTitle": "نظرة عامة",
+    "statUsers": "المستخدمون",
+    "statBusinesses": "الأنشطة التجارية",
+    "statBookings": "الحجوزات",
+    "statSubsActive": "اشتراكات نشطة",
+    "statSubsPending": "بانتظار المراجعة",
+    "statBookingsPendingPayment": "حجوزات بانتظار الدفع",
+    "statPaymentsPendingReview": "مدفوعات للمراجعة",
+    "statLast7d": "آخر 7 أيام",
+    "statActive": "نشط",
+    "statArchived": "مؤرشف",
+    "statTotal": "الإجمالي"
   }
 }
