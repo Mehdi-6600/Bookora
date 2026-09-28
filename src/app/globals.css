@@ -58,23 +58,22 @@
   }
 
   html {
-    /* از باز شدن زوم دو-انگشتی و کش‌خوردن ناخواسته‌ی صفحه داخل WebView تلگرام جلوگیری می‌کند. */
     touch-action: manipulation;
+    /* وقتی کیبورد بالا می‌آید و یک Input فوکوس می‌شود، این فاصله باعث می‌شود
+       Input درست بالای کیبورد بنشیند، نه چسبیده به لبه‌ی پایین صفحه‌ی مرئی. */
+    scroll-padding-bottom: 80px;
   }
 
   body {
     @apply bg-background text-foreground;
-    /* فاصله از Notch/Dynamic Island بالا و Home Indicator پایین در گوشی‌های امروزی. */
     padding-top: var(--safe-top);
     padding-bottom: var(--safe-bottom);
-    /* جلوگیری از پرش صفحه هنگام Scroll بیش‌ازحد در iOS Safari/WebView. */
     overscroll-behavior-y: contain;
   }
 
   input,
   select,
   textarea {
-    /* جلوگیری از زوم خودکار Safari روی iOS وقتی فونت اینپوت زیر 16px باشد. */
     font-size: 16px;
   }
 }
