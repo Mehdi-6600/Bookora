@@ -24,6 +24,9 @@
     --input: 240 5.9% 90%;
     --ring: 240 10% 3.9%;
     --radius: 0.5rem;
+
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .dark {
@@ -53,7 +56,25 @@
   * {
     @apply border-border;
   }
+
+  html {
+    /* از باز شدن زوم دو-انگشتی و کش‌خوردن ناخواسته‌ی صفحه داخل WebView تلگرام جلوگیری می‌کند. */
+    touch-action: manipulation;
+  }
+
   body {
     @apply bg-background text-foreground;
+    /* فاصله از Notch/Dynamic Island بالا و Home Indicator پایین در گوشی‌های امروزی. */
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    /* جلوگیری از پرش صفحه هنگام Scroll بیش‌ازحد در iOS Safari/WebView. */
+    overscroll-behavior-y: contain;
+  }
+
+  input,
+  select,
+  textarea {
+    /* جلوگیری از زوم خودکار Safari روی iOS وقتی فونت اینپوت زیر 16px باشد. */
+    font-size: 16px;
   }
 }
