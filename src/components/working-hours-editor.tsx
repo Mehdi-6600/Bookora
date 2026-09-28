@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { Check, Clock, Loader2 } from "lucide-react";
 
 type WorkingHour = {
   dayOfWeek: number;
@@ -163,82 +164,144 @@ export function WorkingHoursEditor({ businessId }: { businessId: string }) {
     }
   }
 
+  const enabledCount = days.filter((day) => day.enabled).length;
+
   return (
-    <section className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
-      <div>
-        <h2 className="text-xl font-bold">{t("title")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("subtitle")}</p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {t("businessId", { id: businessId })}
-        </p>
-      </div>
+    <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
+      <header className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <Clock className="h-4 w-4" />
+          </span>
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">{t("title")}</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">{t("subtitle")}</p>
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+          {enabledCount} / 7
+        </span>
+      </header>
+
+      <p className="mt-3 break-all text-[11px] text-muted-foreground/80">
+        {t("businessId", { id: businessId })}
+      </p>
 
       {loading && (
-        <div className="rounded-xl border bg-background p-3 text-sm text-muted-foreground">
+        <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
           {t("loading")}
         </div>
       )}
 
       {error && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-          <p className="text-sm text-destructive">{error}</p>
+        <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          {error}
         </div>
       )}
 
       {message && (
-        <div className="rounded-xl border bg-background p-3 text-sm">{message}</div>
+        <div className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-400">
+          <Check className="h-4 w-4 shrink-0" />
+          {message}
+        </div>
       )}
 
-      <div className="space-y-3">
-        {days.map((day, index) => (
-          <div key={day.dayOfWeek} className="rounded-xl border bg-background p-4">
-            <div className="flex items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  checked={day.enabled}
-                  onChange={(e) => updateDay(index, { enabled: e.target.checked })}
-                  className="h-4 w-4"
-                />
-                {dayLabels[day.dayOfWeek]}
-              </label>
-              <span className="text-xs text-muted-foreground">
-                {day.enabled ? t("active") : t("closed")}
-              </span>
-            </div>
+      <div className="mt-4 space-y-2">
+        {days.map((day, index) => {
+          const active = day.enabled;
+          return (
+            <div
+              key={day.dayOfWeek}
+              className={`rounded-xl border p-3 transition-colors ${
+                active
+                  ? "border-border/60 bg-background"
+                  : "border-border/40 bg-muted/20"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex flex-1 cursor-pointer items-center gap-3">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={active}
+                    onClick={() => updateDay(index, { enabled: !active })}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ring-focus ${
+                      active ? "bg-primary" : "bg-muted-foreground/30"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-background shadow transition-transform ${
+                        active
+                          ? "translate-x-4 rtl:-translate-x-4"
+                          : "translate-x-0.5 rtl:-translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                  <span
+                    className={`text-sm ${
+                      active
+                        ? "font-semibold text-foreground"
+                        : "font-medium text-muted-foreground"
+                    }`}
+                  >
+                    {dayLabels[day.dayOfWeek]}
+                  </span>
+                </label>
 
-            {day.enabled && (
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <label className="block text-xs">
-                  <span className="mb-1 block text-muted-foreground">{t("start")}</span>
-                  <input
-                    type="time"
-                    value={day.openTime}
-                    onChange={(e) => updateDay(index, { openTime: e.target.value })}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-                  />
-                </label>
-                <label className="block text-xs">
-                  <span className="mb-1 block text-muted-foreground">{t("end")}</span>
-                  <input
-                    type="time"
-                    value={day.closeTime}
-                    onChange={(e) => updateDay(index, { closeTime: e.target.value })}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-                  />
-                </label>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    active
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {active ? t("active") : t("closed")}
+                </span>
               </div>
-            )}
-          </div>
-        ))}
+
+              {active && (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <label className="block text-xs">
+                    <span className="mb-1 block text-muted-foreground">
+                      {t("start")}
+                    </span>
+                    <input
+                      type="time"
+                      value={day.openTime}
+                      onChange={(e) =>
+                        updateDay(index, { openTime: e.target.value })
+                      }
+                      className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm tabular outline-none"
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="mb-1 block text-muted-foreground">
+                      {t("end")}
+                    </span>
+                    <input
+                      type="time"
+                      value={day.closeTime}
+                      onChange={(e) =>
+                        updateDay(index, { closeTime: e.target.value })
+                      }
+                      className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm tabular outline-none"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <button
         type="button"
         onClick={save}
         disabled={saving || loading || !businessId}
-        className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
+        className="ring-focus mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
       >
+        {saving && <Loader2 className="h-4 w-4 animate-spin" />}
         {saving ? t("saving") : t("saveButton")}
       </button>
     </section>
