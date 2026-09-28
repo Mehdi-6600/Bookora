@@ -45,7 +45,8 @@
     "friend": "friend",
     "subtitle": "Manage your business and Bookora bookings",
     "adminPanel": "Admin panel",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "addBusiness": "New business"
   },
   "businessWizard": {
     "countryQuestion": "Where is your business located?",
@@ -112,6 +113,7 @@
   "messages": {
     "businessCreated": "Business created successfully.",
     "businessCreateError": "Failed to create business.",
+    "businessSubscriptionRequired": "To create more than one business, you need a subscription first. Choose a plan below.",
     "businessEditError": "Failed to update business.",
     "businessEdited": "Business updated.",
     "businessEditedCurrency": "Business updated. The currency has changed going forward.",
@@ -238,9 +240,10 @@
     "activePlan": "Active plan: {plan}",
     "expiresAt": "Until {date}",
     "pendingNotice": "Your payment request for the {plan} plan is submitted and awaiting admin approval.",
-    "manualPayment": "Card transfer payment",
+    "manualPayment": "Card transfer",
     "starsPayment": "{stars} ⭐",
-    "selectButton": "Select",
+    "priceManual": "{price} Toman",
+    "selectButton": "Buy",
     "connecting": "Connecting...",
     "manualPaymentTitle": "Pay for {plan}",
     "manualLoading": "Loading...",
@@ -259,7 +262,20 @@
     "submitError": "Failed to submit request.",
     "loadError": "Failed to load subscription status",
     "planMonthly": "Pro Monthly",
-    "planYearly": "Pro Yearly"
+    "planYearly": "Pro Yearly",
+    "preferenceLabel": "Subscription payment method",
+    "preferenceAuto": "Automatic (by country)",
+    "preferenceManual": "Always card transfer",
+    "preferenceStars": "Always Stars",
+    "preferenceSaved": "Payment method saved.",
+    "compareTitle": "Why upgrade?",
+    "compareFreeTitle": "Free",
+    "compareProTitle": "Pro",
+    "compareFreeBusiness": "1 business",
+    "compareProBusiness": "Unlimited businesses",
+    "compareFreeSupport": "Standard support",
+    "compareProSupport": "Priority support",
+    "compareProBadge": "No limits on bookings or services"
   },
   "admin": {
     "title": "Admin panel",
