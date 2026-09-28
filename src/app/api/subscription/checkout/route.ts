@@ -3,8 +3,15 @@ import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { getBot } from "@/lib/telegram/bot";
-import { PLANS, buildInvoicePayload, isPlanCode } from "@/lib/subscription/plans";
-import { isPaymentPreference, resolvePaymentMethod } from "@/lib/subscription/payment-method";
+import {
+  PLANS,
+  buildInvoicePayload,
+  isPlanCode,
+} from "@/lib/subscription/plans";
+import {
+  isPaymentPreference,
+  resolvePaymentMethod,
+} from "@/lib/subscription/payment-method";
 
 const checkoutSchema = z.object({
   plan: z.string().refine(isPlanCode, "پلن نامعتبر است."),
@@ -14,7 +21,9 @@ const checkoutSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     let body: unknown;
     try {
@@ -25,7 +34,10 @@ export async function POST(req: NextRequest) {
 
     const parsed = checkoutSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: "اطلاعات پرداخت نامعتبر است." }, { status: 400 });
+      return NextResponse.json(
+        { error: "اطلاعات پرداخت نامعتبر است." },
+        { status: 400 }
+      );
     }
 
     const business = await prisma.business.findFirst({
@@ -33,7 +45,10 @@ export async function POST(req: NextRequest) {
       select: { id: true, country: true },
     });
     if (!business) {
-      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
+      return NextResponse.json(
+        { error: "کسب‌وکار پیدا نشد." },
+        { status: 404 }
+      );
     }
 
     const userRecord = await prisma.user.findUnique({
@@ -41,7 +56,8 @@ export async function POST(req: NextRequest) {
       select: { paymentPreference: true },
     });
     const preference =
-      userRecord?.paymentPreference && isPaymentPreference(userRecord.paymentPreference)
+      userRecord?.paymentPreference &&
+      isPaymentPreference(userRecord.paymentPreference)
         ? userRecord.paymentPreference
         : "AUTO";
     const method = resolvePaymentMethod(preference, business.country);
@@ -54,20 +70,72 @@ export async function POST(req: NextRequest) {
     }
 
     const plan = PLANS[parsed.data.plan as keyof typeof PLANS];
-    const bot = getBot();
 
-    const invoiceLink = await bot.api.createInvoiceLink(
-      plan.titleEn,
-      plan.titleEn,
-      buildInvoicePayload(plan.code, user.id),
-      "",
-      "XTR",
-      [{ label: plan.titleEn, amount: plan.starsPrice }]
-    );
+    let bot;
+    try {
+      bot = getBot();
+    } catch (botError) {
+      console.error(
+        "POST /api/subscription/checkout: getBot failed",
+        botError
+      );
+      return NextResponse.json(
+        { error: "ربات تلگرام در دسترس نیست." },
+        { status: 500 }
+      );
+    }
+
+    if (!bot) {
+      console.error("POST /api/subscription/checkout: bot is undefined");
+      return NextResponse.json(
+        { error: "ربات تلگرام در دسترس نیست." },
+        { status: 500 }
+      );
+    }
+
+    let invoiceLink: string;
+    try {
+      invoiceLink = await bot.api.createInvoiceLink(
+        plan.titleEn,
+        plan.titleEn,
+        buildInvoicePayload(plan.code, user.id),
+        "",
+        "XTR",
+        [{ label: plan.titleEn, amount: plan.starsPrice }]
+      );
+    } catch (invoiceError) {
+      console.error(
+        "POST /api/subscription/checkout: createInvoiceLink failed",
+        {
+          plan: plan.code,
+          starsPrice: plan.starsPrice,
+          userId: user.id,
+          error: invoiceError,
+        }
+      );
+      return NextResponse.json(
+        { error: "ساخت لینک پرداخت ناموفق بود." },
+        { status: 500 }
+      );
+    }
+
+    if (!invoiceLink || typeof invoiceLink !== "string") {
+      console.error(
+        "POST /api/subscription/checkout: invoiceLink is empty or invalid",
+        { plan: plan.code, userId: user.id }
+      );
+      return NextResponse.json(
+        { error: "ساخت لینک پرداخت ناموفق بود." },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ invoiceLink });
   } catch (error) {
     console.error("POST /api/subscription/checkout failed:", error);
-    return NextResponse.json({ error: "ساخت لینک پرداخت ناموفق بود." }, { status: 500 });
+    return NextResponse.json(
+      { error: "ساخت لینک پرداخت ناموفق بود." },
+      { status: 500 }
+    );
   }
 }
