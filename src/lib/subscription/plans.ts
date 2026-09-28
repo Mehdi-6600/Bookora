@@ -9,14 +9,15 @@ export type PlanDefinition = {
   durationDays: number;
 };
 
-// قیمت‌ها Placeholder هستن — هر وقت خواستی این اعداد رو عوض کن.
+// قیمت دستی (تومان) با توجه به نرخ دلار و بازار SaaS ایران تعیین شده است.
+// Stars متناسب با هر Star ≈ 1.5–2 سنت و دلار ≈ 235,000 تومان محاسبه شده.
 export const PLANS: Record<PlanCode, PlanDefinition> = {
   PRO_MONTHLY: {
     code: "PRO_MONTHLY",
     titleFa: "اشتراک حرفه‌ای ماهانه",
     titleEn: "Pro Monthly",
     starsPrice: 200,
-    manualPriceToman: 149000,
+    manualPriceToman: 699000,
     durationDays: 30,
   },
   PRO_YEARLY: {
@@ -24,7 +25,7 @@ export const PLANS: Record<PlanCode, PlanDefinition> = {
     titleFa: "اشتراک حرفه‌ای سالانه",
     titleEn: "Pro Yearly",
     starsPrice: 2000,
-    manualPriceToman: 1490000,
+    manualPriceToman: 6990000,
     durationDays: 365,
   },
 };
