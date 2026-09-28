@@ -45,7 +45,8 @@
     "friend": "صديقي",
     "subtitle": "إدارة نشاطك التجاري وحجوزات بوكورا",
     "adminPanel": "لوحة الإدارة",
-    "loading": "جارٍ التحميل..."
+    "loading": "جارٍ التحميل...",
+    "addBusiness": "نشاط تجاري جديد"
   },
   "businessWizard": {
     "countryQuestion": "أين يقع نشاطك التجاري؟",
@@ -112,6 +113,7 @@
   "messages": {
     "businessCreated": "تم إنشاء النشاط التجاري بنجاح.",
     "businessCreateError": "فشل إنشاء النشاط التجاري.",
+    "businessSubscriptionRequired": "لإنشاء أكثر من نشاط تجاري واحد، يجب أولاً شراء اشتراك. اختر خطة أدناه.",
     "businessEditError": "فشل تعديل النشاط التجاري.",
     "businessEdited": "تم تعديل النشاط التجاري.",
     "businessEditedCurrency": "تم تعديل النشاط التجاري. تغيّرت العملة من الآن فصاعداً.",
@@ -238,9 +240,10 @@
     "activePlan": "الخطة الفعّالة: {plan}",
     "expiresAt": "حتى {date}",
     "pendingNotice": "طلب دفع خطة {plan} مُقدَّم وبانتظار موافقة الإدارة.",
-    "manualPayment": "دفع بتحويل بطاقة إلى بطاقة",
+    "manualPayment": "تحويل بطاقة",
     "starsPayment": "{stars} ⭐",
-    "selectButton": "اختيار",
+    "priceManual": "{price} تومان",
+    "selectButton": "شراء",
     "connecting": "جارٍ الاتصال...",
     "manualPaymentTitle": "دفع {plan}",
     "manualLoading": "جارٍ التحميل...",
@@ -259,7 +262,20 @@
     "submitError": "فشل إرسال الطلب.",
     "loadError": "فشل تحميل حالة الاشتراك",
     "planMonthly": "الاشتراك الاحترافي الشهري",
-    "planYearly": "الاشتراك الاحترافي السنوي"
+    "planYearly": "الاشتراك الاحترافي السنوي",
+    "preferenceLabel": "طريقة دفع الاشتراك",
+    "preferenceAuto": "تلقائي (حسب الدولة)",
+    "preferenceManual": "دائماً تحويل بطاقة",
+    "preferenceStars": "دائماً Stars",
+    "preferenceSaved": "تم حفظ طريقة الدفع.",
+    "compareTitle": "لماذا الترقية؟",
+    "compareFreeTitle": "مجاني",
+    "compareProTitle": "احترافي",
+    "compareFreeBusiness": "نشاط تجاري واحد",
+    "compareProBusiness": "أنشطة تجارية غير محدودة",
+    "compareFreeSupport": "دعم عادي",
+    "compareProSupport": "دعم ذو أولوية",
+    "compareProBadge": "بدون حد للحجوزات أو الخدمات"
   },
   "admin": {
     "title": "لوحة الإدارة",
