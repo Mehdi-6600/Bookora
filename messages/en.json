@@ -312,6 +312,18 @@
     "reviewedAt": "Reviewed {date}",
     "adminNote": "Admin note: {note}",
     "viewBusiness": "Open business",
-    "rejectNotePlaceholder": "Rejection reason (optional)"
+    "rejectNotePlaceholder": "Rejection reason (optional)",
+    "statsTitle": "Overview",
+    "statUsers": "Users",
+    "statBusinesses": "Businesses",
+    "statBookings": "Bookings",
+    "statSubsActive": "Active subs",
+    "statSubsPending": "Awaiting review",
+    "statBookingsPendingPayment": "Bookings pending payment",
+    "statPaymentsPendingReview": "Payments to review",
+    "statLast7d": "Last 7 days",
+    "statActive": "Active",
+    "statArchived": "Archived",
+    "statTotal": "Total"
   }
 }
