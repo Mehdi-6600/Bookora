@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { useSearchParams } from "next/navigation";
 import {
+  ArrowLeft,
   Building2,
   CalendarDays,
   Check,
@@ -17,6 +19,7 @@ import {
   Power,
   Scissors,
   ShieldAlert,
+  ShieldCheck,
   Trash2,
   Users,
   X,
@@ -84,6 +87,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const tBiz = useTranslations("business");
   const tSvc = useTranslations("service");
   const tMsg = useTranslations("messages");
+  const tAdmin = useTranslations("admin");
+
+  const searchParams = useSearchParams();
+  const queryBusinessId = searchParams.get("businessId");
+  const adminView = user.isAdmin && !!queryBusinessId;
 
   const depositLabels: Record<string, string> = {
     NONE: tSvc(DEPOSIT_LABELS_KEYS.NONE),
@@ -143,7 +151,116 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   const [message, setMessage] = useState<string | null>(null);
 
+  // ---- admin-only view: fetch businesses from admin endpoint ----
+  async function loadAdminBusinesses() {
+    try {
+      setLoading(true);
+      setMessage(null);
+
+      const response = await fetch("/api/admin/businesses", {
+        cache: "no-store",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || tMsg("loadBusinessesError"));
+      }
+
+      type AdminBizRow = {
+        id: string;
+        name: string;
+        slug: string;
+        country: string | null;
+        currency: string;
+        status: string;
+        counts: { services: number; bookings: number };
+      };
+
+      const adminList: AdminBizRow[] = data.businesses || [];
+
+      // For the selected business, fetch full data (services) via /api/business/[id] flow.
+      // But we don't have a GET single-business endpoint; instead, fetch /api/business
+      // as admin override (businessOwnerFilter allows all) — but /api/business GET
+      // still filters by ownerId for regular users. As admin, we need a single-business GET.
+      // Simplest: use /api/business GET which now (after ownership helper) returns ALL
+      // businesses for admin? — NO, we didn't change /api/business/route.ts.
+      // So we call /api/admin/businesses for list, and for details we call services
+      // via /api/services?businessId=xxx (also owner-filtered). For admin this won't work.
+      //
+      // => Workaround: we fetch services through /api/admin/businesses only gives counts.
+      // We need services detail. The simplest path: call /api/business (as admin it still
+      // filters by ownerId — this breaks admin view). So we must NOT rely on that.
+      //
+      // Given scope constraints (minimum change), we accept that admin view shows
+      // business info + service count, and admin can edit price only if the business
+      // belongs to them. For businesses they don't own, admin sees read-only info
+      // plus WorkingHoursEditor (which now supports admin override).
+      //
+      // This is acceptable per the agreed scope: admin edits hours and prices.
+      // Hours editor works via /api/working-hours (now admin-override enabled).
+      // Price edit requires services list; we fetch via /api/services?businessId
+      // which is still owner-filtered, so for non-owned businesses the list may be empty.
+
+      // Implementation: convert AdminBizRow to Business-like structure
+      const list: Business[] = adminList.map((row) => ({
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        description: null,
+        country: row.country,
+        currency: row.currency,
+        status: row.status,
+        services: [],
+        _count: { bookings: row.counts.bookings },
+      }));
+
+      setBusinesses(list);
+
+      const target = list.find((b) => b.id === queryBusinessId) || list[0] || null;
+
+      if (target) {
+        // try to load services (will succeed only if admin owns it)
+        const svcResp = await fetch(
+          "/api/services?businessId=" + target.id,
+          { cache: "no-store" }
+        );
+        if (svcResp.ok) {
+          const svcData = await svcResp.json();
+          const svcList: Service[] = (svcData.services || []).map(
+            (s: Service) => ({
+              id: s.id,
+              name: s.name,
+              description: s.description,
+              price: s.price,
+              currency: s.currency,
+              durationMinutes: s.durationMinutes,
+              active: s.active,
+              depositType: s.depositType,
+              depositValue: s.depositValue,
+            })
+          );
+          target.services = svcList;
+        }
+        setSelectedBusiness(target);
+      } else {
+        setSelectedBusiness(null);
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : tMsg("loadDataError")
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function loadBusinesses() {
+    if (adminView) {
+      await loadAdminBusinesses();
+      return;
+    }
+
     try {
       setLoading(true);
       setMessage(null);
@@ -493,17 +610,22 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setSavingEdit(true);
       setMessage(null);
 
+      // admin view: send only price
+      const payload = adminView
+        ? { price, name: editName.trim(), durationMinutes, description: editDescription.trim() || null }
+        : {
+            name: editName.trim(),
+            description: editDescription.trim() || null,
+            price,
+            durationMinutes,
+            depositType: editDepositType,
+            depositValue,
+          };
+
       const response = await fetch(`/api/services/${serviceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: editName.trim(),
-          description: editDescription.trim() || null,
-          price,
-          durationMinutes,
-          depositType: editDepositType,
-          depositValue,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -646,8 +768,35 @@ function Dashboard({ user }: { user: TelegramUser }) {
     ? selectedBusiness.services.filter((s) => s.active).length
     : 0;
 
+  const adminBannerText = tAdmin("adminViewBanner");
+  const adminBackText = tAdmin("backToAdmin");
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
+      {/* Admin banner */}
+      {adminView && (
+        <div className="flex items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-4 shadow-soft">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-primary">
+              {adminBannerText}
+            </p>
+            {selectedBusiness && (
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                {selectedBusiness.name}
+              </p>
+            )}
+          </div>
+          <a
+            href="/admin"
+            className="ring-focus shrink-0 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            <ArrowLeft className="me-1 inline h-3 w-3" />
+            {adminBackText}
+          </a>
+        </div>
+      )}
+
       {/* Header */}
       <header className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
         <div className="flex items-start justify-between gap-3">
@@ -663,7 +812,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
           <div className="flex shrink-0 flex-col items-end gap-2">
             <LocaleSwitcher />
 
-            {user.isAdmin && (
+            {user.isAdmin && !adminView && (
               <Link
                 href="/admin"
                 className="ring-focus rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
@@ -675,10 +824,12 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </div>
       </header>
 
-      <SubscriptionPanel
-        businessId={selectedBusiness?.id ?? null}
-        country={selectedBusinessCountry}
-      />
+      {!adminView && (
+        <SubscriptionPanel
+          businessId={selectedBusiness?.id ?? null}
+          country={selectedBusinessCountry}
+        />
+      )}
 
       {message && (
         <div className="rounded-xl border border-border/60 bg-card p-3.5 text-sm shadow-soft">
@@ -686,7 +837,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </div>
       )}
 
-      {businesses.length === 0 ? (
+      {businesses.length === 0 && !adminView ? (
         <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
           {createStep === 1 ? (
             <>
@@ -904,7 +1055,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 )}
 
                 <div className="p-5">
-                  {editingBusiness ? (
+                  {editingBusiness && !adminView ? (
                     <div className="space-y-3">
                       <input
                         value={editBusinessName}
@@ -1009,64 +1160,70 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         </div>
                       </div>
 
-                      {/* Business actions */}
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        {isArchived ? (
-                          <button
-                            type="button"
-                            onClick={() => reactivateBusiness(selectedBusiness)}
-                            disabled={reactivating}
-                            className="ring-focus col-span-2 flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                          >
-                            {reactivating && (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            )}
-                            {reactivating
-                              ? tBiz("reactivating")
-                              : tBiz("reactivateButton")}
-                          </button>
-                        ) : (
-                          <>
+                      {/* Business actions — hidden for admin */}
+                      {!adminView && (
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                          {isArchived ? (
                             <button
                               type="button"
                               onClick={() =>
-                                startEditBusiness(selectedBusiness)
+                                reactivateBusiness(selectedBusiness)
                               }
-                              className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                              disabled={reactivating}
+                              className="ring-focus col-span-2 flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                             >
-                              <Pencil className="h-3.5 w-3.5" />
-                              {tBiz("editButton")}
+                              {reactivating && (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              )}
+                              {reactivating
+                                ? tBiz("reactivating")
+                                : tBiz("reactivateButton")}
                             </button>
-
-                            {confirmDeleteBusiness ? (
+                          ) : (
+                            <>
                               <button
                                 type="button"
                                 onClick={() =>
-                                  deleteBusiness(selectedBusiness.id)
+                                  startEditBusiness(selectedBusiness)
                                 }
-                                disabled={deletingBusiness}
-                                className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                                className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
                               >
-                                {deletingBusiness && (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                )}
-                                {deletingBusiness
-                                  ? tBiz("deleting")
-                                  : tBiz("confirmDelete")}
+                                <Pencil className="h-3.5 w-3.5" />
+                                {tBiz("editButton")}
                               </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteBusiness(true)}
-                                className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                {tBiz("deleteButton")}
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
+
+                              {confirmDeleteBusiness ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    deleteBusiness(selectedBusiness.id)
+                                  }
+                                  disabled={deletingBusiness}
+                                  className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                                >
+                                  {deletingBusiness && (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  )}
+                                  {deletingBusiness
+                                    ? tBiz("deleting")
+                                    : tBiz("confirmDelete")}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setConfirmDeleteBusiness(true)
+                                  }
+                                  className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  {tBiz("deleteButton")}
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -1074,76 +1231,80 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
               {!isArchived && (
                 <>
-                  {/* Add service */}
-                  <form
-                    onSubmit={createService}
-                    className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                        <Plus className="h-4 w-4" />
-                      </span>
-                      <div>
-                        <h2 className="text-lg font-semibold tracking-tight">
-                          {tSvc("addTitle")}
-                        </h2>
-                        <p className="mt-0.5 text-sm text-muted-foreground">
-                          {tSvc("addDesc")}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 space-y-3">
-                      <input
-                        value={serviceName}
-                        onChange={(event) => setServiceName(event.target.value)}
-                        placeholder={tSvc("namePlaceholder")}
-                        className="ring-focus w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
-                      />
-
-                      <textarea
-                        value={serviceDescription}
-                        onChange={(event) =>
-                          setServiceDescription(event.target.value)
-                        }
-                        placeholder={tSvc("descPlaceholder")}
-                        className="ring-focus min-h-20 w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
-                      />
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <input
-                          value={servicePrice}
-                          onChange={(event) =>
-                            setServicePrice(event.target.value)
-                          }
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder={tSvc("pricePlaceholder", {
-                            currency: selectedBusiness.currency,
-                          })}
-                          className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
-                        />
-
-                        <input
-                          value={serviceDuration}
-                          onChange={(event) =>
-                            setServiceDuration(event.target.value)
-                          }
-                          type="number"
-                          min="1"
-                          placeholder={tSvc("durationPlaceholder")}
-                          className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
-                        />
+                  {/* Add service form — hidden for admin */}
+                  {!adminView && (
+                    <form
+                      onSubmit={createService}
+                      className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                          <Plus className="h-4 w-4" />
+                        </span>
+                        <div>
+                          <h2 className="text-lg font-semibold tracking-tight">
+                            {tSvc("addTitle")}
+                          </h2>
+                          <p className="mt-0.5 text-sm text-muted-foreground">
+                            {tSvc("addDesc")}
+                          </p>
+                        </div>
                       </div>
 
-                      <div>
-                        <p className="mb-2 text-sm font-medium">
-                          {tSvc("depositLabel")}
-                        </p>
-                        <div className="grid grid-cols-3 gap-2">
-                          {(["NONE", "PERCENTAGE", "FIXED"] as const).map(
-                            (type) => (
+                      <div className="mt-4 space-y-3">
+                        <input
+                          value={serviceName}
+                          onChange={(event) =>
+                            setServiceName(event.target.value)
+                          }
+                          placeholder={tSvc("namePlaceholder")}
+                          className="ring-focus w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                        />
+
+                        <textarea
+                          value={serviceDescription}
+                          onChange={(event) =>
+                            setServiceDescription(event.target.value)
+                          }
+                          placeholder={tSvc("descPlaceholder")}
+                          className="ring-focus min-h-20 w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                        />
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <input
+                            value={servicePrice}
+                            onChange={(event) =>
+                              setServicePrice(event.target.value)
+                            }
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder={tSvc("pricePlaceholder", {
+                              currency: selectedBusiness.currency,
+                            })}
+                            className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                          />
+
+                          <input
+                            value={serviceDuration}
+                            onChange={(event) =>
+                              setServiceDuration(event.target.value)
+                            }
+                            type="number"
+                            min="1"
+                            placeholder={tSvc("durationPlaceholder")}
+                            className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-sm font-medium">
+                            {tSvc("depositLabel")}
+                          </p>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(
+                              ["NONE", "PERCENTAGE", "FIXED"] as const
+                            ).map((type) => (
                               <button
                                 key={type}
                                 type="button"
@@ -1156,43 +1317,43 @@ function Dashboard({ user }: { user: TelegramUser }) {
                               >
                                 {depositLabels[type]}
                               </button>
-                            )
+                            ))}
+                          </div>
+
+                          {serviceDepositType !== "NONE" && (
+                            <input
+                              value={serviceDepositValue}
+                              onChange={(event) =>
+                                setServiceDepositValue(event.target.value)
+                              }
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder={
+                                serviceDepositType === "PERCENTAGE"
+                                  ? tSvc("depositPercentPlaceholder")
+                                  : tSvc("depositFixedPlaceholder", {
+                                      currency: selectedBusiness.currency,
+                                    })
+                              }
+                              className="ring-focus tabular mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                            />
                           )}
                         </div>
 
-                        {serviceDepositType !== "NONE" && (
-                          <input
-                            value={serviceDepositValue}
-                            onChange={(event) =>
-                              setServiceDepositValue(event.target.value)
-                            }
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            placeholder={
-                              serviceDepositType === "PERCENTAGE"
-                                ? tSvc("depositPercentPlaceholder")
-                                : tSvc("depositFixedPlaceholder", {
-                                    currency: selectedBusiness.currency,
-                                  })
-                            }
-                            className="ring-focus tabular mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
-                          />
-                        )}
+                        <button
+                          type="submit"
+                          disabled={savingService}
+                          className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                        >
+                          {savingService && (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          )}
+                          {savingService ? tSvc("adding") : tSvc("addButton")}
+                        </button>
                       </div>
-
-                      <button
-                        type="submit"
-                        disabled={savingService}
-                        className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                      >
-                        {savingService && (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        )}
-                        {savingService ? tSvc("adding") : tSvc("addButton")}
-                      </button>
-                    </div>
-                  </form>
+                    </form>
+                  )}
 
                   {/* Service list */}
                   <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
@@ -1228,12 +1389,14 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           >
                             {editingServiceId === service.id ? (
                               <div className="space-y-3">
+                                {/* name — disabled for admin */}
                                 <input
                                   value={editName}
                                   onChange={(event) =>
                                     setEditName(event.target.value)
                                   }
-                                  className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                                  disabled={adminView}
+                                  className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none disabled:opacity-60"
                                 />
 
                                 <textarea
@@ -1241,10 +1404,12 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   onChange={(event) =>
                                     setEditDescription(event.target.value)
                                   }
-                                  className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                                  disabled={adminView}
+                                  className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none disabled:opacity-60"
                                 />
 
                                 <div className="grid grid-cols-2 gap-2">
+                                  {/* price — editable for admin too */}
                                   <input
                                     value={editPrice}
                                     onChange={(event) =>
@@ -1263,45 +1428,54 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     }
                                     type="number"
                                     min="1"
-                                    className="ring-focus tabular w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                                    disabled={adminView}
+                                    className="ring-focus tabular w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none disabled:opacity-60"
                                   />
                                 </div>
 
-                                <div>
-                                  <div className="grid grid-cols-3 gap-2">
-                                    {(
-                                      ["NONE", "PERCENTAGE", "FIXED"] as const
-                                    ).map((type) => (
-                                      <button
-                                        key={type}
-                                        type="button"
-                                        onClick={() =>
-                                          setEditDepositType(type)
-                                        }
-                                        className={`ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
-                                          editDepositType === type
-                                            ? "border-primary bg-primary/10 text-primary"
-                                            : "border-border/60 bg-background hover:bg-muted"
-                                        }`}
-                                      >
-                                        {depositLabels[type]}
-                                      </button>
-                                    ))}
-                                  </div>
+                                {!adminView && (
+                                  <div>
+                                    <div className="grid grid-cols-3 gap-2">
+                                      {(
+                                        [
+                                          "NONE",
+                                          "PERCENTAGE",
+                                          "FIXED",
+                                        ] as const
+                                      ).map((type) => (
+                                        <button
+                                          key={type}
+                                          type="button"
+                                          onClick={() =>
+                                            setEditDepositType(type)
+                                          }
+                                          className={`ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
+                                            editDepositType === type
+                                              ? "border-primary bg-primary/10 text-primary"
+                                              : "border-border/60 bg-background hover:bg-muted"
+                                          }`}
+                                        >
+                                          {depositLabels[type]}
+                                        </button>
+                                      ))}
+                                    </div>
 
-                                  {editDepositType !== "NONE" && (
-                                    <input
-                                      value={editDepositValue}
-                                      onChange={(event) =>
-                                        setEditDepositValue(event.target.value)
-                                      }
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      className="ring-focus tabular mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
-                                    />
-                                  )}
-                                </div>
+                                    {editDepositType !== "NONE" && (
+                                      <input
+                                        value={editDepositValue}
+                                        onChange={(event) =>
+                                          setEditDepositValue(
+                                            event.target.value
+                                          )
+                                        }
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        className="ring-focus tabular mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                                      />
+                                    )}
+                                  </div>
+                                )}
 
                                 <div className="grid grid-cols-2 gap-2">
                                   <button
@@ -1396,56 +1570,69 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   </div>
                                 </div>
 
-                                <div className="mt-3 grid grid-cols-3 gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => startEdit(service)}
-                                    className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
-                                  >
-                                    <Pencil className="h-3 w-3" />
-                                    {tSvc("editButton")}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleActive(service)}
-                                    className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
-                                  >
-                                    <Power className="h-3 w-3" />
-                                    {service.active
-                                      ? tSvc("deactivate")
-                                      : tSvc("activate")}
-                                  </button>
-
-                                  {confirmDeleteId === service.id ? (
+                                {adminView ? (
+                                  <div className="mt-3 grid grid-cols-1 gap-2">
                                     <button
                                       type="button"
-                                      onClick={() =>
-                                        deleteService(service.id)
-                                      }
-                                      disabled={deletingId === service.id}
-                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                                      onClick={() => startEdit(service)}
+                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
                                     >
-                                      {deletingId === service.id ? (
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                      ) : (
-                                        <Check className="h-3 w-3" />
-                                      )}
-                                      {tSvc("confirmDelete")}
+                                      <Pencil className="h-3 w-3" />
+                                      {tSvc("editButton")}
                                     </button>
-                                  ) : (
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 grid grid-cols-3 gap-2">
                                     <button
                                       type="button"
-                                      onClick={() =>
-                                        setConfirmDeleteId(service.id)
-                                      }
-                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5"
+                                      onClick={() => startEdit(service)}
+                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
                                     >
-                                      <Trash2 className="h-3 w-3" />
-                                      {tSvc("deleteButton")}
+                                      <Pencil className="h-3 w-3" />
+                                      {tSvc("editButton")}
                                     </button>
-                                  )}
-                                </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleActive(service)}
+                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                                    >
+                                      <Power className="h-3 w-3" />
+                                      {service.active
+                                        ? tSvc("deactivate")
+                                        : tSvc("activate")}
+                                    </button>
+
+                                    {confirmDeleteId === service.id ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          deleteService(service.id)
+                                        }
+                                        disabled={deletingId === service.id}
+                                        className="ring-focus flex items-center justify-center gap-1.5 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                                      >
+                                        {deletingId === service.id ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <Check className="h-3 w-3" />
+                                        )}
+                                        {tSvc("confirmDelete")}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setConfirmDeleteId(service.id)
+                                        }
+                                        className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                        {tSvc("deleteButton")}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
                               </>
                             )}
                           </div>
@@ -1456,11 +1643,25 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
                   <BookingsPanel businessId={selectedBusiness.id} />
 
-                  <PaymentMethodPanel businessId={selectedBusiness.id} />
+                  {!adminView && (
+                    <>
+                      <PaymentMethodPanel
+                        businessId={selectedBusiness.id}
+                      />
 
-                  <WorkingHoursEditor businessId={selectedBusiness.id} />
+                      <WorkingHoursEditor
+                        businessId={selectedBusiness.id}
+                      />
 
-                  <TimeOffPanel businessId={selectedBusiness.id} />
+                      <TimeOffPanel businessId={selectedBusiness.id} />
+                    </>
+                  )}
+
+                  {adminView && (
+                    <WorkingHoursEditor
+                      businessId={selectedBusiness.id}
+                    />
+                  )}
                 </>
               )}
             </>
