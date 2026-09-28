@@ -7,7 +7,9 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  Clock,
   CreditCard,
+  Crown,
   ExternalLink,
   FileText,
   Hash,
@@ -16,11 +18,11 @@ import {
   RotateCcw,
   ShieldCheck,
   StickyNote,
+  Users,
   X,
   XCircle,
 } from "lucide-react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
-import { PlanCode } from "@/lib/subscription/plans";
 import { MANUAL_PAYMENT_SETTING_KEYS } from "@/lib/admin-settings";
 
 type SettingRow = { key: string; value: string };
@@ -38,6 +40,15 @@ type SubscriptionRow = {
   businessName: string | null;
   businessSlug: string | null;
   userName: string;
+};
+
+type StatsPayload = {
+  users: { total: number; last7d: number };
+  businesses: { total: number; active: number; archived: number };
+  bookings: { total: number; last7d: number; pendingPayment: number };
+  subscriptions: { active: number; pending: number };
+  payments: { pendingReview: number };
+  generatedAt: string;
 };
 
 type MessageState = {
@@ -78,6 +89,12 @@ const CARD_SECTION =
 const ICON_TILE =
   "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground";
 
+const STAT_TILE =
+  "rounded-xl border border-border/60 bg-background p-3";
+
+const STAT_TILE_CLICKABLE =
+  "ring-focus rounded-xl border border-border/60 bg-background p-3 text-start transition-colors hover:border-primary/40 hover:bg-muted/40";
+
 function formatDate(value: string, locale: string): string {
   try {
     const date = new Date(value);
@@ -92,6 +109,16 @@ function formatDate(value: string, locale: string): string {
     }).format(date);
   } catch {
     return value;
+  }
+}
+
+function formatNumber(value: number, locale: string): string {
+  try {
+    const numberingLocale =
+      locale === "fa" ? "fa-IR" : locale === "ar" ? "ar-EG" : "en-US";
+    return new Intl.NumberFormat(numberingLocale).format(value);
+  } catch {
+    return String(value);
   }
 }
 
@@ -111,6 +138,9 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   );
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
+
+  const [stats, setStats] = useState<StatsPayload | null>(null);
+  const [loadingStats, setLoadingStats] = useState(true);
 
   const [filter, setFilter] = useState<FilterKey>("PENDING");
   const [rows, setRows] = useState<SubscriptionRow[]>([]);
@@ -135,6 +165,19 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  async function loadStats() {
+    try {
+      setLoadingStats(true);
+      const response = await fetch("/api/admin/stats", {
+        cache: "no-store",
+      });
+      const data = await response.json();
+      if (response.ok) setStats(data);
+    } finally {
+      setLoadingStats(false);
+    }
+  }
+
   const loadRows = useCallback(async (which: FilterKey) => {
     try {
       setLoadingRows(true);
@@ -152,6 +195,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   useEffect(() => {
     if (isAdmin) {
       loadSettings();
+      loadStats();
     }
   }, [isAdmin]);
 
@@ -209,7 +253,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
       }
       setRejectingId(null);
       setRejectNote("");
-      await loadRows(filter);
+      await Promise.all([loadRows(filter), loadStats()]);
       const okText = action === "approve" ? t("approved") : t("rejected");
       setMessage({ kind: "ok", text: okText });
     } catch (error) {
@@ -244,6 +288,20 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const planMonthly = tSub("planMonthly");
   const planYearly = tSub("planYearly");
 
+  // Stats labels
+  const statTitle = t("statsTitle");
+  const statUsers = t("statUsers");
+  const statBusinesses = t("statBusinesses");
+  const statBookings = t("statBookings");
+  const statSubsActive = t("statSubsActive");
+  const statSubsPending = t("statSubsPending");
+  const statBookingsPendingPayment = t("statBookingsPendingPayment");
+  const statPaymentsPendingReview = t("statPaymentsPendingReview");
+  const statLast7d = t("statLast7d");
+  const statActive = t("statActive");
+  const statArchived = t("statArchived");
+  const statTotal = t("statTotal");
+
   const filterLabels: Record<FilterKey, string> = {
     PENDING: t("filterPending"),
     ACTIVE: t("filterApproved"),
@@ -274,11 +332,14 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     );
   }
 
-  const headerTitle =
-    t("pendingTitle", { count: rows.length });
+  const headerTitle = t("pendingTitle", { count: rows.length });
 
   const messageBoxClass =
     message && message.kind === "ok" ? BOX_OK : BOX_BAD;
+
+  // Pre-format stats values (numbers stay numeric — formatting done in Intl)
+  const s = stats;
+  const nf = (v: number) => formatNumber(v, locale);
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
@@ -306,6 +367,149 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
 
+      {/* Stats */}
+      <section className={CARD_SECTION}>
+        <header className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className={ICON_TILE}>
+              <CalendarDays className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">
+                {statTitle}
+              </h2>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadStats}
+            disabled={loadingStats}
+            aria-label={txtLoading}
+            className="ring-focus rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+          >
+            <RotateCcw
+              className={
+                loadingStats ? "h-4 w-4 animate-spin" : "h-4 w-4"
+              }
+            />
+          </button>
+        </header>
+
+        {loadingStats || !s ? (
+          <div
+            className={
+              INPUT_BASE + " mt-4 flex items-center gap-2 text-muted-foreground"
+            }
+          >
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {txtLoading}
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {/* Users */}
+            <div className={STAT_TILE}>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Users className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">{statUsers}</span>
+              </div>
+              <div className="tabular mt-1.5 text-lg font-semibold">
+                {nf(s.users.total)}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                {statLast7d}
+                {" "}
+                +{nf(s.users.last7d)}
+              </div>
+            </div>
+
+            {/* Businesses */}
+            <div className={STAT_TILE}>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Building2 className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">
+                  {statBusinesses}
+                </span>
+              </div>
+              <div className="tabular mt-1.5 text-lg font-semibold">
+                {nf(s.businesses.total)}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                {statActive}
+                {" "}
+                {nf(s.businesses.active)}
+                {" · "}
+                {statArchived}
+                {" "}
+                {nf(s.businesses.archived)}
+              </div>
+            </div>
+
+            {/* Bookings */}
+            <div className={STAT_TILE}>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <CalendarDays className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">
+                  {statBookings}
+                </span>
+              </div>
+              <div className="tabular mt-1.5 text-lg font-semibold">
+                {nf(s.bookings.total)}
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                {statLast7d}
+                {" "}
+                +{nf(s.bookings.last7d)}
+              </div>
+            </div>
+
+            {/* Active subscriptions */}
+            <div className={STAT_TILE}>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Crown className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">
+                  {statSubsActive}
+                </span>
+              </div>
+              <div className="tabular mt-1.5 text-lg font-semibold">
+                {nf(s.subscriptions.active)}
+              </div>
+            </div>
+
+            {/* Pending subscriptions — clickable → PENDING filter */}
+            <button
+              type="button"
+              onClick={() => setFilter("PENDING")}
+              className={STAT_TILE_CLICKABLE}
+            >
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Clock className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">
+                  {statSubsPending}
+                </span>
+              </div>
+              <div className="tabular mt-1.5 text-lg font-semibold">
+                {nf(s.subscriptions.pending)}
+              </div>
+            </button>
+
+            {/* Pending payments — read-only for now */}
+            <div className={STAT_TILE}>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <CreditCard className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">
+                  {statPaymentsPendingReview}
+                </span>
+              </div>
+              <div className="tabular mt-1.5 text-lg font-semibold">
+                {nf(s.payments.pendingReview)}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Payment settings */}
       <section className={CARD_SECTION}>
         <header className="flex items-start gap-3">
           <span className={ICON_TILE}>
@@ -319,7 +523,11 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </header>
 
         {loadingSettings ? (
-          <div className={INPUT_BASE + " mt-4 flex items-center gap-2 text-muted-foreground"}>
+          <div
+            className={
+              INPUT_BASE + " mt-4 flex items-center gap-2 text-muted-foreground"
+            }
+          >
             <Loader2 className="h-4 w-4 animate-spin" />
             {txtLoading}
           </div>
@@ -363,6 +571,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         )}
       </section>
 
+      {/* Subscriptions */}
       <section className={CARD_SECTION}>
         <header className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
@@ -411,7 +620,11 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </div>
 
         {loadingRows ? (
-          <div className={INPUT_BASE + " mt-4 flex items-center gap-2 text-muted-foreground"}>
+          <div
+            className={
+              INPUT_BASE + " mt-4 flex items-center gap-2 text-muted-foreground"
+            }
+          >
             <Loader2 className="h-4 w-4 animate-spin" />
             {txtLoading}
           </div>
