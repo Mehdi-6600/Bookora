@@ -151,20 +151,19 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   const [message, setMessage] = useState<string | null>(null);
 
-  // ---- admin-only view: fetch businesses from admin endpoint ----
   async function loadAdminBusinesses() {
     try {
       setLoading(true);
       setMessage(null);
 
-      const response = await fetch("/api/admin/businesses", {
+      const listResp = await fetch("/api/admin/businesses", {
         cache: "no-store",
       });
 
-      const data = await response.json();
+      const listData = await listResp.json();
 
-      if (!response.ok) {
-        throw new Error(data?.error || tMsg("loadBusinessesError"));
+      if (!listResp.ok) {
+        throw new Error(listData?.error || tMsg("loadBusinessesError"));
       }
 
       type AdminBizRow = {
@@ -177,32 +176,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
         counts: { services: number; bookings: number };
       };
 
-      const adminList: AdminBizRow[] = data.businesses || [];
+      const adminList: AdminBizRow[] = listData.businesses || [];
 
-      // For the selected business, fetch full data (services) via /api/business/[id] flow.
-      // But we don't have a GET single-business endpoint; instead, fetch /api/business
-      // as admin override (businessOwnerFilter allows all) — but /api/business GET
-      // still filters by ownerId for regular users. As admin, we need a single-business GET.
-      // Simplest: use /api/business GET which now (after ownership helper) returns ALL
-      // businesses for admin? — NO, we didn't change /api/business/route.ts.
-      // So we call /api/admin/businesses for list, and for details we call services
-      // via /api/services?businessId=xxx (also owner-filtered). For admin this won't work.
-      //
-      // => Workaround: we fetch services through /api/admin/businesses only gives counts.
-      // We need services detail. The simplest path: call /api/business (as admin it still
-      // filters by ownerId — this breaks admin view). So we must NOT rely on that.
-      //
-      // Given scope constraints (minimum change), we accept that admin view shows
-      // business info + service count, and admin can edit price only if the business
-      // belongs to them. For businesses they don't own, admin sees read-only info
-      // plus WorkingHoursEditor (which now supports admin override).
-      //
-      // This is acceptable per the agreed scope: admin edits hours and prices.
-      // Hours editor works via /api/working-hours (now admin-override enabled).
-      // Price edit requires services list; we fetch via /api/services?businessId
-      // which is still owner-filtered, so for non-owned businesses the list may be empty.
-
-      // Implementation: convert AdminBizRow to Business-like structure
       const list: Business[] = adminList.map((row) => ({
         id: row.id,
         name: row.name,
@@ -217,35 +192,32 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
       setBusinesses(list);
 
-      const target = list.find((b) => b.id === queryBusinessId) || list[0] || null;
+      const target =
+        list.find((b) => b.id === queryBusinessId) || list[0] || null;
 
-      if (target) {
-        // try to load services (will succeed only if admin owns it)
-        const svcResp = await fetch(
-          "/api/services?businessId=" + target.id,
-          { cache: "no-store" }
-        );
-        if (svcResp.ok) {
-          const svcData = await svcResp.json();
-          const svcList: Service[] = (svcData.services || []).map(
-            (s: Service) => ({
-              id: s.id,
-              name: s.name,
-              description: s.description,
-              price: s.price,
-              currency: s.currency,
-              durationMinutes: s.durationMinutes,
-              active: s.active,
-              depositType: s.depositType,
-              depositValue: s.depositValue,
-            })
-          );
-          target.services = svcList;
-        }
-        setSelectedBusiness(target);
-      } else {
+      if (!target) {
         setSelectedBusiness(null);
+        return;
       }
+
+      const detailResp = await fetch(
+        "/api/admin/businesses/" + target.id,
+        { cache: "no-store" }
+      );
+
+      const detailData = await detailResp.json();
+
+      if (!detailResp.ok) {
+        throw new Error(detailData?.error || tMsg("loadDataError"));
+      }
+
+      const full: Business = detailData.business;
+
+      setBusinesses((current) =>
+        current.map((b) => (b.id === full.id ? full : b))
+      );
+
+      setSelectedBusiness(full);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : tMsg("loadDataError")
@@ -610,9 +582,13 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setSavingEdit(true);
       setMessage(null);
 
-      // admin view: send only price
       const payload = adminView
-        ? { price, name: editName.trim(), durationMinutes, description: editDescription.trim() || null }
+        ? {
+            price,
+            name: editName.trim(),
+            durationMinutes,
+            description: editDescription.trim() || null,
+          }
         : {
             name: editName.trim(),
             description: editDescription.trim() || null,
@@ -773,7 +749,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
-      {/* Admin banner */}
       {adminView && (
         <div className="flex items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-4 shadow-soft">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
@@ -797,7 +772,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </div>
       )}
 
-      {/* Header */}
       <header className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -936,7 +910,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </section>
       ) : (
         <>
-          {/* Business selector */}
           <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-soft">
             <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {tBiz("selectLabel")}
@@ -972,7 +945,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
           {selectedBusiness && (
             <>
-              {/* Business card */}
               <section className="overflow-hidden rounded-2xl border border-border/60 bg-card shadow-soft">
                 <div className="border-b border-border/60 bg-muted/30 p-5">
                   <div className="flex items-start gap-3">
@@ -1020,7 +992,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     </div>
                   </div>
 
-                  {/* Stat tiles */}
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3">
                       <Scissors className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -1095,7 +1066,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                          onClick={() => saveBusinessEdit(selectedBusiness.id)}
+                          onClick={() =>
+                            saveBusinessEdit(selectedBusiness.id)
+                          }
                           disabled={savingBusinessEdit}
                           className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                         >
@@ -1118,7 +1091,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     </div>
                   ) : (
                     <>
-                      {/* Booking link card */}
                       <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
                         <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                           <LinkIcon className="h-3.5 w-3.5" />
@@ -1160,7 +1132,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         </div>
                       </div>
 
-                      {/* Business actions — hidden for admin */}
                       {!adminView && (
                         <div className="mt-4 grid grid-cols-2 gap-2">
                           {isArchived ? (
@@ -1231,7 +1202,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
               {!isArchived && (
                 <>
-                  {/* Add service form — hidden for admin */}
                   {!adminView && (
                     <form
                       onSubmit={createService}
@@ -1355,7 +1325,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     </form>
                   )}
 
-                  {/* Service list */}
                   <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-start gap-3">
@@ -1389,7 +1358,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           >
                             {editingServiceId === service.id ? (
                               <div className="space-y-3">
-                                {/* name — disabled for admin */}
                                 <input
                                   value={editName}
                                   onChange={(event) =>
@@ -1409,7 +1377,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 />
 
                                 <div className="grid grid-cols-2 gap-2">
-                                  {/* price — editable for admin too */}
                                   <input
                                     value={editPrice}
                                     onChange={(event) =>
@@ -1648,20 +1615,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       <PaymentMethodPanel
                         businessId={selectedBusiness.id}
                       />
-
-                      <WorkingHoursEditor
-                        businessId={selectedBusiness.id}
-                      />
-
                       <TimeOffPanel businessId={selectedBusiness.id} />
                     </>
                   )}
 
-                  {adminView && (
-                    <WorkingHoursEditor
-                      businessId={selectedBusiness.id}
-                    />
-                  )}
+                  <WorkingHoursEditor businessId={selectedBusiness.id} />
                 </>
               )}
             </>
