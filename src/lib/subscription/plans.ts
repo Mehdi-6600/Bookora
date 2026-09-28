@@ -5,16 +5,18 @@ export type PlanDefinition = {
   titleFa: string;
   titleEn: string;
   starsPrice: number;
+  manualPriceToman: number;
   durationDays: number;
 };
 
-// قیمت‌ها Placeholder هستن — هر وقت خواستی فقط همین اعداد رو عوض کن.
+// قیمت‌ها Placeholder هستن — هر وقت خواستی این اعداد رو عوض کن.
 export const PLANS: Record<PlanCode, PlanDefinition> = {
   PRO_MONTHLY: {
     code: "PRO_MONTHLY",
     titleFa: "اشتراک حرفه‌ای ماهانه",
     titleEn: "Pro Monthly",
     starsPrice: 200,
+    manualPriceToman: 149000,
     durationDays: 30,
   },
   PRO_YEARLY: {
@@ -22,9 +24,12 @@ export const PLANS: Record<PlanCode, PlanDefinition> = {
     titleFa: "اشتراک حرفه‌ای سالانه",
     titleEn: "Pro Yearly",
     starsPrice: 2000,
+    manualPriceToman: 1490000,
     durationDays: 365,
   },
 };
+
+export const FREE_BUSINESS_LIMIT = 1;
 
 export function isPlanCode(value: string): value is PlanCode {
   return value === "PRO_MONTHLY" || value === "PRO_YEARLY";
@@ -38,16 +43,8 @@ export function parseInvoicePayload(
   payload: string
 ): { plan: PlanCode; userId: string } | null {
   const parts = payload.split(":");
-
-  if (parts.length !== 3 || parts[0] !== "sub") {
-    return null;
-  }
-
+  if (parts.length !== 3 || parts[0] !== "sub") return null;
   const [, plan, userId] = parts;
-
-  if (!isPlanCode(plan) || !userId) {
-    return null;
-  }
-
+  if (!isPlanCode(plan) || !userId) return null;
   return { plan, userId };
 }
