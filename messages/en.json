@@ -302,6 +302,16 @@
     "rejectButton": "Reject",
     "reviewError": "Failed to review.",
     "approved": "Subscription activated.",
-    "rejected": "Request rejected."
+    "rejected": "Request rejected.",
+    "filterPending": "Pending",
+    "filterApproved": "Approved",
+    "filterRejected": "Rejected",
+    "filterEmptyApproved": "No approved requests.",
+    "filterEmptyRejected": "No rejected requests.",
+    "submittedAt": "Submitted {date}",
+    "reviewedAt": "Reviewed {date}",
+    "adminNote": "Admin note: {note}",
+    "viewBusiness": "Open business",
+    "rejectNotePlaceholder": "Rejection reason (optional)"
   }
 }
