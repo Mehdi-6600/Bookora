@@ -45,7 +45,8 @@
     "friend": "دوست",
     "subtitle": "مدیریت کسب‌وکار و رزروهای Bookora",
     "adminPanel": "پنل ادمین",
-    "loading": "در حال بارگذاری..."
+    "loading": "در حال بارگذاری...",
+    "addBusiness": "کسب‌وکار جدید"
   },
   "businessWizard": {
     "countryQuestion": "کشور کسب‌وکار شما کجاست؟",
@@ -112,6 +113,7 @@
   "messages": {
     "businessCreated": "کسب‌وکار با موفقیت ساخته شد.",
     "businessCreateError": "ساخت کسب‌وکار ناموفق بود.",
+    "businessSubscriptionRequired": "برای ساخت بیش از یک کسب‌وکار، اول باید اشتراک بخری. پایین‌تر می‌تونی پلن مناسب رو انتخاب کنی.",
     "businessEditError": "ویرایش کسب‌وکار ناموفق بود.",
     "businessEdited": "کسب‌وکار ویرایش شد.",
     "businessEditedCurrency": "کسب‌وکار ویرایش شد. واحد پول از حالا تغییر کرد.",
@@ -238,9 +240,10 @@
     "activePlan": "پلن فعال: {plan}",
     "expiresAt": "تا تاریخ {date}",
     "pendingNotice": "درخواست پرداخت پلن {plan} ثبت شده و در انتظار تأیید ادمین است.",
-    "manualPayment": "پرداخت کارت‌به‌کارت",
+    "manualPayment": "کارت‌به‌کارت",
     "starsPayment": "{stars} ⭐",
-    "selectButton": "انتخاب",
+    "priceManual": "{price} تومان",
+    "selectButton": "خرید",
     "connecting": "در حال اتصال...",
     "manualPaymentTitle": "پرداخت {plan}",
     "manualLoading": "در حال بارگذاری...",
@@ -259,7 +262,20 @@
     "submitError": "ثبت درخواست ناموفق بود.",
     "loadError": "خطا در دریافت وضعیت اشتراک",
     "planMonthly": "اشتراک حرفه‌ای ماهانه",
-    "planYearly": "اشتراک حرفه‌ای سالانه"
+    "planYearly": "اشتراک حرفه‌ای سالانه",
+    "preferenceLabel": "روش پرداخت اشتراک",
+    "preferenceAuto": "خودکار (بر اساس کشور)",
+    "preferenceManual": "همیشه کارت‌به‌کارت",
+    "preferenceStars": "همیشه Stars",
+    "preferenceSaved": "روش پرداخت ذخیره شد.",
+    "compareTitle": "چرا اشتراک بخرم؟",
+    "compareFreeTitle": "رایگان",
+    "compareProTitle": "حرفه‌ای",
+    "compareFreeBusiness": "۱ کسب‌وکار",
+    "compareProBusiness": "کسب‌وکار نامحدود",
+    "compareFreeSupport": "پشتیبانی عادی",
+    "compareProSupport": "پشتیبانی اولویت‌دار",
+    "compareProBadge": "بدون محدودیت رزرو و سرویس"
   },
   "admin": {
     "title": "پنل ادمین",
