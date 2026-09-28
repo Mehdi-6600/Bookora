@@ -312,6 +312,18 @@
     "reviewedAt": "بررسی‌شده در {date}",
     "adminNote": "یادداشت ادمین: {note}",
     "viewBusiness": "باز کردن کسب‌وکار",
-    "rejectNotePlaceholder": "دلیل رد (اختیاری)"
+    "rejectNotePlaceholder": "دلیل رد (اختیاری)",
+    "statsTitle": "آمار کلی",
+    "statUsers": "کاربران",
+    "statBusinesses": "کسب‌وکارها",
+    "statBookings": "رزروها",
+    "statSubsActive": "اشتراک فعال",
+    "statSubsPending": "در انتظار تأیید",
+    "statBookingsPendingPayment": "رزرو در انتظار پرداخت",
+    "statPaymentsPendingReview": "پرداخت در انتظار بررسی",
+    "statLast7d": "۷ روز اخیر",
+    "statActive": "فعال",
+    "statArchived": "بایگانی",
+    "statTotal": "کل"
   }
 }
