@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   CalendarDays,
@@ -96,12 +96,30 @@ export function SubscriptionPanel({
   const [savingPreference, setSavingPreference] = useState(false);
   const [preferenceMessage, setPreferenceMessage] = useState(false);
 
+  const manualBoxRef = useRef<HTMLDivElement | null>(null);
+
   const effectiveMethod = resolvePaymentMethod(preference ?? "AUTO", country);
 
   const planLabels: Record<PlanCode, string> = {
     PRO_MONTHLY: t("planMonthly"),
     PRO_YEARLY: t("planYearly"),
   };
+
+  // وقتی باکس پرداخت دستی باز می‌شود، به آن اسکرول کن تا کاربر آن را ببیند.
+  useEffect(() => {
+    if (manualPlan && manualBoxRef.current) {
+      // کمی تاخیر تا رندر کامل شود و ارتفاع تثبیت شود.
+      const id = window.setTimeout(() => {
+        if (manualBoxRef.current) {
+          manualBoxRef.current.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }
+      }, 50);
+      return () => window.clearTimeout(id);
+    }
+  }, [manualPlan]);
 
   async function loadStatus() {
     try {
@@ -574,7 +592,10 @@ export function SubscriptionPanel({
       )}
 
       {manualPlan && (
-        <div className="mt-4 space-y-3 rounded-xl border border-border/60 bg-background p-4">
+        <div
+          ref={manualBoxRef}
+          className="mt-4 scroll-mt-4 space-y-3 rounded-xl border border-border/60 bg-background p-4"
+        >
           <div className="flex items-center justify-between gap-2">
             <h3 className="flex items-center gap-2 font-semibold">
               <CreditCard className="h-4 w-4" />
