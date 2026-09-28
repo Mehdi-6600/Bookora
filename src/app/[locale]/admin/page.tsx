@@ -14,6 +14,7 @@ import {
   FileText,
   Hash,
   Loader2,
+  LogIn,
   Receipt,
   RotateCcw,
   Search,
@@ -333,8 +334,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  // ---- All translation strings resolved here (outside JSX) ----
-
   const txtTitle = t("title");
   const txtNoAccess = t("noAccess");
   const txtPaymentInfo = t("paymentInfoTitle");
@@ -356,7 +355,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const planMonthly = tSub("planMonthly");
   const planYearly = tSub("planYearly");
 
-  // Stats labels
   const statTitle = t("statsTitle");
   const statUsers = t("statUsers");
   const statBusinesses = t("statBusinesses");
@@ -368,7 +366,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const statActive = t("statActive");
   const statArchived = t("statArchived");
 
-  // Tab + businesses labels
   const tabRequests = t("tabRequests");
   const tabBusinesses = t("tabBusinesses");
   const bizTitle = t("bizTitle");
@@ -380,6 +377,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const bizServices = t("bizServices");
   const bizBookings = t("bizBookings");
   const bizOwner = t("bizOwner");
+  const enterPanelText = t("enterPanelButton");
 
   const filterLabels: Record<FilterKey, string> = {
     PENDING: t("filterPending"),
@@ -471,10 +469,8 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
 
-      {/* =================== REQUESTS TAB =================== */}
       {tab === "requests" && (
         <>
-          {/* Stats */}
           <section className={CARD_SECTION}>
             <header className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
@@ -613,7 +609,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
             )}
           </section>
 
-          {/* Payment settings */}
           <section className={CARD_SECTION}>
             <header className="flex items-start gap-3">
               <span className={ICON_TILE}>
@@ -676,7 +671,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
             )}
           </section>
 
-          {/* Subscriptions */}
           <section className={CARD_SECTION}>
             <header className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
@@ -952,7 +946,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </>
       )}
 
-      {/* =================== BUSINESSES TAB =================== */}
       {tab === "businesses" && (
         <section className={CARD_SECTION}>
           <header className="flex items-start justify-between gap-3">
@@ -1040,6 +1033,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                   : null;
                 const bizLink = "/book/" + biz.slug;
                 const createdDate = formatDate(biz.createdAt, locale);
+                const panelLink = "/app?businessId=" + biz.id;
 
                 return (
                   <article
@@ -1075,16 +1069,27 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                         </div>
                       </div>
 
-                      <a
-                        href={bizLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={txtViewBusiness}
-                        title={txtViewBusiness}
-                        className="ring-focus shrink-0 rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
+                      <div className="flex shrink-0 gap-2">
+                        <a
+                          href={panelLink}
+                          aria-label={enterPanelText}
+                          title={enterPanelText}
+                          className="ring-focus rounded-lg border border-primary/40 bg-primary/5 p-2 text-primary transition-colors hover:bg-primary/10"
+                        >
+                          <LogIn className="h-3.5 w-3.5" />
+                        </a>
+
+                        <a
+                          href={bizLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={txtViewBusiness}
+                          title={txtViewBusiness}
+                          className="ring-focus rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
                     </div>
 
                     <div className="mt-3 space-y-1.5 text-xs">
@@ -1134,6 +1139,14 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                         </span>
                       </div>
                     </div>
+
+                    <a
+                      href={panelLink}
+                      className="ring-focus mt-3 flex items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                    >
+                      <LogIn className="h-3.5 w-3.5" />
+                      {enterPanelText}
+                    </a>
                   </article>
                 );
               })}
