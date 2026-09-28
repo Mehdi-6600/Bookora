@@ -1,8 +1,21 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+const ALLOWED_STATUSES = ["PENDING", "ACTIVE", "REJECTED"] as const;
+type AllowedStatus = (typeof ALLOWED_STATUSES)[number];
+
+function parseStatus(value: string | null): AllowedStatus | "ALL" {
+  if (!value) return "PENDING";
+  const upper = value.toUpperCase();
+  if (upper === "ALL") return "ALL";
+  if ((ALLOWED_STATUSES as readonly string[]).includes(upper)) {
+    return upper as AllowedStatus;
+  }
+  return "PENDING";
+}
+
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser();
 
@@ -10,9 +23,11 @@ export async function GET() {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const status = parseStatus(req.nextUrl.searchParams.get("status"));
+
     const subscriptions = await prisma.subscription.findMany({
-      where: { status: "PENDING" },
-      orderBy: { createdAt: "asc" },
+      where: status === "ALL" ? {} : { status },
+      orderBy: { createdAt: "desc" },
       include: {
         user: {
           select: {
@@ -23,7 +38,7 @@ export async function GET() {
           },
         },
         business: {
-          select: { name: true },
+          select: { name: true, slug: true },
         },
       },
     });
@@ -32,10 +47,14 @@ export async function GET() {
       subscriptions: subscriptions.map((sub) => ({
         id: sub.id,
         plan: sub.plan,
+        status: sub.status,
         receiptReference: sub.receiptReference,
         receiptNote: sub.receiptNote,
+        adminNote: sub.adminNote,
         createdAt: sub.createdAt,
+        reviewedAt: sub.reviewedAt,
         businessName: sub.business?.name || null,
+        businessSlug: sub.business?.slug || null,
         userName:
           sub.user.firstName ||
           sub.user.telegramUsername ||
