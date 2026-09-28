@@ -324,6 +324,17 @@
     "statLast7d": "۷ روز اخیر",
     "statActive": "فعال",
     "statArchived": "بایگانی",
-    "statTotal": "کل"
+    "statTotal": "کل",
+    "tabRequests": "درخواست‌ها",
+    "tabBusinesses": "کسب‌وکارها",
+    "bizTitle": "کسب‌وکارها",
+    "bizSearchPlaceholder": "جستجو بر اساس نام، اسلاگ یا نام مالک",
+    "bizEmpty": "کسب‌وکاری مطابق فیلتر فعلی پیدا نشد.",
+    "bizFilterAll": "همه",
+    "bizFilterActive": "فعال",
+    "bizFilterArchived": "بایگانی",
+    "bizServices": "سرویس",
+    "bizBookings": "رزرو",
+    "bizOwner": "مالک"
   }
 }
