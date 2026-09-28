@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { notifyUser } from "@/lib/telegram/notify";
+import { isRateLimited } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/get-client-ip";
 
 const receiptSchema = z.object({
   customerPhone: z.string().trim().min(3).max(30),
@@ -14,9 +16,14 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const ip = getClientIp(req);
+
+    // حداکثر ۲۰ تلاش در ۱۰ دقیقه از هر IP — جلوگیری از Brute-force حدس شماره تلفن رزروهای دیگران.
+    if (await isRateLimited(`receipt:${ip}`, 20, 10 * 60 * 1000)) {
+      return NextResponse.json({ error: "درخواست‌های زیاد. کمی صبر کنید." }, { status: 429 });
+    }
 
     let body: unknown;
-
     try {
       body = await req.json();
     } catch {
@@ -24,12 +31,8 @@ export async function POST(
     }
 
     const parsed = receiptSchema.safeParse(body);
-
     if (!parsed.success) {
-      return NextResponse.json(
-        { error: "اطلاعات معتبر نیست." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "اطلاعات معتبر نیست." }, { status: 400 });
     }
 
     const booking = await prisma.booking.findFirst({
@@ -39,7 +42,6 @@ export async function POST(
         service: { select: { name: true } },
       },
     });
-
     if (!booking) {
       return NextResponse.json(
         { error: "رزرو پیدا نشد یا شماره تلفن اشتباه است." },
@@ -50,7 +52,6 @@ export async function POST(
     const payment = await prisma.payment.findFirst({
       where: { bookingId: booking.id, type: "DEPOSIT", status: "PENDING" },
     });
-
     if (!payment) {
       return NextResponse.json(
         { error: "پرداخت در انتظاری برای این رزرو یافت نشد." },
@@ -76,10 +77,6 @@ export async function POST(
     return NextResponse.json({ submitted: true });
   } catch (error) {
     console.error("POST /api/public/bookings/[id]/receipt failed:", error);
-
-    return NextResponse.json(
-      { error: "ثبت رسید ناموفق بود." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "ثبت رسید ناموفق بود." }, { status: 500 });
   }
 }
