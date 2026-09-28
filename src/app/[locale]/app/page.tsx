@@ -2,6 +2,25 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import {
+  Building2,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  Clock,
+  Copy,
+  ExternalLink,
+  Link as LinkIcon,
+  Loader2,
+  Pencil,
+  Plus,
+  Power,
+  Scissors,
+  ShieldAlert,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
 import { SubscriptionPanel } from "@/components/subscription-panel";
@@ -593,7 +612,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-sm text-muted-foreground">{t("loading")}</div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t("loading")}
+        </div>
       </div>
     );
   }
@@ -620,16 +642,20 @@ function Dashboard({ user }: { user: TelegramUser }) {
       ? `/book/${selectedBusiness.slug}`
       : "";
 
+  const activeServices = selectedBusiness
+    ? selectedBusiness.services.filter((s) => s.active).length
+    : 0;
+
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
-      <div className="rounded-2xl border bg-card p-5 shadow-sm">
+    <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
+      {/* Header */}
+      <header className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold">
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">
               {t("greeting", { name: user.firstName || t("friend") })}
             </h1>
-
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-1.5 text-sm text-muted-foreground">
               {t("subtitle")}
             </p>
           </div>
@@ -640,14 +666,14 @@ function Dashboard({ user }: { user: TelegramUser }) {
             {user.isAdmin && (
               <Link
                 href="/admin"
-                className="rounded-lg border px-3 py-2 text-xs font-medium"
+                className="ring-focus rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
               >
                 {t("adminPanel")}
               </Link>
             )}
           </div>
         </div>
-      </div>
+      </header>
 
       <SubscriptionPanel
         businessId={selectedBusiness?.id ?? null}
@@ -655,23 +681,30 @@ function Dashboard({ user }: { user: TelegramUser }) {
       />
 
       {message && (
-        <div className="rounded-xl border bg-card p-4 text-sm">{message}</div>
+        <div className="rounded-xl border border-border/60 bg-card p-3.5 text-sm shadow-soft">
+          {message}
+        </div>
       )}
 
       {businesses.length === 0 ? (
-        <div className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm">
+        <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
           {createStep === 1 ? (
             <>
-              <div>
-                <h2 className="text-xl font-bold">
-                  {tWizard("countryQuestion")}
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {tWizard("countryHelp")}
-                </p>
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                  <Building2 className="h-4 w-4" />
+                </span>
+                <div>
+                  <h2 className="text-lg font-semibold tracking-tight">
+                    {tWizard("countryQuestion")}
+                  </h2>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {tWizard("countryHelp")}
+                  </p>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3">
+              <div className="mt-4 grid grid-cols-1 gap-3">
                 {(["IR", "OTHER"] as CountryCode[]).map((code) => (
                   <button
                     key={code}
@@ -680,7 +713,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       setBusinessCountry(code);
                       setCreateStep(2);
                     }}
-                    className="rounded-xl border bg-background p-4 text-right"
+                    className="ring-focus rounded-xl border border-border/60 bg-background p-4 text-start transition-colors hover:border-primary/40 hover:bg-muted/40"
                   >
                     <div className="font-semibold">
                       {code === "IR"
@@ -698,12 +731,14 @@ function Dashboard({ user }: { user: TelegramUser }) {
             </>
           ) : (
             <form onSubmit={createBusiness} className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold">{tWizard("infoTitle")}</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold tracking-tight">
+                  {tWizard("infoTitle")}
+                </h2>
                 <button
                   type="button"
                   onClick={() => setCreateStep(1)}
-                  className="text-xs text-muted-foreground underline"
+                  className="ring-focus rounded-md px-2 py-1 text-xs text-muted-foreground underline-offset-4 hover:underline"
                 >
                   {tWizard("changeCountry")}
                 </button>
@@ -723,7 +758,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 value={businessName}
                 onChange={(event) => setBusinessName(event.target.value)}
                 placeholder={tWizard("namePlaceholder")}
-                className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
+                className="ring-focus w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
               />
 
               <textarea
@@ -732,336 +767,453 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   setBusinessDescription(event.target.value)
                 }
                 placeholder={tWizard("descPlaceholder")}
-                className="min-h-24 w-full rounded-xl border bg-background px-4 py-3 outline-none"
+                className="ring-focus min-h-24 w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
               />
 
               <button
                 type="submit"
                 disabled={savingBusiness}
-                className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
+                className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
               >
+                {savingBusiness && <Loader2 className="h-4 w-4 animate-spin" />}
                 {savingBusiness
                   ? tWizard("creating")
                   : tWizard("createButton")}
               </button>
             </form>
           )}
-        </div>
+        </section>
       ) : (
         <>
-          <div className="rounded-2xl border bg-card p-5 shadow-sm">
-            <label className="mb-2 block text-sm font-medium">
+          {/* Business selector */}
+          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-soft">
+            <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {tBiz("selectLabel")}
             </label>
 
-            <select
-              value={selectedBusiness?.id || ""}
-              onChange={(event) => {
-                const business = businesses.find(
-                  (item) => item.id === event.target.value
-                );
-                setSelectedBusiness(business || null);
-                setEditingServiceId(null);
-                setConfirmDeleteId(null);
-                setEditingBusiness(false);
-                setConfirmDeleteBusiness(false);
-              }}
-              className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-            >
-              {businesses.map((business) => (
-                <option key={business.id} value={business.id}>
-                  {business.name}
-                  {business.status === "ARCHIVED"
-                    ? ` ${tBiz("archivedTag")}`
-                    : ""}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={selectedBusiness?.id || ""}
+                onChange={(event) => {
+                  const business = businesses.find(
+                    (item) => item.id === event.target.value
+                  );
+                  setSelectedBusiness(business || null);
+                  setEditingServiceId(null);
+                  setConfirmDeleteId(null);
+                  setEditingBusiness(false);
+                  setConfirmDeleteBusiness(false);
+                }}
+                className="ring-focus w-full appearance-none rounded-xl border border-border/60 bg-background px-4 py-3 pe-10 text-sm font-medium outline-none"
+              >
+                {businesses.map((business) => (
+                  <option key={business.id} value={business.id}>
+                    {business.name}
+                    {business.status === "ARCHIVED"
+                      ? ` ${tBiz("archivedTag")}`
+                      : ""}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute inset-y-0 end-3 my-auto h-4 w-4 text-muted-foreground" />
+            </div>
           </div>
 
           {selectedBusiness && (
             <>
-              <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                {isArchived && (
-                  <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                    {tBiz("archivedBanner")}
-                  </div>
-                )}
-
-                {editingBusiness ? (
-                  <div className="space-y-3">
-                    <input
-                      value={editBusinessName}
-                      onChange={(event) =>
-                        setEditBusinessName(event.target.value)
-                      }
-                      className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-                    />
-
-                    <textarea
-                      value={editBusinessDescription}
-                      onChange={(event) =>
-                        setEditBusinessDescription(event.target.value)
-                      }
-                      className="min-h-16 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-                    />
-
-                    <div className="grid grid-cols-2 gap-2">
-                      {(["IR", "OTHER"] as CountryCode[]).map((code) => (
-                        <button
-                          key={code}
-                          type="button"
-                          onClick={() => setEditBusinessCountry(code)}
-                          className={`rounded-lg border px-3 py-2 text-sm font-medium ${
-                            editBusinessCountry === code
-                              ? "border-primary bg-primary/10"
-                              : "bg-background"
-                          }`}
-                        >
-                          {code === "IR"
-                            ? tWizard("countryIR")
-                            : tWizard("countryOther")}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => saveBusinessEdit(selectedBusiness.id)}
-                        disabled={savingBusinessEdit}
-                        className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                      >
-                        {savingBusinessEdit
-                          ? tSvc("saving")
-                          : tSvc("saveButton")}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setEditingBusiness(false)}
-                        className="rounded-lg border px-3 py-2 text-sm font-medium"
-                      >
-                        {tSvc("cancelButton")}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <h2 className="text-xl font-bold">
-                      {selectedBusiness.name}
-                    </h2>
-
-                    {selectedBusiness.description && (
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {selectedBusiness.description}
-                      </p>
-                    )}
-
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {tBiz("countryLabel")}:{" "}
-                      {selectedBusinessCountry
-                        ? selectedBusinessCountry === "IR"
-                          ? tWizard("countryIR")
-                          : tWizard("countryOther")
-                        : tBiz("notSet")}{" "}
-                      — {tBiz("currencyLabel")}: {selectedBusiness.currency}
-                    </p>
-
-                    <div className="mt-4 rounded-xl bg-muted p-4">
-                      <p className="text-xs text-muted-foreground">
-                        {tBiz("bookingLinkLabel")}
-                      </p>
-
-                      <p className="mt-1 break-all text-sm font-medium">
-                        {bookingUrl}
-                      </p>
-
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => copyBookingLink(bookingUrl)}
-                          className="rounded-lg border px-3 py-2 text-xs font-medium"
-                        >
-                          {linkCopied ? tBiz("copied") : tBiz("copyLink")}
-                        </button>
-
-                        <a
-                          href={`/book/${selectedBusiness.slug}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded-lg border px-3 py-2 text-center text-xs font-medium"
-                        >
-                          {tBiz("openPage")}
-                        </a>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      {isArchived ? (
-                        <button
-                          type="button"
-                          onClick={() => reactivateBusiness(selectedBusiness)}
-                          disabled={reactivating}
-                          className="col-span-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                        >
-                          {reactivating
-                            ? tBiz("reactivating")
-                            : tBiz("reactivateButton")}
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => startEditBusiness(selectedBusiness)}
-                            className="rounded-lg border px-3 py-2 text-sm font-medium"
-                          >
-                            {tBiz("editButton")}
-                          </button>
-
-                          {confirmDeleteBusiness ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                deleteBusiness(selectedBusiness.id)
-                              }
-                              disabled={deletingBusiness}
-                              className="rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-50"
-                            >
-                              {deletingBusiness
-                                ? tBiz("deleting")
-                                : tBiz("confirmDelete")}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteBusiness(true)}
-                              className="rounded-lg border border-destructive/30 px-3 py-2 text-sm font-medium text-destructive"
-                            >
-                              {tBiz("deleteButton")}
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {!isArchived && (
-                <>
-                  <form
-                    onSubmit={createService}
-                    className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm"
-                  >
-                    <div>
-                      <h2 className="text-xl font-bold">
-                        {tSvc("addTitle")}
-                      </h2>
-
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {tSvc("addDesc")}
-                      </p>
-                    </div>
-
-                    <input
-                      value={serviceName}
-                      onChange={(event) => setServiceName(event.target.value)}
-                      placeholder={tSvc("namePlaceholder")}
-                      className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                    />
-
-                    <textarea
-                      value={serviceDescription}
-                      onChange={(event) =>
-                        setServiceDescription(event.target.value)
-                      }
-                      placeholder={tSvc("descPlaceholder")}
-                      className="min-h-20 w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                    />
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <input
-                        value={servicePrice}
-                        onChange={(event) =>
-                          setServicePrice(event.target.value)
-                        }
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder={tSvc("pricePlaceholder", {
-                          currency: selectedBusiness.currency,
-                        })}
-                        className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                      />
-
-                      <input
-                        value={serviceDuration}
-                        onChange={(event) =>
-                          setServiceDuration(event.target.value)
-                        }
-                        type="number"
-                        min="1"
-                        placeholder={tSvc("durationPlaceholder")}
-                        className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <p className="mb-2 text-sm font-medium">
-                        {tSvc("depositLabel")}
-                      </p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {(["NONE", "PERCENTAGE", "FIXED"] as const).map(
-                          (type) => (
-                            <button
-                              key={type}
-                              type="button"
-                              onClick={() => setServiceDepositType(type)}
-                              className={`rounded-lg border px-2 py-2 text-xs font-medium ${
-                                serviceDepositType === type
-                                  ? "border-primary bg-primary/10"
-                                  : "bg-background"
-                              }`}
-                            >
-                              {depositLabels[type]}
-                            </button>
-                          )
+              {/* Business card */}
+              <section className="overflow-hidden rounded-2xl border border-border/60 bg-card shadow-soft">
+                <div className="border-b border-border/60 bg-muted/30 p-5">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-background text-foreground shadow-sm">
+                      <Building2 className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h2 className="truncate text-lg font-semibold tracking-tight">
+                          {selectedBusiness.name}
+                        </h2>
+                        {isArchived && (
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                            <ShieldAlert className="h-3 w-3" />
+                            {tBiz("archivedTag")}
+                          </span>
                         )}
                       </div>
 
-                      {serviceDepositType !== "NONE" && (
+                      {selectedBusiness.description && (
+                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                          {selectedBusiness.description}
+                        </p>
+                      )}
+
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span>
+                          {tBiz("countryLabel")}:{" "}
+                          <span className="font-medium text-foreground">
+                            {selectedBusinessCountry
+                              ? selectedBusinessCountry === "IR"
+                                ? tWizard("countryIR")
+                                : tWizard("countryOther")
+                              : tBiz("notSet")}
+                          </span>
+                        </span>
+                        <span className="opacity-50">•</span>
+                        <span>
+                          {tBiz("currencyLabel")}:{" "}
+                          <span className="font-medium text-foreground">
+                            {selectedBusiness.currency}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stat tiles */}
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3">
+                      <Scissors className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="tabular text-sm font-semibold leading-tight">
+                          {selectedBusiness.services.length}
+                        </div>
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {tSvc("listTitle")}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3">
+                      <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="tabular text-sm font-semibold leading-tight">
+                          {selectedBusiness._count?.bookings ?? 0}
+                        </div>
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {tSvc("listTitle")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {isArchived && (
+                  <div className="flex items-start gap-2 border-b border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-400">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{tBiz("archivedBanner")}</span>
+                  </div>
+                )}
+
+                <div className="p-5">
+                  {editingBusiness ? (
+                    <div className="space-y-3">
+                      <input
+                        value={editBusinessName}
+                        onChange={(event) =>
+                          setEditBusinessName(event.target.value)
+                        }
+                        className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                      />
+
+                      <textarea
+                        value={editBusinessDescription}
+                        onChange={(event) =>
+                          setEditBusinessDescription(event.target.value)
+                        }
+                        className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                      />
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {(["IR", "OTHER"] as CountryCode[]).map((code) => (
+                          <button
+                            key={code}
+                            type="button"
+                            onClick={() => setEditBusinessCountry(code)}
+                            className={`ring-focus rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                              editBusinessCountry === code
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border/60 bg-background"
+                            }`}
+                          >
+                            {code === "IR"
+                              ? tWizard("countryIR")
+                              : tWizard("countryOther")}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => saveBusinessEdit(selectedBusiness.id)}
+                          disabled={savingBusinessEdit}
+                          className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                        >
+                          {savingBusinessEdit && (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          )}
+                          {savingBusinessEdit
+                            ? tSvc("saving")
+                            : tSvc("saveButton")}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setEditingBusiness(false)}
+                          className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                        >
+                          {tSvc("cancelButton")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Booking link card */}
+                      <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          <LinkIcon className="h-3.5 w-3.5" />
+                          {tBiz("bookingLinkLabel")}
+                        </div>
+
+                        <p className="mt-2 break-all text-sm font-medium">
+                          {bookingUrl}
+                        </p>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => copyBookingLink(bookingUrl)}
+                            className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                          >
+                            {linkCopied ? (
+                              <>
+                                <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                                {tBiz("copied")}
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3.5 w-3.5" />
+                                {tBiz("copyLink")}
+                              </>
+                            )}
+                          </button>
+
+                          <a
+                            href={`/book/${selectedBusiness.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            {tBiz("openPage")}
+                          </a>
+                        </div>
+                      </div>
+
+                      {/* Business actions */}
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        {isArchived ? (
+                          <button
+                            type="button"
+                            onClick={() => reactivateBusiness(selectedBusiness)}
+                            disabled={reactivating}
+                            className="ring-focus col-span-2 flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                          >
+                            {reactivating && (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            )}
+                            {reactivating
+                              ? tBiz("reactivating")
+                              : tBiz("reactivateButton")}
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                startEditBusiness(selectedBusiness)
+                              }
+                              className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              {tBiz("editButton")}
+                            </button>
+
+                            {confirmDeleteBusiness ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  deleteBusiness(selectedBusiness.id)
+                                }
+                                disabled={deletingBusiness}
+                                className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                              >
+                                {deletingBusiness && (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                )}
+                                {deletingBusiness
+                                  ? tBiz("deleting")
+                                  : tBiz("confirmDelete")}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteBusiness(true)}
+                                className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                {tBiz("deleteButton")}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </section>
+
+              {!isArchived && (
+                <>
+                  {/* Add service */}
+                  <form
+                    onSubmit={createService}
+                    className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                        <Plus className="h-4 w-4" />
+                      </span>
+                      <div>
+                        <h2 className="text-lg font-semibold tracking-tight">
+                          {tSvc("addTitle")}
+                        </h2>
+                        <p className="mt-0.5 text-sm text-muted-foreground">
+                          {tSvc("addDesc")}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <input
+                        value={serviceName}
+                        onChange={(event) => setServiceName(event.target.value)}
+                        placeholder={tSvc("namePlaceholder")}
+                        className="ring-focus w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                      />
+
+                      <textarea
+                        value={serviceDescription}
+                        onChange={(event) =>
+                          setServiceDescription(event.target.value)
+                        }
+                        placeholder={tSvc("descPlaceholder")}
+                        className="ring-focus min-h-20 w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                      />
+
+                      <div className="grid grid-cols-2 gap-3">
                         <input
-                          value={serviceDepositValue}
+                          value={servicePrice}
                           onChange={(event) =>
-                            setServiceDepositValue(event.target.value)
+                            setServicePrice(event.target.value)
                           }
                           type="number"
                           min="0"
                           step="0.01"
-                          placeholder={
-                            serviceDepositType === "PERCENTAGE"
-                              ? tSvc("depositPercentPlaceholder")
-                              : tSvc("depositFixedPlaceholder", {
-                                  currency: selectedBusiness.currency,
-                                })
-                          }
-                          className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                          placeholder={tSvc("pricePlaceholder", {
+                            currency: selectedBusiness.currency,
+                          })}
+                          className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
                         />
-                      )}
-                    </div>
 
-                    <button
-                      type="submit"
-                      disabled={savingService}
-                      className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
-                    >
-                      {savingService ? tSvc("adding") : tSvc("addButton")}
-                    </button>
+                        <input
+                          value={serviceDuration}
+                          onChange={(event) =>
+                            setServiceDuration(event.target.value)
+                          }
+                          type="number"
+                          min="1"
+                          placeholder={tSvc("durationPlaceholder")}
+                          className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <p className="mb-2 text-sm font-medium">
+                          {tSvc("depositLabel")}
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(["NONE", "PERCENTAGE", "FIXED"] as const).map(
+                            (type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => setServiceDepositType(type)}
+                                className={`ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
+                                  serviceDepositType === type
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border/60 bg-background hover:bg-muted"
+                                }`}
+                              >
+                                {depositLabels[type]}
+                              </button>
+                            )
+                          )}
+                        </div>
+
+                        {serviceDepositType !== "NONE" && (
+                          <input
+                            value={serviceDepositValue}
+                            onChange={(event) =>
+                              setServiceDepositValue(event.target.value)
+                            }
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder={
+                              serviceDepositType === "PERCENTAGE"
+                                ? tSvc("depositPercentPlaceholder")
+                                : tSvc("depositFixedPlaceholder", {
+                                    currency: selectedBusiness.currency,
+                                  })
+                            }
+                            className="ring-focus tabular mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                          />
+                        )}
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={savingService}
+                        className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                      >
+                        {savingService && (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        )}
+                        {savingService ? tSvc("adding") : tSvc("addButton")}
+                      </button>
+                    </div>
                   </form>
 
-                  <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                    <h2 className="text-xl font-bold">{tSvc("listTitle")}</h2>
+                  {/* Service list */}
+                  <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                          <Scissors className="h-4 w-4" />
+                        </span>
+                        <div>
+                          <h2 className="text-lg font-semibold tracking-tight">
+                            {tSvc("listTitle")}
+                          </h2>
+                          {selectedBusiness.services.length > 0 && (
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {activeServices} /{" "}
+                              {selectedBusiness.services.length}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
                     {selectedBusiness.services.length === 0 ? (
                       <p className="mt-4 text-sm text-muted-foreground">
@@ -1072,7 +1224,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         {selectedBusiness.services.map((service) => (
                           <div
                             key={service.id}
-                            className="rounded-xl border p-4"
+                            className="rounded-xl border border-border/60 bg-background p-4"
                           >
                             {editingServiceId === service.id ? (
                               <div className="space-y-3">
@@ -1081,7 +1233,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   onChange={(event) =>
                                     setEditName(event.target.value)
                                   }
-                                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                  className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
                                 />
 
                                 <textarea
@@ -1089,7 +1241,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   onChange={(event) =>
                                     setEditDescription(event.target.value)
                                   }
-                                  className="min-h-16 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                  className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
                                 />
 
                                 <div className="grid grid-cols-2 gap-2">
@@ -1101,7 +1253,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     type="number"
                                     min="0"
                                     step="0.01"
-                                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                    className="ring-focus tabular w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
                                   />
 
                                   <input
@@ -1111,7 +1263,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     }
                                     type="number"
                                     min="1"
-                                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                    className="ring-focus tabular w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
                                   />
                                 </div>
 
@@ -1126,10 +1278,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                         onClick={() =>
                                           setEditDepositType(type)
                                         }
-                                        className={`rounded-lg border px-2 py-2 text-xs font-medium ${
+                                        className={`ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
                                           editDepositType === type
-                                            ? "border-primary bg-primary/10"
-                                            : "bg-background"
+                                            ? "border-primary bg-primary/10 text-primary"
+                                            : "border-border/60 bg-background hover:bg-muted"
                                         }`}
                                       >
                                         {depositLabels[type]}
@@ -1146,7 +1298,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                       type="number"
                                       min="0"
                                       step="0.01"
-                                      className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
+                                      className="ring-focus tabular mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
                                     />
                                   )}
                                 </div>
@@ -1156,8 +1308,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     type="button"
                                     onClick={() => saveEdit(service.id)}
                                     disabled={savingEdit}
-                                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                                    className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                                   >
+                                    {savingEdit && (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    )}
                                     {savingEdit
                                       ? tSvc("saving")
                                       : tSvc("saveButton")}
@@ -1166,7 +1321,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   <button
                                     type="button"
                                     onClick={cancelEdit}
-                                    className="rounded-lg border px-3 py-2 text-sm font-medium"
+                                    className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
                                   >
                                     {tSvc("cancelButton")}
                                   </button>
@@ -1175,18 +1330,33 @@ function Dashboard({ user }: { user: TelegramUser }) {
                             ) : (
                               <>
                                 <div className="flex items-start justify-between gap-4">
-                                  <div>
-                                    <h3 className="font-semibold">
-                                      {service.name}
-                                      {!service.active && (
-                                        <span className="mr-2 text-xs font-normal text-muted-foreground">
-                                          {tSvc("inactiveTag")}
-                                        </span>
-                                      )}
-                                    </h3>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <h3 className="font-semibold">
+                                        {service.name}
+                                      </h3>
+                                      <span
+                                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                          service.active
+                                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                            : "bg-muted text-muted-foreground"
+                                        }`}
+                                      >
+                                        <span
+                                          className={`h-1.5 w-1.5 rounded-full ${
+                                            service.active
+                                              ? "bg-emerald-500"
+                                              : "bg-muted-foreground/60"
+                                          }`}
+                                        />
+                                        {service.active
+                                          ? tSvc("activate")
+                                          : tSvc("inactiveTag")}
+                                      </span>
+                                    </div>
 
                                     {service.description && (
-                                      <p className="mt-1 text-sm text-muted-foreground">
+                                      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                                         {service.description}
                                       </p>
                                     )}
@@ -1210,15 +1380,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     )}
                                   </div>
 
-                                  <div className="text-left text-sm">
-                                    <div className="font-semibold">
+                                  <div className="shrink-0 text-end text-sm">
+                                    <div className="tabular font-semibold">
                                       {formatPrice(
                                         service.price,
                                         service.currency
                                       )}
                                     </div>
-
-                                    <div className="text-muted-foreground">
+                                    <div className="mt-0.5 flex items-center justify-end gap-1 text-xs text-muted-foreground">
+                                      <Clock className="h-3 w-3" />
                                       {tSvc("minutes", {
                                         count: service.durationMinutes,
                                       })}
@@ -1230,16 +1400,18 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   <button
                                     type="button"
                                     onClick={() => startEdit(service)}
-                                    className="rounded-lg border px-3 py-2 text-xs font-medium"
+                                    className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
                                   >
+                                    <Pencil className="h-3 w-3" />
                                     {tSvc("editButton")}
                                   </button>
 
                                   <button
                                     type="button"
                                     onClick={() => toggleActive(service)}
-                                    className="rounded-lg border px-3 py-2 text-xs font-medium"
+                                    className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
                                   >
+                                    <Power className="h-3 w-3" />
                                     {service.active
                                       ? tSvc("deactivate")
                                       : tSvc("activate")}
@@ -1252,11 +1424,14 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                         deleteService(service.id)
                                       }
                                       disabled={deletingId === service.id}
-                                      className="rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground disabled:opacity-50"
+                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                                     >
-                                      {deletingId === service.id
-                                        ? "..."
-                                        : tSvc("confirmDelete")}
+                                      {deletingId === service.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Check className="h-3 w-3" />
+                                      )}
+                                      {tSvc("confirmDelete")}
                                     </button>
                                   ) : (
                                     <button
@@ -1264,8 +1439,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                       onClick={() =>
                                         setConfirmDeleteId(service.id)
                                       }
-                                      className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive"
+                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5"
                                     >
+                                      <Trash2 className="h-3 w-3" />
                                       {tSvc("deleteButton")}
                                     </button>
                                   )}
@@ -1276,7 +1452,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         ))}
                       </div>
                     )}
-                  </div>
+                  </section>
 
                   <BookingsPanel businessId={selectedBusiness.id} />
 
@@ -1297,7 +1473,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
 export default function MiniAppPage() {
   return (
-    <main className="min-h-screen px-4">
+    <main className="min-h-screen">
       <TelegramAuthGate>
         {(user) => <Dashboard user={user} />}
       </TelegramAuthGate>
