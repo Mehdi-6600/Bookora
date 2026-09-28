@@ -324,6 +324,17 @@
     "statLast7d": "آخر 7 أيام",
     "statActive": "نشط",
     "statArchived": "مؤرشف",
-    "statTotal": "الإجمالي"
+    "statTotal": "الإجمالي",
+    "tabRequests": "الطلبات",
+    "tabBusinesses": "الأنشطة التجارية",
+    "bizTitle": "الأنشطة التجارية",
+    "bizSearchPlaceholder": "ابحث بالاسم أو الرابط أو اسم المالك",
+    "bizEmpty": "لا توجد أنشطة تجارية مطابقة للتصفية الحالية.",
+    "bizFilterAll": "الكل",
+    "bizFilterActive": "نشط",
+    "bizFilterArchived": "مؤرشف",
+    "bizServices": "الخدمات",
+    "bizBookings": "الحجوزات",
+    "bizOwner": "المالك"
   }
 }
