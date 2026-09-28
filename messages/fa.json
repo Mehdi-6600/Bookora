@@ -302,6 +302,16 @@
     "rejectButton": "رد",
     "reviewError": "بررسی ناموفق بود.",
     "approved": "اشتراک فعال شد.",
-    "rejected": "درخواست رد شد."
+    "rejected": "درخواست رد شد.",
+    "filterPending": "در انتظار",
+    "filterApproved": "تأییدشده",
+    "filterRejected": "ردشده",
+    "filterEmptyApproved": "درخواست تأییدشده‌ای وجود ندارد.",
+    "filterEmptyRejected": "درخواست ردشده‌ای وجود ندارد.",
+    "submittedAt": "ثبت‌شده در {date}",
+    "reviewedAt": "بررسی‌شده در {date}",
+    "adminNote": "یادداشت ادمین: {note}",
+    "viewBusiness": "باز کردن کسب‌وکار",
+    "rejectNotePlaceholder": "دلیل رد (اختیاری)"
   }
 }
