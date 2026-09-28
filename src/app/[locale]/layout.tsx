@@ -4,6 +4,7 @@ import { getMessages, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 import Script from "next/script";
 import { routing, type Locale } from "@/i18n/routing";
+import { TelegramThemeSync } from "@/components/telegram/theme-sync";
 import "../globals.css";
 
 export const metadata: Metadata = {
@@ -16,6 +17,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   themeColor: "#0f172a",
+  viewportFit: "cover",
 };
 
 export function generateStaticParams() {
@@ -48,6 +50,7 @@ export default async function LocaleLayout({
           strategy="beforeInteractive"
         />
         <NextIntlClientProvider messages={messages}>
+          <TelegramThemeSync />
           {children}
         </NextIntlClientProvider>
       </body>
