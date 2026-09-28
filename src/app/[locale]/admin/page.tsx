@@ -16,7 +16,6 @@ import {
   RotateCcw,
   ShieldCheck,
   StickyNote,
-  User as UserIcon,
   X,
   XCircle,
 } from "lucide-react";
@@ -26,7 +25,7 @@ import { MANUAL_PAYMENT_SETTING_KEYS } from "@/lib/admin-settings";
 
 type SettingRow = { key: string; value: string };
 
-type SubscriptionStatus = "PENDING" | "ACTIVE" | "REJECTED";
+type FilterKey = "PENDING" | "ACTIVE" | "REJECTED";
 
 type SubscriptionRow = {
   id: string;
@@ -41,8 +40,6 @@ type SubscriptionRow = {
   businessSlug: string | null;
   userName: string;
 };
-
-type FilterKey = "PENDING" | "ACTIVE" | "REJECTED";
 
 const FILTERS: FilterKey[] = ["PENDING", "ACTIVE", "REJECTED"];
 
@@ -61,6 +58,16 @@ function formatDate(value: string, locale: string): string {
   } catch {
     return value;
   }
+}
+
+function statusBadgeClass(status: string): string {
+  if (status === "ACTIVE") {
+    return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
+  }
+  if (status === "REJECTED") {
+    return "bg-destructive/10 text-destructive";
+  }
+  return "bg-amber-500/10 text-amber-700 dark:text-amber-400";
 }
 
 function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
@@ -112,22 +119,19 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  const loadRows = useCallback(
-    async (which: FilterKey) => {
-      try {
-        setLoadingRows(true);
-        const response = await fetch(
-          `/api/admin/subscriptions?status=${which}`,
-          { cache: "no-store" }
-        );
-        const data = await response.json();
-        if (response.ok) setRows(data.subscriptions || []);
-      } finally {
-        setLoadingRows(false);
-      }
-    },
-    []
-  );
+  const loadRows = useCallback(async (which: FilterKey) => {
+    try {
+      setLoadingRows(true);
+      const response = await fetch(
+        `/api/admin/subscriptions?status=${which}`,
+        { cache: "no-store" }
+      );
+      const data = await response.json();
+      if (response.ok) setRows(data.subscriptions || []);
+    } finally {
+      setLoadingRows(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (isAdmin) {
@@ -221,12 +225,8 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     REJECTED: t("filterEmptyRejected"),
   };
 
-  const pendingCount =
-    filter === "PENDING" ? rows.length : undefined;
-
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
-      {/* Header */}
       <header className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground">
@@ -240,14 +240,13 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </div>
       </header>
 
-      {/* Message */}
       {message && (
         <div
-          className={`flex items-start gap-2 rounded-xl border p-3.5 text-sm shadow-soft ${
+          className={
             message.kind === "ok"
-              ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400"
-              : "border-destructive/30 bg-destructive/5 text-destructive"
-          }`}
+              ? "flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 text-sm text-emerald-700 shadow-soft dark:text-emerald-400"
+              : "flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 text-sm text-destructive shadow-soft"
+          }
         >
           {message.kind === "ok" ? (
             <Check className="mt-0.5 h-4 w-4 shrink-0" />
@@ -258,7 +257,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
 
-      {/* Payment settings */}
       <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
         <header className="flex items-start gap-3">
           <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
@@ -310,7 +308,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         )}
       </section>
 
-      {/* Subscriptions with filter */}
       <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
         <header className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
@@ -319,7 +316,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
             </span>
             <div>
               <h2 className="text-lg font-semibold tracking-tight">
-                {t("pendingTitle", { count: pendingCount ?? rows.length })}
+                {t("pendingTitle", { count: rows.length })}
               </h2>
             </div>
           </div>
@@ -332,27 +329,31 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
             aria-label={t("loading")}
           >
             <RotateCcw
-              className={`h-4 w-4 ${loadingRows ? "animate-spin" : ""}`}
+              className={
+                loadingRows ? "h-4 w-4 animate-spin" : "h-4 w-4"
+              }
             />
           </button>
         </header>
 
-        {/* Filter pills */}
         <div className="mt-4 grid grid-cols-3 gap-2">
-          {FILTERS.map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-              className={`ring-focus rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                filter === key
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border/60 bg-background hover:bg-muted"
-              }`}
-            >
-              {filterLabels[key]}
-            </button>
-          ))}
+          {FILTERS.map((key) => {
+            const active = filter === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                className={
+                  active
+                    ? "ring-focus rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-medium text-primary transition-colors"
+                    : "ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                }
+              >
+                {filterLabels[key]}
+              </button>
+            );
+          })}
         </div>
 
         {loadingRows ? (
@@ -373,18 +374,12 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
               const planLabel =
                 planLabels[sub.plan as PlanCode] || sub.plan;
               const isPending = sub.status === "PENDING";
-              const statusBadge =
-                sub.status === "ACTIVE"
-                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : sub.status === "REJECTED"
-                  ? "bg-destructive/10 text-destructive <"
-                  : "bg-amber-500/span10 text-amber-700>
- dark:text-amber-400";
+              const badgeClass = statusBadgeClass(sub.status);
 
-                                       return (
-                < {article
-                  key={sub.idt}
-                  className="rounded-xl border border("-border/60 bg-background p-4"
+              return (
+                <article
+                  key={sub.id}
+                  className="rounded-xl border border-border/60 bg-background p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -393,7 +388,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                           {sub.userName}
                         </h3>
                         <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge}`}
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${badgeClass}`}
                         >
                           {filterLabels[
                             sub.status as FilterKey
@@ -458,7 +453,8 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                     {sub.reviewedAt && (
                       <div className="flex items-start gap-2 text-muted-foreground">
                         <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                       reviewedAt", {
+                        <span>
+                          {t("reviewedAt", {
                             date: formatDate(sub.reviewedAt, locale),
                           })}
                         </span>
@@ -475,76 +471,72 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                     )}
                   </dl>
 
-                  {isPending && (
-                    <>
-                      {rejectingId === sub.id ? (
-                        <div className="mt-3 space-y-2">
-                          <input
-                            value={rejectNote}
-                            onChange={(event) =>
-                              setRejectNote(event.target.value)
-                            }
-                            placeholder={t("rejectNotePlaceholder")}
-                            className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
-                          />
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                review(sub.id, "reject", rejectNote)
-                              }
-                              disabled={reviewingId === sub.id}
-                              className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                            >
-                              {reviewingId === sub.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <XCircle className="h-3.5 w-3.5" />
-                              )}
-                              {t("rejectButton")}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRejectingId(null);
-                                setRejectNote("");
-                              }}
-                              className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
-                            >
-                              {tSub("cancelButton")}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => review(sub.id, "approve")}
-                            disabled={reviewingId === sub.id}
-                            className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                          >
-                            {reviewingId === sub.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                            )}
-                            {t("approveButton")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRejectingId(sub.id);
-                              setRejectNote("");
-                            }}
-                            disabled={reviewingId === sub.id}
-                            className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
-                          >
+                  {isPending && rejectingId === sub.id && (
+                    <div className="mt-3 space-y-2">
+                      <input
+                        value={rejectNote}
+                        onChange={(event) =>
+                          setRejectNote(event.target.value)
+                        }
+                        placeholder={t("rejectNotePlaceholder")}
+                        className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => review(sub.id, "reject", rejectNote)}
+                          disabled={reviewingId === sub.id}
+                          className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                        >
+                          {reviewingId === sub.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
                             <XCircle className="h-3.5 w-3.5" />
-                            {t("rejectButton")}
-                          </button>
-                        </div>
-                      )}
-                    </>
+                          )}
+                          {t("rejectButton")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRejectingId(null);
+                            setRejectNote("");
+                          }}
+                          className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                        >
+                          {tSub("cancelButton")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {isPending && rejectingId !== sub.id && (
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => review(sub.id, "approve")}
+                        disabled={reviewingId === sub.id}
+                        className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                      >
+                        {reviewingId === sub.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        )}
+                        {t("approveButton")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRejectingId(sub.id);
+                          setRejectNote("");
+                        }}
+                        disabled={reviewingId === sub.id}
+                        className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                        {t("rejectButton")}
+                      </button>
+                    </div>
                   )}
                 </article>
               );
@@ -552,12 +544,6 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
           </div>
         )}
       </section>
-
-      {/* Footer info (icon-only legend, subtle) */}
-      <div className="flex items-center justify-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
-        <UserIcon className="h-3 w-3" />
-        <span>Bookora Admin</span>
-      </div>
     </div>
   );
 }
@@ -566,7 +552,7 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen">
       <TelegramAuthGate>
-        {(user) => <AdminDashboard isAdmin={user.isAdmin} />}
+        {(userلی) => <AdminDashboard isAdmin={user.isAdmin} از />}
       </TelegramAuthGate>
     </main>
   );
