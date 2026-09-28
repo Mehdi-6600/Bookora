@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
+import { businessOwnerFilter } from "@/lib/auth/ownership";
 
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
     }
 
     const business = await prisma.business.findFirst({
-      where: { id: businessId, ownerId: user.id },
+      where: { id: businessId, ...businessOwnerFilter(user) },
       select: { id: true },
     });
 
@@ -100,7 +101,7 @@ export async function PUT(req: NextRequest) {
     const { businessId, days } = parsed.data;
 
     const business = await prisma.business.findFirst({
-      where: { id: businessId, ownerId: user.id },
+      where: { id: businessId, ...businessOwnerFilter(user) },
       select: { id: true },
     });
 
