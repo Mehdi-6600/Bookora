@@ -19,8 +19,13 @@ const createBookingSchema = z.object({
   customerEmail: z.string().trim().email().nullable().optional(),
 });
 
-function computeDeposit(depositType: string, depositValue: number, price: number): number {
-  if (depositType === "PERCENTAGE") return Math.round(((price * depositValue) / 100) * 100) / 100;
+function computeDeposit(
+  depositType: string,
+  depositValue: number,
+  price: number
+): number {
+  if (depositType === "PERCENTAGE")
+    return Math.round(((price * depositValue) / 100) * 100) / 100;
   if (depositType === "FIXED") return Math.min(depositValue, price);
   return 0;
 }
@@ -33,9 +38,11 @@ export async function POST(
     const { slug } = await params;
     const ip = getClientIp(req);
 
-    // حداکثر ۱۰ رزرو در ۱۰ دقیقه از هر IP — جلوگیری از اسپم/Bot بدون آسیب به کاربر واقعی.
     if (await isRateLimited(`booking:${ip}`, 10, 10 * 60 * 1000)) {
-      return NextResponse.json({ error: "درخواست‌های زیاد. کمی صبر کنید." }, { status: 429 });
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { status: 429 }
+      );
     }
 
     let body: unknown;
@@ -47,7 +54,10 @@ export async function POST(
 
     const parsed = createBookingSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: "اطلاعات رزرو معتبر نیست." }, { status: 400 });
+      return NextResponse.json(
+        { error: "اطلاعات رزرو معتبر نیست." },
+        { status: 400 }
+      );
     }
 
     const business = await prisma.business.findFirst({
@@ -55,40 +65,76 @@ export async function POST(
       include: { owner: { select: { telegramId: true } } },
     });
     if (!business) {
-      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
+      return NextResponse.json(
+        { error: "کسب‌وکار پیدا نشد." },
+        { status: 404 }
+      );
     }
 
     const service = await prisma.service.findFirst({
-      where: { id: parsed.data.serviceId, businessId: business.id, active: true },
+      where: {
+        id: parsed.data.serviceId,
+        businessId: business.id,
+        active: true,
+      },
     });
     if (!service) {
-      return NextResponse.json({ error: "سرویس پیدا نشد." }, { status: 404 });
+      return NextResponse.json(
+        { error: "سرویس پیدا نشد." },
+        { status: 404 }
+      );
     }
 
     const startAt = new Date(parsed.data.startAt);
-    const endAt = new Date(startAt.getTime() + service.durationMinutes * 60000);
+    const endAt = new Date(
+      startAt.getTime() + service.durationMinutes * 60000
+    );
 
     if (startAt.getTime() <= Date.now()) {
-      return NextResponse.json({ error: "این زمان دیگر معتبر نیست." }, { status: 400 });
+      return NextResponse.json(
+        { error: "این زمان دیگر معتبر نیست." },
+        { status: 400 }
+      );
     }
 
     const localDate = toZonedTime(startAt, business.timezone);
     const dateStr = format(localDate, "yyyy-MM-dd");
-    const dayOfWeek = localDate.getDay();
+    // FIX: getUTCDay روی Date برگشته از toZonedTime، روز هفته در
+    // timezone کسب‌وکار را می‌دهد. getDay روز هفته در timezone سرور
+    // (UTC در Vercel) را می‌داد و باعث جابه‌جایی روزها می‌شد.
+    const dayOfWeek = localDate.getUTCDay();
 
     const workingHour = await prisma.workingHour.findUnique({
-      where: { businessId_dayOfWeek: { businessId: business.id, dayOfWeek } },
+      where: {
+        businessId_dayOfWeek: {
+          businessId: business.id,
+          dayOfWeek,
+        },
+      },
     });
     if (!workingHour || !workingHour.enabled) {
-      return NextResponse.json({ error: "این روز کسب‌وکار تعطیل است." }, { status: 409 });
+      return NextResponse.json(
+        { error: "این روز کسب‌وکار تعطیل است." },
+        { status: 409 }
+      );
     }
 
-    const dayStart = fromZonedTime(`${dateStr}T00:00:00`, business.timezone);
-    const dayEnd = fromZonedTime(`${dateStr}T23:59:59`, business.timezone);
+    const dayStart = fromZonedTime(
+      `${dateStr}T00:00:00`,
+      business.timezone
+    );
+    const dayEnd = fromZonedTime(
+      `${dateStr}T23:59:59`,
+      business.timezone
+    );
 
     const [timeOffs, existingBookings] = await Promise.all([
       prisma.timeOff.findMany({
-        where: { businessId: business.id, startAt: { lte: dayEnd }, endAt: { gte: dayStart } },
+        where: {
+          businessId: business.id,
+          startAt: { lte: dayEnd },
+          endAt: { gte: dayStart },
+        },
       }),
       prisma.booking.findMany({
         where: {
@@ -101,14 +147,15 @@ export async function POST(
     ]);
 
     const busyRanges = [
-      ...timeOffs.map((t) => ({ start: t.startAt, end: t.endAt })),
+      ...timeOffs.map((t) => ({ start: t },
+.startAt, end: t.endAt      })),
       ...existingBookings.map((b) => ({ start: b.startAt, end: b.endAt })),
     ];
 
     const validSlots = computeAvailableSlots({
       dateStr,
-      timezone: business.timezone,
-      openTime: workingHour.openTime,
+      timezone: business.time datazone:,
+      openTime: workingHour.openTime {,
       closeTime: workingHour.closeTime,
       breakStart: workingHour.breakStart,
       breakEnd: workingHour.breakEnd,
@@ -116,7 +163,9 @@ export async function POST(
       busyRanges,
     });
 
-    const isValid = validSlots.some((slot) => Math.abs(slot.getTime() - startAt.getTime()) < 1000);
+    const isValid = validSlots.some(
+      (slot) => Math.abs(slot.getTime() - startAt.getTime()) < 1000
+    );
     if (!isValid) {
       return NextResponse.json(
         { error: "این زمان دیگر آزاد نیست، لطفاً زمان دیگری انتخاب کنید." },
@@ -125,7 +174,11 @@ export async function POST(
     }
 
     const price = Number(service.price);
-    const depositDue = computeDeposit(service.depositType, Number(service.depositValue), price);
+    const depositDue = computeDeposit(
+      service.depositType,
+      Number(service.depositValue),
+      price
+    );
     const requiresDeposit = depositDue > 0;
 
     try {
@@ -179,26 +232,35 @@ export async function POST(
 
       let paymentMethod = null;
       if (requiresDeposit) {
-        paymentMethod = await prisma.paymentMethod.findFirst({ where: { businessId: business.id } });
+        paymentMethod = await prisma.paymentMethod.findFirst({
+          where: { businessId: business.id },
+        });
       }
 
-      const localTime = toZonedTime(startAt, business.timezone);
-      const timeLabel = format(localTime, "yyyy-MM-dd HH:mm");
+      // فقط رزروهای بدون بیعانه بلافاصله به صاحب کسب‌وکار اطلاع داده می‌شوند.
+      // رزروهای دارای بیعانه، فقط پس از ثبت receipt توسط مشتری پیام می‌فرستند.
+      if (!requiresDeposit) {
+        const localTime = toZonedTime(startAt, business.timezone);
+        const timeLabel = format(localTime, "yyyy-MM-dd HH:mm");
 
-      void notifyUser(
-        business.owner.telegramId,
-        `📅 رزرو جدید در ${business.name}\n` +
-          `سرویس: ${service.name}\n` +
-          `مشتری: ${parsed.data.customerName} (${parsed.data.customerPhone})\n` +
-          `زمان: ${timeLabel}\n` +
-          (requiresDeposit
-            ? `بیعانه: ${formatPrice(depositDue, business.currency)} (در انتظار پرداخت)`
-            : `مبلغ: ${formatPrice(price, business.currency)}`)
-      );
+        void notifyUser(
+          business.owner.telegramId,
+          `📅 رزرو جدید در ${business.name}\n` +
+            `سرویس: ${service.name}\n` +
+            `مشتری: ${parsed.data.customerName} (${parsed.data.customerPhone})\n` +
+            `زمان: ${timeLabel}\n` +
+            `مبلغ: ${formatPrice(price, business.currency)}`
+        );
+      }
 
       return NextResponse.json(
         {
-          booking: { id: result.id, requiresDeposit, depositDue, currency: business.currency },
+          booking: {
+            id: result.id,
+            requiresDeposit,
+            depositDue,
+            currency: business.currency,
+          },
           paymentMethod: paymentMethod
             ? {
                 accountHolder: paymentMethod.accountHolder,
@@ -220,7 +282,13 @@ export async function POST(
       throw txError;
     }
   } catch (error) {
-    console.error("POST /api/public/business/[slug]/bookings failed:", error);
-    return NextResponse.json({ error: "ثبت رزرو ناموفق بود." }, { status: 500 });
+    console.error(
+      "POST /api/public/business/[slug]/bookings failed:",
+      error
+    );
+    return NextResponse.json(
+      { error: "ثبت رزرو ناموفق بود." },
+      { status: 500 }
+    );
   }
 }
