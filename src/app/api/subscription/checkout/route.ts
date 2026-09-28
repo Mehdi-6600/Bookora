@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { getBot } from "@/lib/telegram/bot";
 import { PLANS, buildInvoicePayload, isPlanCode } from "@/lib/subscription/plans";
+import { isPaymentPreference, resolvePaymentMethod } from "@/lib/subscription/payment-method";
 
 const checkoutSchema = z.object({
   plan: z.string().refine(isPlanCode, "پلن نامعتبر است."),
@@ -13,13 +14,9 @@ const checkoutSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     let body: unknown;
-
     try {
       body = await req.json();
     } catch {
@@ -27,29 +24,31 @@ export async function POST(req: NextRequest) {
     }
 
     const parsed = checkoutSchema.safeParse(body);
-
     if (!parsed.success) {
-      return NextResponse.json(
-        { error: "اطلاعات پرداخت نامعتبر است." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "اطلاعات پرداخت نامعتبر است." }, { status: 400 });
     }
 
     const business = await prisma.business.findFirst({
       where: { id: parsed.data.businessId, ownerId: user.id },
       select: { id: true, country: true },
     });
-
     if (!business) {
-      return NextResponse.json(
-        { error: "کسب‌وکار پیدا نشد." },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
     }
 
-    if (business.country === "IR") {
+    const userRecord = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { paymentPreference: true },
+    });
+    const preference =
+      userRecord?.paymentPreference && isPaymentPreference(userRecord.paymentPreference)
+        ? userRecord.paymentPreference
+        : "AUTO";
+    const method = resolvePaymentMethod(preference, business.country);
+
+    if (method !== "STARS") {
       return NextResponse.json(
-        { error: "برای کسب‌وکار ایرانی از مسیر پرداخت کارت‌به‌کارت استفاده کنید." },
+        { error: "روش پرداخت شما روی کارت‌به‌کارت تنظیم شده است." },
         { status: 400 }
       );
     }
@@ -69,10 +68,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ invoiceLink });
   } catch (error) {
     console.error("POST /api/subscription/checkout failed:", error);
-
-    return NextResponse.json(
-      { error: "ساخت لینک پرداخت ناموفق بود." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "ساخت لینک پرداخت ناموفق بود." }, { status: 500 });
   }
 }
