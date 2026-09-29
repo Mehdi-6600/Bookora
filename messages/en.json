@@ -211,7 +211,11 @@
     "requiredError": "Please enter start and end dates.",
     "addError": "Failed to add time off.",
     "deleteButton": "Delete",
-    "toLabel": "to"
+    "toLabel": "to",
+    "startLabel": "From",
+    "endLabel": "To",
+    "loading": "Loading...",
+    "empty": "No time off added yet."
   },
   "paymentMethod": {
     "title": "Deposit payment method",
