@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import {
   CalendarDays,
   Check,
+  CheckCircle2,
   Clock,
   CreditCard,
   Crown,
@@ -12,6 +13,7 @@ import {
   Sparkles,
   Star,
   X,
+  XCircle,
 } from "lucide-react";
 import { PLANS } from "@/lib/subscription/plans";
 import type { PlanCode } from "@/lib/subscription/plans";
@@ -53,6 +55,47 @@ const PREFERENCE_OPTIONS: { value: PaymentPreference; labelKey: string }[] = [
   { value: "MANUAL", labelKey: "preferenceManual" },
   { value: "STARS", labelKey: "preferenceStars" },
 ];
+
+const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-5 shadow-soft";
+
+const CARD_INNER = "rounded-2xl bg-white p-4 shadow-soft";
+
+const CARD_INNER_MUTED = "rounded-2xl bg-white/60 p-4 shadow-soft";
+
+const BTN_PRIMARY =
+  "btn-elevated flex w-full items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-4 py-3.5 text-sm font-bold text-white transition-transform active:scale-[0.98] disabled:opacity-50";
+
+const BTN_GHOST =
+  "flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-bold text-[#1A1F36] shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50";
+
+const BTN_PREF_ACTIVE =
+  "btn-selected w-full rounded-2xl px-3 py-2.5 text-sm font-bold transition-all active:scale-95 disabled:opacity-50";
+
+const BTN_PREF_IDLE =
+  "w-full rounded-2xl bg-white px-3 py-2.5 text-sm font-bold text-[#1A1F36] shadow-soft transition-all active:scale-95 disabled:opacity-50";
+
+const INPUT_BASE =
+  "w-full rounded-2xl bg-white px-4 py-3 text-sm font-medium text-[#1A1F36] outline-none placeholder:text-[#1A1F36]/40 shadow-soft";
+
+const SECTION_ICON =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft";
+
+const SECTION_TITLE = "text-base font-bold text-[#1A1F36]";
+
+const LABEL_SMALL =
+  "text-[11px] font-bold uppercase tracking-wide text-[#1A1F36]/50";
+
+const BOX_ERROR =
+  "flex items-start gap-2 rounded-2xl bg-[#FF4D5E] p-3.5 text-sm font-medium text-white shadow-soft";
+
+const BOX_SUCCESS =
+  "flex items-start gap-2 rounded-2xl bg-[#34C759] p-3.5 text-sm font-bold text-white shadow-soft";
+
+const BADGE_CROWN =
+  "inline-flex items-center gap-1 rounded-full bg-[#FCA311] px-2.5 py-1 text-[10px] font-bold text-white shadow-soft";
+
+const BADGE_PENDING =
+  "inline-flex items-center gap-1 rounded-full bg-[#1A1F36]/15 px-2.5 py-1 text-[10px] font-bold text-[#1A1F36]/70";
 
 function getTelegramWebApp(): TelegramWebAppWithInvoice | undefined {
   return (
@@ -105,10 +148,8 @@ export function SubscriptionPanel({
     PRO_YEARLY: t("planYearly"),
   };
 
-  // وقتی باکس پرداخت دستی باز می‌شود، به آن اسکرول کن تا کاربر آن را ببیند.
   useEffect(() => {
     if (manualPlan && manualBoxRef.current) {
-      // کمی تاخیر تا رندر کامل شود و ارتفاع تثبیت شود.
       const id = window.setTimeout(() => {
         if (manualBoxRef.current) {
           manualBoxRef.current.scrollIntoView({
@@ -201,7 +242,6 @@ export function SubscriptionPanel({
     setOkMessage(null);
 
     if (!businessId) {
-      console.error("[subscription] subscribeWithStars: businessId is null");
       setError(t("needBusiness"));
       return;
     }
@@ -210,11 +250,6 @@ export function SubscriptionPanel({
       setCheckingOut(plan);
       setError(null);
 
-      console.log(
-        "[subscription] subscribeWithStars start",
-        JSON.stringify({ plan, businessId })
-      );
-
       const response = await fetch("/api/subscription/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -222,12 +257,6 @@ export function SubscriptionPanel({
       });
 
       const data = await response.json();
-
-      console.log(
-        "[subscription] checkout response",
-        response.status,
-        JSON.stringify(data)
-      );
 
       if (!response.ok) {
         throw new Error(data?.error || t("checkoutError"));
@@ -239,27 +268,18 @@ export function SubscriptionPanel({
 
       const webApp = getTelegramWebApp();
 
-      if (!webApp) {
-        console.error("[subscription] Telegram.WebApp is unavailable");
-        setError(t("telegramOnly"));
-        return;
-      }
-
-      if (typeof webApp.openInvoice !== "function") {
-        console.error("[subscription] Telegram.WebApp.openInvoice is missing");
+      if (!webApp || typeof webApp.openInvoice !== "function") {
         setError(t("telegramOnly"));
         return;
       }
 
       webApp.openInvoice(data.invoiceLink, (status) => {
-        console.log("[subscription] invoice status:", status);
         if (status === "paid") {
           loadStatus();
         }
       });
     } catch (err) {
       const text = err instanceof Error ? err.message : t("checkoutError");
-      console.error("[subscription] subscribeWithStars failed:", text);
       setError(text);
     } finally {
       setCheckingOut(null);
@@ -275,7 +295,6 @@ export function SubscriptionPanel({
     setManualInfo(null);
 
     if (!businessId) {
-      console.error("[subscription] openManualPayment: businessId is null");
       setError(t("needBusiness"));
       return;
     }
@@ -296,7 +315,6 @@ export function SubscriptionPanel({
       setManualInfo(data);
     } catch (err) {
       const text = err instanceof Error ? err.message : t("loadError");
-      console.error("[subscription] openManualPayment failed:", text);
       setError(text);
     } finally {
       setManualLoading(false);
@@ -307,9 +325,6 @@ export function SubscriptionPanel({
     setOkMessage(null);
 
     if (!businessId || !manualPlan) {
-      console.error(
-        "[subscription] submitReceipt: missing businessId or manualPlan"
-      );
       setError(t("needBusiness"));
       return;
     }
@@ -345,23 +360,23 @@ export function SubscriptionPanel({
       setOkMessage(t("submittedNotice"));
     } catch (err) {
       const text = err instanceof Error ? err.message : t("submitError");
-      console.error("[subscription] submitReceipt failed:", text);
       setError(text);
     } finally {
       setSubmittingReceipt(false);
     }
   }
 
+  // ==================== NO BUSINESS ====================
   if (!businessId || !country) {
     return (
-      <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
+      <section className={CARD_MAIN}>
         <div className="flex items-start gap-3">
-          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          <span className={SECTION_ICON}>
+            <Sparkles className="h-5 w-5 text-[#4F5FE8]" />
+          </span>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">
-              {t("title")}
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h2 className={SECTION_TITLE}>{t("title")}</h2>
+            <p className="mt-1 text-sm font-medium text-[#1A1F36]/60">
               {t("needBusiness")}
             </p>
           </div>
@@ -373,17 +388,15 @@ export function SubscriptionPanel({
   const showPlans = !pending;
 
   return (
-    <section
-      id="subscription-panel"
-      className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft"
-    >
+    <section id="subscription-panel" className={CARD_MAIN}>
+      {/* Header */}
       <div className="flex items-start gap-3">
-        <Sparkles className="mt-1 h-5 w-5 shrink-0 text-primary" />
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">
-            {t("title")}
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
+        <span className={SECTION_ICON}>
+          <Sparkles className="h-5 w-5 text-[#4F5FE8]" />
+        </span>
+        <div className="min-w-0">
+          <h2 className={SECTION_TITLE}>{t("title")}</h2>
+          <p className="mt-0.5 text-xs font-medium text-[#1A1F36]/60">
             {effectiveMethod === "MANUAL"
               ? t("subtitleIR")
               : t("subtitleOther")}
@@ -391,32 +404,36 @@ export function SubscriptionPanel({
         </div>
       </div>
 
+      {/* Loading */}
       {loading && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground">
+        <div className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-white py-4 text-sm font-medium text-[#1A1F36]/60 shadow-soft">
           <Loader2 className="h-4 w-4 animate-spin" />
           {t("checkingStatus")}
         </div>
       )}
 
+      {/* Error */}
       {error && (
-        <div className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          <X className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className={BOX_ERROR + " mt-4"}>
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
+      {/* Success */}
       {okMessage && (
-        <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-400">
-          <Check className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className={BOX_SUCCESS + " mt-4"}>
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{okMessage}</span>
         </div>
       )}
 
+      {/* Active subscription */}
       {!loading && subscription && (
-        <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
-          <Crown className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-          <div className="text-sm">
-            <p className="font-semibold text-amber-900 dark:text-amber-400">
+        <div className="mt-4 flex items-start gap-3 rounded-2xl bg-[#FCA311] p-4 shadow-soft">
+          <Crown className="mt-0.5 h-5 w-5 shrink-0 text-white" />
+          <div className="text-sm text-white">
+            <p className="font-bold">
               {t("activePlan", {
                 plan:
                   planLabels[subscription.plan as PlanCode] ||
@@ -424,7 +441,7 @@ export function SubscriptionPanel({
               })}
             </p>
             {subscription.expiresAt && (
-              <p className="mt-1 flex items-center gap-1.5 text-amber-800 dark:text-amber-400/90">
+              <p className="mt-1 flex items-center gap-1.5 opacity-90">
                 <CalendarDays className="h-4 w-4" />
                 {t("expiresAt", {
                   date: new Date(subscription.expiresAt).toLocaleDateString(
@@ -437,59 +454,68 @@ export function SubscriptionPanel({
         </div>
       )}
 
+      {/* Pending subscription */}
       {!loading && !subscription && pending && (
-        <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-400">
-          <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-          <span>
-            {t("pendingNotice", {
-              plan: planLabels[pending.plan as PlanCode] || pending.plan,
-            })}
-          </span>
+        <div className="mt-4 flex items-start gap-3 rounded-2xl bg-white p-4 shadow-soft">
+          <Clock className="mt-0.5 h-5 w-5 shrink-0 text-[#FCA311]" />
+          <div className="min-w-0 flex-1 text-sm">
+            <span className={BADGE_PENDING}>
+              {t("statusPending")}
+            </span>
+            <p className="mt-2 font-medium text-[#1A1F36]">
+              {t("pendingNotice", {
+                plan: planLabels[pending.plan as PlanCode] || pending.plan,
+              })}
+            </p>
+          </div>
         </div>
       )}
 
+      {/* Free plan info */}
       {!loading && !subscription && !pending && (
-        <div className="mt-4 flex items-start gap-3 rounded-xl bg-muted/40 p-4">
-          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+        <div className={CARD_INNER_MUTED + " mt-4 flex items-start gap-3"}>
+          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-[#1A1F36]/50" />
           <div className="text-sm">
-            <p className="font-semibold">{t("compareFreeTitle")}</p>
-            <p className="mt-1 text-muted-foreground">
+            <p className="font-bold text-[#1A1F36]">{t("compareFreeTitle")}</p>
+            <p className="mt-0.5 font-medium text-[#1A1F36]/60">
               {t("compareFreeBusiness")}
             </p>
           </div>
         </div>
       )}
 
+      {/* Preference saved */}
       {preferenceMessage && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-400">
+        <div className={BOX_SUCCESS + " mt-4"}>
           <Check className="h-4 w-4 shrink-0" />
           {t("preferenceSaved")}
         </div>
       )}
 
+      {/* Payment preference */}
       {!loading && (
-        <div className="mt-4 space-y-2">
-          <p className="text-sm font-medium">{t("preferenceLabel")}</p>
+        <div className="mt-4">
+          <p className={LABEL_SMALL + " mb-2"}>{t("preferenceLabel")}</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {PREFERENCE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                disabled={savingPreference}
-                onClick={() => updatePreference(option.value)}
-                className={
-                  preference === option.value
-                    ? "ring-focus rounded-xl border border-primary bg-primary/10 px-3 py-2.5 text-sm font-medium text-primary transition-colors disabled:opacity-50"
-                    : "ring-focus rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
-                }
-              >
-                {t(option.labelKey)}
-              </button>
-            ))}
+            {PREFERENCE_OPTIONS.map((option) => {
+              const isActive = preference === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  disabled={savingPreference}
+                  onClick={() => updatePreference(option.value)}
+                  className={isActive ? BTN_PREF_ACTIVE : BTN_PREF_IDLE}
+                >
+                  {t(option.labelKey)}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
 
+      {/* Plans */}
       {!loading && showPlans && (
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {Object.values(PLANS).map((plan) => {
@@ -497,27 +523,30 @@ export function SubscriptionPanel({
             const disabled = checkingOut !== null || submittingReceipt;
 
             return (
-              <div
-                key={plan.code}
-                className="flex flex-col rounded-xl border border-border/60 bg-background p-4"
-              >
+              <div key={plan.code} className={CARD_INNER}>
                 <div className="flex items-center gap-2">
-                  <Crown className="h-4 w-4 text-amber-600" />
-                  <div className="font-semibold">{planLabels[plan.code]}</div>
+                  <Crown className="h-4 w-4 text-[#FCA311]" />
+                  <div className="text-sm font-bold text-[#1A1F36]">
+                    {planLabels[plan.code]}
+                  </div>
                 </div>
 
-                <div className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
+                <div className="mt-3 flex items-center gap-1.5 text-sm font-medium text-[#1A1F36]/70">
                   {effectiveMethod === "MANUAL" ? (
                     <>
                       <CreditCard className="h-4 w-4" />
-                      {t("priceManual", {
-                        price: formatToman(plan.manualPriceToman, locale),
-                      })}
+                      <span className="tabular font-bold text-[#1A1F36]">
+                        {t("priceManual", {
+                          price: formatToman(plan.manualPriceToman, locale),
+                        })}
+                      </span>
                     </>
                   ) : (
                     <>
-                      <Star className="h-4 w-4 text-amber-500" />
-                      {t("starsPayment", { stars: plan.starsPrice })}
+                      <Star className="h-4 w-4 text-[#FCA311]" />
+                      <span className="tabular font-bold text-[#1A1F36]">
+                        {t("starsPayment", { stars: plan.starsPrice })}
+                      </span>
                     </>
                   )}
                 </div>
@@ -530,7 +559,7 @@ export function SubscriptionPanel({
                       ? openManualPayment(plan.code)
                       : subscribeWithStars(plan.code)
                   }
-                  className="ring-focus mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                  className={BTN_PRIMARY + " mt-4"}
                 >
                   {isCheckingOut && (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -543,17 +572,23 @@ export function SubscriptionPanel({
         </div>
       )}
 
+      {/* Compare */}
       {!loading && !subscription && (
-        <div className="mt-4 space-y-3 rounded-xl border border-border/60 bg-background p-4">
-          <h3 className="text-sm font-semibold">{t("compareTitle")}</h3>
+        <div className={CARD_INNER + " mt-4"}>
+          <h3 className="text-sm font-bold text-[#1A1F36]">
+            {t("compareTitle")}
+          </h3>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-muted/40 p-4">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* Free */}
+            <div className={CARD_INNER_MUTED}>
               <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-muted-foreground" />
-                <p className="font-semibold">{t("compareFreeTitle")}</p>
+                <Sparkles className="h-4 w-4 text-[#1A1F36]/50" />
+                <p className="text-sm font-bold text-[#1A1F36]">
+                  {t("compareFreeTitle")}
+                </p>
               </div>
-              <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+              <ul className="mt-3 space-y-2 text-sm font-medium text-[#1A1F36]/60">
                 <li className="flex items-start gap-2">
                   <X className="mt-0.5 h-4 w-4 shrink-0" />
                   {t("compareFreeBusiness")}
@@ -565,24 +600,25 @@ export function SubscriptionPanel({
               </ul>
             </div>
 
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+            {/* Pro */}
+            <div className="rounded-2xl bg-[#FCA311]/15 p-4">
               <div className="flex items-center gap-2">
-                <Crown className="h-4 w-4 text-amber-600" />
-                <p className="font-semibold text-amber-900 dark:text-amber-400">
+                <Crown className="h-4 w-4 text-[#FCA311]" />
+                <p className="text-sm font-bold text-[#1A1F36]">
                   {t("compareProTitle")}
                 </p>
               </div>
-              <ul className="mt-3 space-y-2 text-sm text-amber-900 dark:text-amber-400">
+              <ul className="mt-3 space-y-2 text-sm font-medium text-[#1A1F36]/80">
                 <li className="flex items-start gap-2">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#34C759]" />
                   {t("compareProBusiness")}
                 </li>
                 <li className="flex items-start gap-2">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#34C759]" />
                   {t("compareProSupport")}
                 </li>
                 <li className="flex items-start gap-2">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#34C759]" />
                   {t("compareProBadge")}
                 </li>
               </ul>
@@ -591,102 +627,117 @@ export function SubscriptionPanel({
         </div>
       )}
 
+      {/* Manual payment box */}
       {manualPlan && (
-        <div
-          ref={manualBoxRef}
-          className="mt-4 scroll-mt-4 space-y-3 rounded-xl border border-border/60 bg-background p-4"
-        >
+        <div ref={manualBoxRef} className={CARD_INNER + " mt-4 scroll-mt-4"}>
           <div className="flex items-center justify-between gap-2">
-            <h3 className="flex items-center gap-2 font-semibold">
-              <CreditCard className="h-4 w-4" />
+            <h3 className="flex items-center gap-2 text-sm font-bold text-[#1A1F36]">
+              <CreditCard className="h-4 w-4 text-[#4F5FE8]" />
               {t("manualPaymentTitle", { plan: planLabels[manualPlan] })}
             </h3>
             <button
               type="button"
               onClick={() => setManualPlan(null)}
               aria-label={t("cancelButton")}
-              className="ring-focus rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1F36]/10 text-[#1A1F36] transition-colors hover:bg-[#1A1F36]/20"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
           {manualLoading && (
-            <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
+            <div className="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#B8D4F5]/60 py-4 text-sm font-medium text-[#1A1F36]/60">
               <Loader2 className="h-4 w-4 animate-spin" />
               {t("manualLoading")}
             </div>
           )}
 
           {!manualLoading && manualInfo && !manualInfo.configured && (
-            <p className="flex items-start gap-2 text-sm text-destructive">
-              <X className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="mt-3 rounded-2xl bg-[#FF4D5E] p-4 text-sm font-medium text-white">
               {t("manualNotConfigured")}
-            </p>
-          )}
-
-          {!manualLoading && manualInfo && manualInfo.configured && (
-            <div className="space-y-1 rounded-lg bg-muted/40 p-3 text-sm">
-              <p className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 shrink-0 text-muted-foreground" />
-                {t("cardNumber", { value: manualInfo.cardNumber || "" })}
-              </p>
-              {manualInfo.cardHolder && (
-                <p className="flex items-center gap-2">
-                  <Check className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  {t("accountHolder", { value: manualInfo.cardHolder })}
-                </p>
-              )}
-              {manualInfo.bankName && (
-                <p className="flex items-center gap-2">
-                  <Check className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  {t("bankName", { value: manualInfo.bankName })}
-                </p>
-              )}
-              {manualInfo.instructions && (
-                <p className="pt-1 text-muted-foreground">
-                  {manualInfo.instructions}
-                </p>
-              )}
             </div>
           )}
 
           {!manualLoading && manualInfo && manualInfo.configured && (
             <>
-              <input
-                value={receiptReference}
-                onChange={(event) => setReceiptReference(event.target.value)}
-                placeholder={t("receiptPlaceholder")}
-                className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm outline-none"
-              />
+              <div className="mt-3 space-y-3">
+                {manualInfo.cardNumber && (
+                  <div className="rounded-2xl bg-white p-4 shadow-soft">
+                    <p className={LABEL_SMALL}>{t("cardNumberLabel")}</p>
+                    <p className="mt-1 tabular text-lg font-bold tracking-wider text-[#1A1F36]">
+                      {manualInfo.cardNumber}
+                    </p>
+                  </div>
+                )}
 
-              <textarea
-                value={receiptNote}
-                onChange={(event) => setReceiptNote(event.target.value)}
-                placeholder={t("notePlaceholder")}
-                className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm outline-none"
-              />
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={submitReceipt}
-                  disabled={submittingReceipt}
-                  className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                >
-                  {submittingReceipt && (
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                <div className="grid grid-cols-2 gap-3">
+                  {manualInfo.cardHolder && (
+                    <div className="rounded-2xl bg-white p-3 shadow-soft">
+                      <p className={LABEL_SMALL}>
+                        {t("accountHolderLabel")}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-[#1A1F36]">
+                        {manualInfo.cardHolder}
+                      </p>
+                    </div>
                   )}
-                  {submittingReceipt ? t("submitting") : t("submitButton")}
-                </button>
+                  {manualInfo.bankName && (
+                    <div className="rounded-2xl bg-white p-3 shadow-soft">
+                      <p className={LABEL_SMALL}>{t("bankNameLabel")}</p>
+                      <p className="mt-1 text-sm font-semibold text-[#1A1F36]">
+                        {manualInfo.bankName}
+                      </p>
+                    </div>
+                  )}
+                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setManualPlan(null)}
-                  className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
-                >
-                  {t("cancelButton")}
-                </button>
+                {manualInfo.instructions && (
+                  <div className="rounded-2xl bg-white/60 p-4 shadow-soft">
+                    <p className="text-sm font-medium text-[#1A1F36]/80">
+                      {manualInfo.instructions}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <input
+                  value={receiptReference}
+                  onChange={(event) =>
+                    setReceiptReference(event.target.value)
+                  }
+                  placeholder={t("receiptPlaceholder")}
+                  className={INPUT_BASE}
+                />
+
+                <textarea
+                  value={receiptNote}
+                  onChange={(event) => setReceiptNote(event.target.value)}
+                  placeholder={t("notePlaceholder")}
+                  className={INPUT_BASE + " min-h-16"}
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={submitReceipt}
+                    disabled={submittingReceipt}
+                    className={BTN_PRIMARY}
+                  >
+                    {submittingReceipt && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                    {submittingReceipt ? t("submitting") : t("submitButton")}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setManualPlan(null)}
+                    className={BTN_GHOST}
+                  >
+                    {t("cancelButton")}
+                  </button>
+                </div>
               </div>
             </>
           )}
