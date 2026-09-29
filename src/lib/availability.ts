@@ -23,17 +23,9 @@ export function computeAvailableSlots(params: {
   const durationMinutes = params.durationMinutes;
   const busyRanges = params.busyRanges;
 
-  // فاصله‌ی نوبت‌ها:
-  // - اگر صاحب کسب‌وکار مقدار مشخصی داده باشد (و معتبر باشد)، همان استفاده می‌شود.
-  // - در غیر این صورت، فاصله = مدت سرویس (پیش‌فرض منطقی).
-  let step = durationMinutes;
-  if (
-    typeof params.slotIntervalMinutes === "number" &&
-    params.slotIntervalMinutes > 0 &&
-    params.slotIntervalMinutes <= durationMinutes
-  ) {
-    step = params.slotIntervalMinutes;
-  }
+  // فاصله‌ی نوبت‌ها همیشه برابر مدت سرویس است.
+  // این تضمین می‌کند که نوبت‌ها با ساعت کاری و مدت سرویس کاملاً هماهنگ باشند.
+  const step = durationMinutes;
 
   const open = fromZonedTime(dateStr + "T" + openTime + ":00", timezone);
   const close = fromZonedTime(dateStr + "T" + closeTime + ":00", timezone);
