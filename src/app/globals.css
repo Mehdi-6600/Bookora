@@ -4,17 +4,16 @@
 
 @layer base {
   :root {
-    /* Bookora light theme — آبی روشن + بنفش-آبی */
-    --background: 215 81% 71%;         /* #7BA8F0 */
-    --foreground: 224 33% 16%;         /* #1A1F36 */
+    --background: 215 81% 71%;
+    --foreground: 224 33% 16%;
 
-    --card: 213 79% 84%;               /* #B8D4F5 */
+    --card: 213 79% 84%;
     --card-foreground: 224 33% 16%;
 
     --popover: 213 79% 84%;
     --popover-foreground: 224 33% 16%;
 
-    --primary: 234 76% 61%;            /* #4F5FE8 */
+    --primary: 234 76% 61%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 0 0% 100%;
@@ -26,10 +25,10 @@
     --accent: 234 76% 61%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 351 100% 65%;       /* #FF4D5E */
+    --destructive: 351 100% 65%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 60% 49%;            /* #34C759 */
+    --success: 142 71% 35%;            /* سبز تیره‌تر برای خوانایی روی آبی */
     --success-foreground: 0 0% 100%;
 
     --border: 215 60% 75%;
@@ -62,34 +61,57 @@
   }
 
   /* ============================= */
-  /* فیلدهای تایپ: فرورفته */
+  /* Input/Select/Textarea: فرو رفته */
   /* ============================= */
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="time"]):not([type="date"]),
   select,
   textarea {
     font-size: 16px;
-    @apply rounded-2xl border border-white/40 bg-white text-foreground;
+    @apply rounded-2xl border-0 bg-white text-foreground;
+    padding: 0.75rem 1rem;
     box-shadow:
-      inset 0 3px 6px 0 hsl(215 60% 30% / 0.18),
-      inset 0 1px 2px 0 hsl(215 60% 30% / 0.12),
-      0 1px 0 0 hsl(0 0% 100% / 0.8);
+      inset 0 3px 6px 0 hsl(215 60% 30% / 0.2),
+      inset 0 1px 2px 0 hsl(215 60% 30% / 0.15);
     transition: box-shadow 0.15s ease;
   }
 
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="time"]):not([type="date"]):focus,
   select:focus,
   textarea:focus {
     @apply outline-none;
-    border-color: hsl(var(--primary) / 0.5);
     box-shadow:
-      inset 0 3px 6px 0 hsl(215 60% 30% / 0.2),
-      inset 0 1px 2px 0 hsl(215 60% 30% / 0.15),
+      inset 0 3px 6px 0 hsl(215 60% 30% / 0.22),
       0 0 0 3px hsl(var(--primary) / 0.3);
   }
 
   input::placeholder,
   textarea::placeholder {
     color: hsl(224 20% 55%);
+  }
+
+  /* ============================= */
+  /* Time/Date input: برجسته + خوانا */
+  /* ============================= */
+  input[type="time"],
+  input[type="date"] {
+    @apply rounded-2xl border-0 bg-white text-foreground;
+    padding: 0.75rem 1rem;
+    font-size: 16px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    box-shadow:
+      0 2px 4px 0 hsl(215 60% 30% / 0.15),
+      0 6px 16px -6px hsl(215 60% 30% / 0.2),
+      inset 0 1px 0 0 hsl(0 0% 100%);
+  }
+
+  input[type="time"]:focus,
+  input[type="date"]:focus {
+    @apply outline-none;
+    box-shadow:
+      0 2px 4px 0 hsl(215 60% 30% / 0.15),
+      0 6px 16px -6px hsl(215 60% 30% / 0.2),
+      0 0 0 3px hsl(var(--primary) / 0.3);
   }
 
   /* ============================= */
@@ -109,10 +131,20 @@
     color: hsl(var(--primary)) !important;
   }
 
-  .dark .dark\:text-amber-400,
-  .dark .dark\:text-amber-500,
-  .dark .dark\:text-yellow-400 {
-    color: hsl(var(--primary)) !important;
+  /* ============================= */
+  /* Badge سبز «فعال» خوانا روی آبی */
+  /* ============================= */
+  .bg-emerald-500\/10,
+  .bg-emerald-500\/15,
+  .bg-emerald-500\/20 {
+    background-color: hsl(142 71% 35% / 0.95) !important;
+  }
+
+  .text-emerald-700,
+  .text-emerald-600,
+  .text-emerald-500,
+  .dark .dark\:text-emerald-400 {
+    color: hsl(0 0% 100%) !important;
   }
 
   ::selection {
@@ -145,32 +177,33 @@
   /* ============================= */
   .shadow-soft {
     box-shadow:
-      0 1px 2px 0 hsl(215 60% 30% / 0.1),
-      0 8px 24px -8px hsl(215 60% 30% / 0.22),
-      0 2px 4px 0 hsl(215 60% 30% / 0.08);
+      0 2px 4px 0 hsl(215 60% 25% / 0.18),
+      0 12px 28px -10px hsl(215 60% 25% / 0.35),
+      0 4px 8px -2px hsl(215 60% 25% / 0.15);
   }
 
   .shadow-elevated {
     box-shadow:
-      0 2px 4px 0 hsl(215 60% 30% / 0.12),
-      0 16px 48px -12px hsl(215 60% 30% / 0.3),
-      0 4px 12px -2px hsl(215 60% 30% / 0.1);
+      0 3px 6px 0 hsl(215 60% 25% / 0.2),
+      0 20px 48px -12px hsl(215 60% 25% / 0.4),
+      0 6px 16px -4px hsl(215 60% 25% / 0.18);
   }
 
   .surface-muted {
     @apply rounded-2xl bg-white;
     box-shadow:
-      0 1px 2px 0 hsl(215 60% 40% / 0.08),
-      0 4px 12px -4px hsl(215 60% 40% / 0.12);
+      0 2px 4px 0 hsl(215 60% 40% / 0.12),
+      0 6px 14px -6px hsl(215 60% 40% / 0.18),
+      inset 0 1px 0 0 hsl(0 0% 100%);
   }
 
   /* ============================= */
-  /* دکمه‌های برجسته — در سطح global */
+  /* دکمه‌های برجسته */
   /* ============================= */
   .btn-elevated {
     box-shadow:
-      0 2px 4px 0 hsl(234 76% 41% / 0.25),
-      0 8px 20px -6px hsl(234 76% 41% / 0.35),
+      0 3px 6px 0 hsl(234 76% 41% / 0.3),
+      0 10px 24px -8px hsl(234 76% 41% / 0.4),
       inset 0 1px 0 0 hsl(0 0% 100% / 0.15);
     transition: transform 0.1s ease, box-shadow 0.15s ease;
   }
@@ -179,7 +212,7 @@
     transform: translateY(1px);
     box-shadow:
       0 1px 2px 0 hsl(234 76% 41% / 0.3),
-      inset 0 2px 4px 0 hsl(0 0% 0% / 0.1);
+      inset 0 2px 4px 0 hsl(0 0% 0% / 0.15);
   }
 
   .ring-focus {
