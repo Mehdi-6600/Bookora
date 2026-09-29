@@ -24,11 +24,16 @@ function computeDeposit(
   depositValue: number,
   price: number
 ): number {
-  if (depositType === "PERCENTAGE") {
-    return Math.round(((price * depositValue) / 100) * 100) / 100;
+  const type = String(depositType || "").trim().toUpperCase();
+  const value = Number(depositValue);
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
   }
-  if (depositType === "FIXED") {
-    return Math.min(depositValue, price);
+  if (type === "PERCENTAGE") {
+    return Math.round(((price * value) / 100) * 100) / 100;
+  }
+  if (type === "FIXED") {
+    return Math.min(value, price);
   }
   return 0;
 }
@@ -107,7 +112,7 @@ export async function POST(
       where: {
         businessId_dayOfWeek: {
           businessId: business.id,
-          dayOfWeek,
+          dayOfWeek: dayOfWeek,
         },
       },
     });
@@ -157,14 +162,14 @@ export async function POST(
     const busyRanges = [...timeOffRanges, ...bookingRanges];
 
     const validSlots = computeAvailableSlots({
-      dateStr,
+      dateStr: dateStr,
       timezone: business.timezone,
       openTime: workingHour.openTime,
       closeTime: workingHour.closeTime,
       breakStart: workingHour.breakStart,
       breakEnd: workingHour.breakEnd,
       durationMinutes: service.durationMinutes,
-      busyRanges,
+      busyRanges: busyRanges,
     });
 
     const isValid = validSlots.some((slot) => {
@@ -179,15 +184,14 @@ export async function POST(
     }
 
     const price = Number(service.price);
-    const depositValue = Number(service.depositValue);
+    const rawDepositType = String(service.depositType || "");
+    const rawDepositValue = Number(service.depositValue || 0);
     const depositDue = computeDeposit(
-      service.depositType,
-      depositValue,
+      rawDepositType,
+      rawDepositValue,
       price
     );
     const requiresDeposit = depositDue > 0;
-
-    let createdBookingId: string | null = null;
 
     try {
       const result = await prisma.$transaction(async (tx) => {
@@ -217,15 +221,15 @@ export async function POST(
             customerName: parsed.data.customerName,
             customerPhone: parsed.data.customerPhone,
             customerEmail: parsed.data.customerEmail || null,
-            startAt,
-            endAt,
+            startAt: startAt,
+            endAt: endAt,
             timezone: business.timezone,
             status: initialStatus,
             servicePrice: price,
             finalPrice: price,
             depositType: service.depositType,
             depositValue: service.depositValue,
-            depositDue,
+            depositDue: depositDue,
             remainingAmount: price - depositDue,
             currency: business.currency,
             paymentStatus: initialPaymentStatus,
@@ -247,8 +251,6 @@ export async function POST(
         return booking;
       });
 
-      createdBookingId = result.id;
-
       let paymentMethod = null;
       if (requiresDeposit) {
         paymentMethod = await prisma.paymentMethod.findFirst({
@@ -269,16 +271,13 @@ export async function POST(
           `مبلغ: ${priceLabel}`,
         ];
 
-        void notifyUser(
-          business.owner.telegramId,
-          lines.join("\n")
-        );
+        void notifyUser(business.owner.telegramId, lines.join("\n"));
       }
 
       const bookingPayload = {
         id: result.id,
-        requiresDeposit,
-        depositDue,
+        requiresDeposit: requiresDeposit,
+        depositDue: depositDue,
         currency: business.currency,
       };
 
@@ -304,9 +303,7 @@ export async function POST(
         txError.message === "SLOT_TAKEN"
       ) {
         return NextResponse.json(
-          {
-            error: "این زمان همین الان توسط شخص دیگری رزرو شد.",
-          },
+          { error: "این زمان همین الان توسط شخص دیگری رزرو شد." },
           { status: 409 }
         );
       }
