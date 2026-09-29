@@ -10,33 +10,35 @@ const LOCALE_LABELS: Record<string, string> = {
   ar: "عربي",
 };
 
+const BTN_ACTIVE = "btn-selected rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-95";
+
+const BTN_IDLE =
+  "rounded-xl bg-white px-3 py-1.5 text-xs font-bold text-[#1A1F36] shadow-soft transition-all active:scale-95";
+
 export function LocaleSwitcher() {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
 
   function switchTo(nextLocale: string) {
-    // pathname اینجا از next-intl گرفته شده و از قبل بدون پیشوند locale است؛
-    // router.replace خودش پیشوند مناسب (یا نبود پیشوند برای en) و Cookie را مدیریت می‌کند.
     router.replace(pathname, { locale: nextLocale });
   }
 
   return (
-    <div className="flex gap-1 rounded-lg border p-1 text-xs">
-      {routing.locales.map((code) => (
-        <button
-          key={code}
-          type="button"
-          onClick={() => switchTo(code)}
-          className={`rounded-md px-2 py-1 font-medium ${
-            locale === code
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground"
-          }`}
-        >
-          {LOCALE_LABELS[code] || code}
-        </button>
-      ))}
+    <div className="flex shrink-0 gap-1.5 rounded-2xl bg-[#B8D4F5] p-1.5 shadow-soft">
+      {routing.locales.map((code) => {
+        const isActive = locale === code;
+        return (
+          <button
+            key={code}
+            type="button"
+            onClick={() => switchTo(code)}
+            className={isActive ? BTN_ACTIVE : BTN_IDLE}
+          >
+            {LOCALE_LABELS[code] || code}
+          </button>
+        );
+      })}
     </div>
   );
 }
