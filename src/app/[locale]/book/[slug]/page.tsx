@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { format } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
 import {
   Calendar,
   CheckCircle2,
@@ -32,6 +34,7 @@ type BusinessInfo = {
   description: string | null;
   currency: string;
   country: string | null;
+  timezone: string | null;
   services: Service[];
 };
 
@@ -136,6 +139,7 @@ export default function PublicBookingPage() {
   const [receiptSubmitted, setReceiptSubmitted] = useState(false);
 
   const locale = business?.country === "IR" ? "fa-IR" : "en-US";
+  const tz = business?.timezone || "UTC";
 
   useEffect(() => {
     async function load() {
@@ -301,7 +305,6 @@ export default function PublicBookingPage() {
     (s) => s.id === selectedServiceId
   );
 
-  // ==================== CONFIRMED (NO DEPOSIT) ====================
   if (confirmedBookingId && (!depositDue || depositDue <= 0)) {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center p-6">
@@ -320,7 +323,6 @@ export default function PublicBookingPage() {
     );
   }
 
-  // ==================== RECEIPT SUBMITTED ====================
   if (confirmedBookingId && receiptSubmitted) {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center p-6">
@@ -339,7 +341,6 @@ export default function PublicBookingPage() {
     );
   }
 
-  // ==================== DEPOSIT PAYMENT ====================
   if (confirmedBookingId) {
     return (
       <div className="mx-auto max-w-md space-y-5 p-4 py-8">
@@ -379,7 +380,9 @@ export default function PublicBookingPage() {
               <div className="grid grid-cols-2 gap-3">
                 {paymentMethod.accountHolder && (
                   <div className="rounded-2xl bg-white p-3 shadow-soft">
-                    <p className={LABEL_SMALL}>{t("accountHolderLabel")}</p>
+                    <p className={LABEL_SMALL}>
+                      {t("accountHolderLabel")}
+                    </p>
                     <p className="mt-1 text-sm font-semibold text-[#1A1F36]">
                       {paymentMethod.accountHolder}
                     </p>
@@ -438,10 +441,8 @@ export default function PublicBookingPage() {
     );
   }
 
-  // ==================== MAIN BOOKING ====================
   return (
     <div className="mx-auto max-w-md space-y-5 p-4 py-6">
-      {/* Header */}
       <div className="flex items-start justify-between gap-3 rounded-3xl bg-[#B8D4F5] p-5 shadow-elevated">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-bold text-[#1A1F36]">
@@ -458,7 +459,6 @@ export default function PublicBookingPage() {
 
       {error && <div className={ERROR_BOX}>{error}</div>}
 
-      {/* Services */}
       <div className={CARD_MAIN}>
         <div className="mb-4 flex items-center gap-2">
           <span className={SECTION_ICON}>
@@ -522,7 +522,6 @@ export default function PublicBookingPage() {
         </div>
       </div>
 
-      {/* Date */}
       <div className={CARD_MAIN}>
         <div className="mb-4 flex items-center gap-2">
           <span className={SECTION_ICON}>
@@ -554,7 +553,6 @@ export default function PublicBookingPage() {
         </div>
       </div>
 
-      {/* Slots */}
       <div className={CARD_MAIN}>
         <div className="mb-4 flex items-center gap-2">
           <span className={SECTION_ICON}>
@@ -575,11 +573,8 @@ export default function PublicBookingPage() {
         ) : (
           <div className="grid grid-cols-3 gap-2">
             {slots.map((slot) => {
-              const time = new Date(slot);
-              const label = time.toLocaleTimeString(locale, {
-                hour: "2-digit",
-                minute: "2-digit",
-              });
+              const zoned = toZonedTime(new Date(slot), tz);
+              const label = format(zoned, "HH:mm");
               const isSelected = selectedSlot === slot;
               return (
                 <button
@@ -596,7 +591,6 @@ export default function PublicBookingPage() {
         )}
       </div>
 
-      {/* Customer info */}
       {selectedSlot && (
         <div className={CARD_MAIN}>
           <div className="mb-4 flex items-center gap-2">
