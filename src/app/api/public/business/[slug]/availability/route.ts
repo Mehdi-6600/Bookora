@@ -8,7 +8,8 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
-    const { slug } = await params;
+    const resolved = await params;
+    const slug = resolved.slug;
     const serviceId = req.nextUrl.searchParams.get("serviceId");
     const date = req.nextUrl.searchParams.get("date");
 
@@ -20,7 +21,7 @@ export async function GET(
     }
 
     const business = await prisma.business.findFirst({
-      where: { slug, status: "ACTIVE" },
+      where: { slug: slug, status: "ACTIVE" },
       select: { id: true, timezone: true },
     });
 
@@ -33,43 +34,59 @@ export async function GET(
 
     const service = await prisma.service.findFirst({
       where: { id: serviceId, businessId: business.id, active: true },
-      select: { durationMinutes: true },
+      select: {
+        durationMinutes: true,
+        slotIntervalMinutes: true,
+      },
     });
 
     if (!service) {
-      return NextResponse.json({ error: "سرویس پیدا نشد." }, { status: 404 });
+      return NextResponse.json(
+        { error: "سرویس پیدا نشد." },
+        { status: 404 }
+      );
     }
 
-    const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
+    const dayOfWeek = new Date(date + "T00:00:00Z").getUTCDay();
 
     const workingHour = await prisma.workingHour.findUnique({
-      where: { businessId_dayOfWeek: { businessId: business.id, dayOfWeek } },
+      where: {
+        businessId_dayOfWeek: {
+          businessId: business.id,
+          dayOfWeek: dayOfWeek,
+        },
+      },
     });
 
     if (!workingHour || !workingHour.enabled) {
       return NextResponse.json({ slots: [] });
     }
 
-    const dayStart = fromZonedTime(`${date}T00:00:00`, business.timezone);
-    const dayEnd = fromZonedTime(`${date}T23:59:59`, business.timezone);
+    const dayStart = fromZonedTime(
+      date + "T00:00:00",
+      business.timezone
+    );
+    const dayEnd = fromZonedTime(
+      date + "T23:59:59",
+      business.timezone
+    );
 
-    const [timeOffs, bookings] = await Promise.all([
-      prisma.timeOff.findMany({
-        where: {
-          businessId: business.id,
-          startAt: { lte: dayEnd },
-          endAt: { gte: dayStart },
-        },
-      }),
-      prisma.booking.findMany({
-        where: {
-          businessId: business.id,
-          status: { not: "CANCELLED" },
-          startAt: { lte: dayEnd },
-          endAt: { gte: dayStart },
-        },
-      }),
-    ]);
+    const timeOffs = await prisma.timeOff.findMany({
+      where: {
+        businessId: business.id,
+        startAt: { lte: dayEnd },
+        endAt: { gte: dayStart },
+      },
+    });
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        businessId: business.id,
+        status: { not: "CANCELLED" },
+        startAt: { lte: dayEnd },
+        endAt: { gte: dayStart },
+      },
+    });
 
     const busyRanges = [
       ...timeOffs.map((t) => ({ start: t.startAt, end: t.endAt })),
@@ -84,7 +101,8 @@ export async function GET(
       breakStart: workingHour.breakStart,
       breakEnd: workingHour.breakEnd,
       durationMinutes: service.durationMinutes,
-      busyRanges,
+      slotIntervalMinutes: service.slotIntervalMinutes,
+      busyRanges: busyRanges,
     });
 
     const now = Date.now();
@@ -98,7 +116,6 @@ export async function GET(
       "GET /api/public/business/[slug]/availability failed:",
       error
     );
-
     return NextResponse.json(
       { error: "خطا در دریافت زمان‌های آزاد" },
       { status: 500 }
