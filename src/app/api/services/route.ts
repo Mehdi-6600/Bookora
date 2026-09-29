@@ -10,7 +10,10 @@ const depositSchema = z
   })
   .refine(
     (d) => d.depositType !== "PERCENTAGE" || d.depositValue <= 100,
-    { message: "درصد بیعانه نمی‌تواند بیشتر از ۱۰۰ باشد.", path: ["depositValue"] }
+    {
+      message: "درصد بیعانه نمی‌تواند بیشتر از ۱۰۰ باشد.",
+      path: ["depositValue"],
+    }
   );
 
 const createServiceSchema = z
@@ -20,6 +23,12 @@ const createServiceSchema = z
     description: z.string().trim().max(1000).nullable().optional(),
     price: z.coerce.number().finite().min(0).max(99999999.99),
     durationMinutes: z.coerce.number().int().min(1).max(1440),
+    slotIntervalMinutes: z.coerce
+      .number()
+      .int()
+      .min(5)
+      .max(480)
+      .default(30),
   })
   .and(depositSchema);
 
@@ -28,25 +37,17 @@ export async function GET(req: NextRequest) {
     const user = await getCurrentUser();
 
     if (!user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const businessId = req.nextUrl.searchParams.get("businessId");
 
     const services = await prisma.service.findMany({
       where: {
-        business: {
-          ownerId: user.id,
-        },
+        business: { ownerId: user.id },
         ...(businessId ? { businessId } : {}),
       },
-      orderBy: [
-        { sortOrder: "asc" },
-        { createdAt: "asc" },
-      ],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     });
 
     return NextResponse.json({
@@ -58,6 +59,7 @@ export async function GET(req: NextRequest) {
         price: service.price.toString(),
         currency: service.currency,
         durationMinutes: service.durationMinutes,
+        slotIntervalMinutes: service.slotIntervalMinutes,
         active: service.active,
         depositType: service.depositType,
         depositValue: service.depositValue.toString(),
@@ -65,7 +67,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error("GET /api/services failed:", error);
-
     return NextResponse.json(
       { error: "خطا در دریافت سرویس‌ها" },
       { status: 500 }
@@ -78,25 +79,17 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
 
     if (!user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     let body: unknown;
-
     try {
       body = await req.json();
     } catch {
-      return NextResponse.json(
-        { error: "Invalid JSON" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
 
     const parsed = createServiceSchema.safeParse(body);
-
     if (!parsed.success) {
       return NextResponse.json(
         {
@@ -107,25 +100,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const {
-      businessId,
-      name,
-      description,
-      price,
-      durationMinutes,
-      depositType,
-      depositValue,
-    } = parsed.data;
+    const businessId = parsed.data.businessId;
+    const name = parsed.data.name;
+    const description = parsed.data.description;
+    const price = parsed.data.price;
+    const durationMinutes = parsed.data.durationMinutes;
+    const slotIntervalMinutes = parsed.data.slotIntervalMinutes;
+    const depositType = parsed.data.depositType;
+    const depositValue = parsed.data.depositValue;
 
     const business = await prisma.business.findFirst({
-      where: {
-        id: businessId,
-        ownerId: user.id,
-      },
-      select: {
-        id: true,
-        currency: true,
-      },
+      where: { id: businessId, ownerId: user.id },
+      select: { id: true, currency: true },
     });
 
     if (!business) {
@@ -136,29 +122,24 @@ export async function POST(req: NextRequest) {
     }
 
     const lastService = await prisma.service.findFirst({
-      where: {
-        businessId: business.id,
-      },
-      orderBy: {
-        sortOrder: "desc",
-      },
-      select: {
-        sortOrder: true,
-      },
+      where: { businessId: business.id },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
     });
 
     const service = await prisma.service.create({
       data: {
         businessId: business.id,
-        name,
+        name: name,
         description: description || null,
-        price,
+        price: price,
         currency: business.currency,
-        durationMinutes,
+        durationMinutes: durationMinutes,
+        slotIntervalMinutes: slotIntervalMinutes,
         sortOrder: (lastService?.sortOrder ?? -1) + 1,
         active: true,
-        depositType,
-        depositValue,
+        depositType: depositType,
+        depositValue: depositValue,
       },
     });
 
@@ -172,6 +153,7 @@ export async function POST(req: NextRequest) {
           price: service.price.toString(),
           currency: service.currency,
           durationMinutes: service.durationMinutes,
+          slotIntervalMinutes: service.slotIntervalMinutes,
           active: service.active,
           depositType: service.depositType,
           depositValue: service.depositValue.toString(),
@@ -181,7 +163,6 @@ export async function POST(req: NextRequest) {
     );
   } catch (error) {
     console.error("POST /api/services failed:", error);
-
     return NextResponse.json(
       { error: "ساخت سرویس ناموفق بود." },
       { status: 500 }
