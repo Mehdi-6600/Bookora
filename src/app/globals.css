@@ -3,36 +3,38 @@
 @tailwind utilities;
 
 @layer base {
-  :root,
-  .dark {
-    /* Bookora theme — مشکی + سرمه‌ای + تأکید نارنجی طلایی */
-    --background: 0 0% 0%;             /* #000000 */
-    --foreground: 0 0% 100%;           /* #FFFFFF */
+  :root {
+    /* Bookora light theme — آبی روشن + بنفش-آبی */
+    --background: 215 81% 71%;         /* #7BA8F0 */
+    --foreground: 224 33% 16%;         /* #1A1F36 */
 
-    --card: 220 51% 16%;               /* #14213D */
-    --card-foreground: 0 0% 100%;
+    --card: 213 79% 84%;               /* #B8D4F5 */
+    --card-foreground: 224 33% 16%;
 
-    --popover: 220 51% 16%;
-    --popover-foreground: 0 0% 100%;
+    --popover: 213 79% 84%;
+    --popover-foreground: 224 33% 16%;
 
-    --primary: 36 98% 53%;             /* #FCA311 */
-    --primary-foreground: 0 0% 0%;
+    --primary: 234 76% 61%;            /* #4F5FE8 */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 51% 16%;          /* #14213D */
-    --secondary-foreground: 0 0% 100%;
+    --secondary: 0 0% 100%;            /* #FFFFFF — کارت‌های سفید داخلی */
+    --secondary-foreground: 224 33% 16%;
 
-    --muted: 220 51% 16%;              /* #14213D */
-    --muted-foreground: 0 0% 90%;      /* #E5E5E5 */
+    --muted: 213 79% 88%;
+    --muted-foreground: 224 20% 40%;
 
-    --accent: 36 98% 53%;              /* #FCA311 */
-    --accent-foreground: 0 0% 0%;
+    --accent: 234 76% 61%;             /* #4F5FE8 */
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 351 100% 65%;       /* #FF4D5E */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 40% 22%;
-    --input: 220 40% 20%;
-    --ring: 36 98% 53%;                /* #FCA311 */
+    --success: 142 60% 49%;            /* #34C759 */
+    --success-foreground: 0 0% 100%;
+
+    --border: 215 60% 75%;
+    --input: 0 0% 100%;                /* #FFFFFF — input سفید */
+    --ring: 234 76% 61%;               /* #4F5FE8 */
 
     --radius: 1rem;
 
@@ -49,7 +51,7 @@
   html {
     touch-action: manipulation;
     scroll-padding-bottom: 80px;
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   body {
@@ -59,36 +61,36 @@
     overscroll-behavior-y: contain;
   }
 
-  /* فیلدهای تایپ: فرورفته با لبه‌های نرم */
+  /* فیلدهای تایپ: سفید، برجسته با سایه‌ی نرم */
   input,
   select,
   textarea {
     font-size: 16px;
-    @apply rounded-xl border border-input bg-background;
+    @apply rounded-2xl border-0 bg-white text-foreground;
     box-shadow:
-      inset 0 2px 4px 0 hsl(0 0% 0% / 0.5),
-      inset 0 1px 2px 0 hsl(0 0% 0% / 0.3);
-    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+      0 1px 2px 0 hsl(215 60% 40% / 0.08),
+      0 4px 12px -4px hsl(215 60% 40% / 0.12),
+      inset 0 1px 0 0 hsl(0 0% 100%);
+    transition: box-shadow 0.15s ease, transform 0.1s ease;
   }
 
   input:focus,
   select:focus,
   textarea:focus {
     @apply outline-none;
-    border-color: hsl(var(--primary));
     box-shadow:
-      inset 0 2px 4px 0 hsl(0 0% 0% / 0.5),
-      inset 0 1px 2px 0 hsl(0 0% 0% / 0.3),
-      0 0 0 3px hsl(var(--primary) / 0.2);
+      0 1px 2px 0 hsl(215 60% 40% / 0.1),
+      0 6px 20px -4px hsl(234 76% 61% / 0.35),
+      0 0 0 3px hsl(234 76% 61% / 0.25);
   }
 
   input::placeholder,
   textarea::placeholder {
-    color: hsl(var(--muted-foreground) / 0.55);
+    color: hsl(224 20% 55%);
   }
 
   ::selection {
-    background: hsl(var(--primary) / 0.35);
+    background: hsl(var(--primary) / 0.3);
     color: hsl(var(--foreground));
   }
 
@@ -102,7 +104,7 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
+    background: hsl(215 60% 70%);
     border-radius: 9999px;
   }
 
@@ -112,42 +114,44 @@
 }
 
 @layer utilities {
-  /* کارت‌های برجسته با سایه‌ی اطراف */
+  /* کارت‌های برجسته با سایه‌ی نرم */
   .shadow-soft {
     box-shadow:
-      0 1px 2px 0 hsl(0 0% 0% / 0.5),
-      0 8px 24px -8px hsl(0 0% 0% / 0.7),
-      0 0 0 1px hsl(220 40% 22% / 0.5);
+      0 1px 2px 0 hsl(215 60% 30% / 0.08),
+      0 8px 24px -8px hsl(215 60% 30% / 0.18),
+      0 2px 4px 0 hsl(215 60% 30% / 0.06);
   }
 
-  /* سایه‌ی قوی‌تر برای کارت‌های شاخص (دیالوگ‌ها، کارت‌های اصلی) */
+  /* سایه‌ی قوی‌تر برای کارت‌های شاخص */
   .shadow-elevated {
     box-shadow:
-      0 2px 4px 0 hsl(0 0% 0% / 0.5),
-      0 16px 48px -12px hsl(0 0% 0% / 0.8),
-      0 0 0 1px hsl(220 40% 22% / 0.6);
+      0 2px 4px 0 hsl(215 60% 30% / 0.1),
+      0 16px 48px -12px hsl(215 60% 30% / 0.25),
+      0 4px 12px -2px hsl(215 60% 30% / 0.08);
   }
 
-  /* سطح داخلی محو — همچنان فرورفته */
+  /* سطح داخلی روشن — کارت سفید داخل کارت آبی */
   .surface-muted {
-    @apply rounded-xl border border-border/40 bg-muted/40;
-    box-shadow: inset 0 1px 2px 0 hsl(0 0% 0% / 0.3);
+    @apply rounded-2xl bg-white;
+    box-shadow:
+      0 1px 2px 0 hsl(215 60% 40% / 0.08),
+      0 4px 12px -4px hsl(215 60% 40% / 0.1);
   }
 
-  /* دکمه‌های برجسته */
+  /* دکمه‌های برجسته با سایه‌ی نرم */
   .btn-elevated {
     box-shadow:
-      0 1px 2px 0 hsl(0 0% 0% / 0.5),
-      0 4px 12px -2px hsl(0 0% 0% / 0.6),
-      inset 0 1px 0 0 hsl(0 0% 100% / 0.05);
+      0 2px 4px 0 hsl(234 76% 41% / 0.25),
+      0 8px 20px -6px hsl(234 76% 41% / 0.35),
+      inset 0 1px 0 0 hsl(0 0% 100% / 0.15);
     transition: transform 0.1s ease, box-shadow 0.15s ease;
   }
 
   .btn-elevated:active {
     transform: translateY(1px);
     box-shadow:
-      0 1px 2px 0 hsl(0 0% 0% / 0.5),
-      inset 0 2px 4px 0 hsl(0 0% 0% / 0.4);
+      0 1px 2px 0 hsl(234 76% 41% / 0.3),
+      inset 0 2px 4px 0 hsl(0 0% 0% / 0.1);
   }
 
   .ring-focus {
@@ -162,7 +166,7 @@
     background-image: linear-gradient(
       135deg,
       hsl(var(--primary)) 0%,
-      hsl(28 98% 48%) 100%
+      hsl(245 76% 68%) 100%
     );
   }
 
@@ -173,9 +177,9 @@
   }
 
   .bookora-glass {
-    background: hsl(220 51% 16% / 0.7);
+    background: hsl(213 79% 84% / 0.7);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid hsl(var(--border) / 0.8);
+    border: 1px solid hsl(0 0% 100% / 0.5);
   }
 }
