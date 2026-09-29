@@ -26,23 +26,31 @@ async function createUniqueSlug(name: string): Promise<string> {
   const base = createBaseSlug(name);
   let slug = base;
   let counter = 2;
-  while (await prisma.business.findUnique({ where: { slug } })) {
-    slug = `${base}-${counter}`;
+  while (await prisma.business.findUnique({ where: { slug: slug } })) {
+    slug = base + "-" + counter;
     counter += 1;
   }
   return slug;
 }
 
+function resolveTimezone(country: string): string {
+  return country === "IR" ? "Asia/Tehran" : "UTC";
+}
+
 export async function GET() {
   try {
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const businesses = await prisma.business.findMany({
       where: { ownerId: user.id },
       orderBy: { createdAt: "asc" },
       include: {
-        services: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
+        services: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        },
         _count: { select: { bookings: true } },
       },
     });
@@ -63,6 +71,7 @@ export async function GET() {
           price: service.price.toString(),
           currency: service.currency,
           durationMinutes: service.durationMinutes,
+          slotIntervalMinutes: service.slotIntervalMinutes,
           active: service.active,
           depositType: service.depositType,
           depositValue: service.depositValue.toString(),
@@ -72,14 +81,19 @@ export async function GET() {
     });
   } catch (error) {
     console.error("GET /api/business failed:", error);
-    return NextResponse.json({ error: "خطا در دریافت کسب‌وکارها" }, { status: 500 });
+    return NextResponse.json(
+      { error: "خطا در دریافت کسب‌وکارها" },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     let body: unknown;
     try {
@@ -91,12 +105,17 @@ export async function POST(req: NextRequest) {
     const parsed = createBusinessSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "اطلاعات کسب‌وکار معتبر نیست.", details: parsed.error.flatten() },
+        {
+          error: "اطلاعات کسب‌وکار معتبر نیست.",
+          details: parsed.error.flatten(),
+        },
         { status: 400 }
       );
     }
 
-    const existingCount = await prisma.business.count({ where: { ownerId: user.id } });
+    const existingCount = await prisma.business.count({
+      where: { ownerId: user.id },
+    });
 
     if (existingCount >= FREE_BUSINESS_LIMIT) {
       const activeSubscription = await prisma.subscription.findFirst({
@@ -106,7 +125,8 @@ export async function POST(req: NextRequest) {
       if (!activeSubscription) {
         return NextResponse.json(
           {
-            error: "برای ساخت بیش از یک کسب‌وکار، ابتدا باید اشتراک بخرید.",
+            error:
+              "برای ساخت بیش از یک کسب‌وکار، ابتدا باید اشتراک بخرید.",
             code: "SUBSCRIPTION_REQUIRED",
           },
           { status: 403 }
@@ -118,11 +138,23 @@ export async function POST(req: NextRequest) {
     const description = parsed.data.description || null;
     const country = parsed.data.country;
     const currency = COUNTRY_CURRENCY[country];
+    const timezone = resolveTimezone(country);
     const slug = await createUniqueSlug(name);
 
     const business = await prisma.business.create({
-      data: { ownerId: user.id, name, slug, description, country, currency },
-      include: { services: true, _count: { select: { bookings: true } } },
+      data: {
+        ownerId: user.id,
+        name: name,
+        slug: slug,
+        description: description,
+        country: country,
+        currency: currency,
+        timezone: timezone,
+      },
+      include: {
+        services: true,
+        _count: { select: { bookings: true } },
+      },
     });
 
     return NextResponse.json(
@@ -143,6 +175,9 @@ export async function POST(req: NextRequest) {
     );
   } catch (error) {
     console.error("POST /api/business failed:", error);
-    return NextResponse.json({ error: "ساخت کسب‌وکار ناموفق بود." }, { status: 500 });
+    return NextResponse.json(
+      { error: "ساخت کسب‌وکار ناموفق بود." },
+      { status: 500 }
+    );
   }
 }
