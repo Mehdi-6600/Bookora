@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Building2,
-  CalendarDays,
+  Calendar,
   Check,
   CheckCircle2,
   Clock,
@@ -16,7 +16,7 @@ import {
   Loader2,
   LogIn,
   Receipt,
-  RotateCcw,
+  RefreshCw,
   Search,
   ShieldCheck,
   StickyNote,
@@ -83,48 +83,64 @@ type MessageState = {
 const FILTERS: FilterKey[] = ["PENDING", "ACTIVE", "REJECTED"];
 const BIZ_STATUSES: BizStatusKey[] = ["ALL", "ACTIVE", "ARCHIVED"];
 
-const BADGE_OK = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
-const BADGE_BAD = "bg-destructive/10 text-destructive";
-const BADGE_WARN = "bg-amber-500/10 text-amber-700 dark:text-amber-400";
-const BADGE_MUTED = "bg-muted text-muted-foreground";
+const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-5 shadow-soft";
 
-const BOX_OK =
-  "flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 text-sm text-emerald-700 shadow-soft dark:text-emerald-400";
+const CARD_INNER = "rounded-2xl bg-white p-4 shadow-soft";
 
-const BOX_BAD =
-  "flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 text-sm text-destructive shadow-soft";
+const CARD_INNER_MUTED = "rounded-2xl bg-white/60 p-4 shadow-soft";
 
 const BTN_PRIMARY =
-  "ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50";
-
-const BTN_GHOST =
-  "ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50";
+  "btn-elevated flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#34C759] px-3 py-3 text-sm font-bold text-white transition-transform active:scale-[0.98] disabled:opacity-50";
 
 const BTN_DANGER =
-  "ring-focus flex items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50";
+  "flex flex-1 items-center justify-center gap-2 rounded-2xl bg-[#FF4D5E] px-3 py-3 text-sm font-bold text-white shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50";
 
-const BTN_DANGER_SOLID =
-  "ring-focus flex items-center justify-center gap-2 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50";
+const BTN_GHOST =
+  "flex flex-1 items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-sm font-bold text-[#1A1F36] shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50";
+
+const BTN_PILL_ACTIVE =
+  "btn-selected shrink-0 rounded-2xl px-4 py-2.5 text-xs font-bold transition-all active:scale-95";
+
+const BTN_PILL_IDLE =
+  "shrink-0 rounded-2xl bg-white px-4 py-2.5 text-xs font-bold text-[#1A1F36] shadow-soft transition-all active:scale-95";
+
+const BTN_TAB_ACTIVE =
+  "btn-selected flex-1 rounded-2xl px-4 py-3 text-sm font-bold transition-all active:scale-[0.98]";
+
+const BTN_TAB_IDLE =
+  "flex-1 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-[#1A1F36] shadow-soft transition-all active:scale-[0.98]";
 
 const INPUT_BASE =
-  "ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none";
+  "w-full rounded-2xl bg-white px-4 py-3 text-sm font-medium text-[#1A1F36] outline-none placeholder:text-[#1A1F36]/40 shadow-soft";
 
-const CARD_SECTION =
-  "rounded-2xl border border-border/60 bg-card p-5 shadow-soft";
+const INPUT_SEARCH =
+  "w-full rounded-2xl bg-white px-4 py-3 ps-11 text-sm font-medium text-[#1A1F36] outline-none placeholder:text-[#1A1F36]/40 shadow-soft";
 
-const ICON_TILE =
-  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground";
+const SECTION_ICON =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft";
 
-const STAT_TILE = "rounded-xl border border-border/60 bg-background p-3";
+const SECTION_TITLE = "text-base font-bold text-[#1A1F36]";
 
-const STAT_TILE_CLICKABLE =
-  "ring-focus rounded-xl border border-border/60 bg-background p-3 text-start transition-colors hover:border-primary/40 hover:bg-muted/40";
+const LABEL_SMALL =
+  "text-[11px] font-bold uppercase tracking-wide text-[#1A1F36]/50";
 
-const TAB_ACTIVE =
-  "ring-focus flex-1 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-medium text-primary transition-colors";
+const BOX_OK =
+  "flex items-start gap-2 rounded-2xl bg-[#34C759] p-3.5 text-sm font-bold text-white shadow-soft";
 
-const TAB_IDLE =
-  "ring-focus flex-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted";
+const BOX_ERR =
+  "flex items-start gap-2 rounded-2xl bg-[#FF4D5E] p-3.5 text-sm font-medium text-white shadow-soft";
+
+const BADGE_OK =
+  "inline-flex items-center gap-1 rounded-full bg-[#34C759] px-2.5 py-1 text-[10px] font-bold text-white shadow-soft";
+
+const BADGE_WARN =
+  "inline-flex items-center gap-1 rounded-full bg-[#FCA311] px-2.5 py-1 text-[10px] font-bold text-white shadow-soft";
+
+const BADGE_BAD =
+  "inline-flex items-center gap-1 rounded-full bg-[#FF4D5E] px-2.5 py-1 text-[10px] font-bold text-white shadow-soft";
+
+const BADGE_MUTED =
+  "inline-flex items-center gap-1 rounded-full bg-[#1A1F36]/15 px-2.5 py-1 text-[10px] font-bold text-[#1A1F36]/70";
 
 function formatDate(value: string, locale: string): string {
   try {
@@ -407,9 +423,13 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   if (!isAdmin) {
     return (
       <div className="mx-auto flex min-h-[60vh] w-full max-w-3xl items-center justify-center px-4">
-        <div className={CARD_SECTION + " text-center"}>
-          <ShieldCheck className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">{txtNoAccess}</p>
+        <div className={CARD_MAIN + " text-center"}>
+          <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-soft">
+            <ShieldCheck className="h-7 w-7 text-[#4F5FE8]" />
+          </span>
+          <p className="text-sm font-medium text-[#1A1F36]/60">
+            {txtNoAccess}
+          </p>
         </div>
       </div>
     );
@@ -417,24 +437,23 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
 
   const headerTitle = t("pendingTitle", { count: rows.length });
 
-  const messageBoxClass =
-    message && message.kind === "ok" ? BOX_OK : BOX_BAD;
-
   const s = stats;
   const nf = (v: number) => formatNumber(v, locale);
 
-  const tabRequestsCls = tab === "requests" ? TAB_ACTIVE : TAB_IDLE;
-  const tabBusinessesCls = tab === "businesses" ? TAB_ACTIVE : TAB_IDLE;
+  const tabRequestsCls = tab === "requests" ? BTN_TAB_ACTIVE : BTN_TAB_IDLE;
+  const tabBusinessesCls =
+    tab === "businesses" ? BTN_TAB_ACTIVE : BTN_TAB_IDLE;
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
-      <header className={CARD_SECTION}>
+      {/* Header */}
+      <header className={CARD_MAIN}>
         <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground">
-            <ShieldCheck className="h-5 w-5" />
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white shadow-soft">
+            <ShieldCheck className="h-6 w-6 text-[#4F5FE8]" />
           </span>
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-bold tracking-tight text-[#1A1F36] sm:text-2xl">
               {txtTitle}
             </h1>
           </div>
@@ -458,8 +477,9 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </div>
       </header>
 
+      {/* Message */}
       {message && (
-        <div className={messageBoxClass}>
+        <div className={message.kind === "ok" ? BOX_OK : BOX_ERR}>
           {message.kind === "ok" ? (
             <Check className="mt-0.5 h-4 w-4 shrink-0" />
           ) : (
@@ -469,18 +489,18 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
 
+      {/* =================== REQUESTS TAB =================== */}
       {tab === "requests" && (
         <>
-          <section className={CARD_SECTION}>
+          {/* Stats */}
+          <section className={CARD_MAIN}>
             <header className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
-                <span className={ICON_TILE}>
-                  <CalendarDays className="h-4 w-4" />
+                <span className={SECTION_ICON}>
+                  <Calendar className="h-5 w-5 text-[#4F5FE8]" />
                 </span>
                 <div>
-                  <h2 className="text-lg font-semibold tracking-tight">
-                    {statTitle}
-                  </h2>
+                  <h2 className={SECTION_TITLE}>{statTitle}</h2>
                 </div>
               </div>
 
@@ -489,91 +509,79 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                 onClick={loadStats}
                 disabled={loadingStats}
                 aria-label={txtLoading}
-                className="ring-focus rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft transition-transform active:scale-95 disabled:opacity-50"
               >
-                <RotateCcw
+                <RefreshCw
                   className={
-                    loadingStats ? "h-4 w-4 animate-spin" : "h-4 w-4"
+                    loadingStats
+                      ? "h-4 w-4 animate-spin text-[#4F5FE8]"
+                      : "h-4 w-4 text-[#4F5FE8]"
                   }
                 />
               </button>
             </header>
 
             {loadingStats || !s ? (
-              <div
-                className={
-                  INPUT_BASE +
-                  " mt-4 flex items-center gap-2 text-muted-foreground"
-                }
-              >
+              <div className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-white py-6 text-sm font-medium text-[#1A1F36]/60 shadow-soft">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {txtLoading}
               </div>
             ) : (
               <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                <div className={STAT_TILE}>
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                <div className={CARD_INNER}>
+                  <div className="flex items-center gap-2 text-[#1A1F36]/60">
                     <Users className="h-3.5 w-3.5" />
-                    <span className="text-[11px] font-medium">
+                    <span className="text-[11px] font-bold uppercase tracking-wide">
                       {statUsers}
                     </span>
                   </div>
-                  <div className="tabular mt-1.5 text-lg font-semibold">
+                  <div className="tabular mt-2 text-2xl font-bold text-[#1A1F36]">
                     {nf(s.users.total)}
                   </div>
-                  <div className="mt-0.5 text-[10px] text-muted-foreground">
-                    {statLast7d}
-                    {" "}
-                    +{nf(s.users.last7d)}
+                  <div className="mt-0.5 text-[10px] font-medium text-[#1A1F36]/50">
+                    {statLast7d} +{nf(s.users.last7d)}
                   </div>
                 </div>
 
-                <div className={STAT_TILE}>
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                <div className={CARD_INNER}>
+                  <div className="flex items-center gap-2 text-[#1A1F36]/60">
                     <Building2 className="h-3.5 w-3.5" />
-                    <span className="text-[11px] font-medium">
+                    <span className="text-[11px] font-bold uppercase tracking-wide">
                       {statBusinesses}
                     </span>
                   </div>
-                  <div className="tabular mt-1.5 text-lg font-semibold">
+                  <div className="tabular mt-2 text-2xl font-bold text-[#1A1F36]">
                     {nf(s.businesses.total)}
                   </div>
-                  <div className="mt-0.5 text-[10px] text-muted-foreground">
-                    {statActive}
-                    {" "}
-                    {nf(s.businesses.active)}
-                    {" · "}
-                    {statArchived}
-                    {" "}
+                  <div className="mt-0.5 text-[10px] font-medium text-[#1A1F36]/50">
+                    {statActive} {nf(s.businesses.active)} · {statArchived}{" "}
                     {nf(s.businesses.archived)}
                   </div>
                 </div>
 
-                <div className={STAT_TILE}>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <CalendarDays className="h-3.5 w-3.5" />
-                    <span className="text-[11px] font-medium">
+                <div className={CARD_INNER}>
+                  <div className="flex items-center gap-2 text-[#1A1F36]/60">
+                    <Calendar className="h-3.5 w-3.5" />
+                    <span className="text-[11px] font-bold uppercase tracking-wide">
                       {statBookings}
                     </span>
                   </div>
-                  <div className="tabular mt-1.5 text-lg font-semibold">
+                  <div className="tabular mt-2 text-2xl font-bold text-[#1A1F36]">
                     {nf(s.bookings.total)}
                   </div>
-                  <div className="mt-0.5 text-[10px] text-muted-foreground">
-                    {statLast7d}
-                    {" "}
-                    +{nf(s.bookings.last7d)}
+                  <div className="mt-0.5 text-[10px] font-medium text-[#1A1F36]/50">
+                    {statLast7d} +{nf(s.bookings.last7d)}
                   </div>
                 </div>
 
-                <div className={STAT_TILE}>
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                <div className={CARD_INNER}>
+                  <div className="flex items-center gap-2 text-[#1A1F36]/60">
                     <Crown className="h-3.5 w-3.5" />
-                    <span className="text-[11px] font-medium">
+                    <span className="text-[11px] font-bold uppercase tracking-wide">
                       {statSubsActive}
                     </span>
                   </div>
-                  <div className="tabular mt-1.5 text-lg font-semibold">
+                  <div className="tabular mt-2 text-2xl font-bold text-[#1A1F36]">
                     {nf(s.subscriptions.active)}
                   </div>
                 </div>
@@ -581,27 +589,27 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                 <button
                   type="button"
                   onClick={() => setFilter("PENDING")}
-                  className={STAT_TILE_CLICKABLE}
+                  className={CARD_INNER + " text-start transition-transform active:scale-95"}
                 >
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="flex items-center gap-2 text-[#FCA311]">
                     <Clock className="h-3.5 w-3.5" />
-                    <span className="text-[11px] font-medium">
+                    <span className="text-[11px] font-bold uppercase tracking-wide">
                       {statSubsPending}
                     </span>
                   </div>
-                  <div className="tabular mt-1.5 text-lg font-semibold">
+                  <div className="tabular mt-2 text-2xl font-bold text-[#FCA311]">
                     {nf(s.subscriptions.pending)}
                   </div>
                 </button>
 
-                <div className={STAT_TILE}>
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                <div className={CARD_INNER}>
+                  <div className="flex items-center gap-2 text-[#1A1F36]/60">
                     <CreditCard className="h-3.5 w-3.5" />
-                    <span className="text-[11px] font-medium">
+                    <span className="text-[11px] font-bold uppercase tracking-wide">
                       {statPaymentsPendingReview}
                     </span>
                   </div>
-                  <div className="tabular mt-1.5 text-lg font-semibold">
+                  <div className="tabular mt-2 text-2xl font-bold text-[#1A1F36]">
                     {nf(s.payments.pendingReview)}
                   </div>
                 </div>
@@ -609,25 +617,19 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
             )}
           </section>
 
-          <section className={CARD_SECTION}>
+          {/* Payment settings */}
+          <section className={CARD_MAIN}>
             <header className="flex items-start gap-3">
-              <span className={ICON_TILE}>
-                <CreditCard className="h-4 w-4" />
+              <span className={SECTION_ICON}>
+                <CreditCard className="h-5 w-5 text-[#4F5FE8]" />
               </span>
               <div>
-                <h2 className="text-lg font-semibold tracking-tight">
-                  {txtPaymentInfo}
-                </h2>
+                <h2 className={SECTION_TITLE}>{txtPaymentInfo}</h2>
               </div>
             </header>
 
             {loadingSettings ? (
-              <div
-                className={
-                  INPUT_BASE +
-                  " mt-4 flex items-center gap-2 text-muted-foreground"
-                }
-              >
+              <div className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-white py-6 text-sm font-medium text-[#1A1F36]/60 shadow-soft">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {txtLoading}
               </div>
@@ -637,7 +639,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                   const label = settingLabels[setting.key] || setting.key;
                   return (
                     <div key={setting.key}>
-                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                      <label className={LABEL_SMALL + " mb-1.5 block"}>
                         {label}
                       </label>
                       <input
@@ -660,7 +662,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                   type="button"
                   onClick={saveSettings}
                   disabled={savingSettings}
-                  className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                  className="btn-elevated flex w-full items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-4 py-4 text-base font-bold text-white transition-transform active:scale-[0.98] disabled:opacity-50"
                 >
                   {savingSettings && (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -671,16 +673,15 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
             )}
           </section>
 
-          <section className={CARD_SECTION}>
+          {/* Subscriptions */}
+          <section className={CARD_MAIN}>
             <header className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
-                <span className={ICON_TILE}>
-                  <Receipt className="h-4 w-4" />
+                <span className={SECTION_ICON}>
+                  <Receipt className="h-5 w-5 text-[#4F5FE8]" />
                 </span>
                 <div>
-                  <h2 className="text-lg font-semibold tracking-tight">
-                    {headerTitle}
-                  </h2>
+                  <h2 className={SECTION_TITLE}>{headerTitle}</h2>
                 </div>
               </div>
 
@@ -689,28 +690,27 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                 onClick={() => loadRows(filter)}
                 disabled={loadingRows}
                 aria-label={txtLoading}
-                className="ring-focus rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft transition-transform active:scale-95 disabled:opacity-50"
               >
-                <RotateCcw
+                <RefreshCw
                   className={
-                    loadingRows ? "h-4 w-4 animate-spin" : "h-4 w-4"
+                    loadingRows
+                      ? "h-4 w-4 animate-spin text-[#4F5FE8]"
+                      : "h-4 w-4 text-[#4F5FE8]"
                   }
                 />
               </button>
             </header>
 
-            <div className="mt-4 grid grid-cols-3 gap-2">
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
               {FILTERS.map((key) => {
                 const active = filter === key;
-                const cls = active
-                  ? "ring-focus rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-medium text-primary transition-colors"
-                  : "ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted";
                 return (
                   <button
                     key={key}
                     type="button"
                     onClick={() => setFilter(key)}
-                    className={cls}
+                    className={active ? BTN_PILL_ACTIVE : BTN_PILL_IDLE}
                   >
                     {filterLabels[key]}
                   </button>
@@ -719,19 +719,14 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
             </div>
 
             {loadingRows ? (
-              <div
-                className={
-                  INPUT_BASE +
-                  " mt-4 flex items-center gap-2 text-muted-foreground"
-                }
-              >
+              <div className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-white py-6 text-sm font-medium text-[#1A1F36]/60 shadow-soft">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {txtLoading}
               </div>
             ) : rows.length === 0 ? (
-              <div className="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center">
-                <CheckCircle2 className="h-5 w-5 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
+              <div className="mt-4 rounded-2xl bg-white py-8 text-center shadow-soft">
+                <CheckCircle2 className="mx-auto h-6 w-6 text-[#1A1F36]/30" />
+                <p className="mt-2 text-sm font-medium text-[#1A1F36]/50">
                   {filterEmpty[filter]}
                 </p>
               </div>
@@ -745,7 +740,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                       ? planYearly
                       : sub.plan;
                   const isPending = sub.status === "PENDING";
-                  const badgeClass = statusBadgeClass(sub.status);
+                  const badgeCls = statusBadgeClass(sub.status);
                   const statusLabel =
                     filterLabels[sub.status as FilterKey] || sub.status;
                   const businessText = sub.businessName || txtNoBusiness;
@@ -753,47 +748,28 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                   const reviewedDate = sub.reviewedAt
                     ? formatDate(sub.reviewedAt, locale)
                     : "";
-                  const receiptText = sub.receiptReference
-                    ? txtReceiptLabel
-                    : "";
-                  const receiptValue = sub.receiptReference || "";
-                  const noteText = sub.receiptNote ? txtNoteLabel : "";
-                  const noteValue = sub.receiptNote || "";
-                  const adminNoteText = sub.adminNote ? txtAdminNote : "";
-                  const adminNoteValue = sub.adminNote || "";
                   const showReject = isPending && rejectingId === sub.id;
                   const showActions = isPending && rejectingId !== sub.id;
 
                   return (
-                    <article
-                      key={sub.id}
-                      className="rounded-xl border border-border/60 bg-background p-4"
-                    >
+                    <article key={sub.id} className={CARD_INNER}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="truncate font-semibold">
+                            <h3 className="truncate text-base font-bold text-[#1A1F36]">
                               {sub.userName}
                             </h3>
-                            <span
-                              className={
-                                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium " +
-                                badgeClass
-                              }
-                            >
-                              {statusLabel}
-                            </span>
+                            <span className={badgeCls}>{statusLabel}</span>
                           </div>
 
-                          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-[#1A1F36]/70">
                             <span className="inline-flex items-center gap-1">
                               <Building2 className="h-3 w-3" />
                               {businessText}
                             </span>
+                            <span className="opacity-50">•</span>
                             <span className="inline-flex items-center gap-1">
                               <CreditCard className="h-3 w-3" />
-                              {txtPlanLabel}
-                              {" "}
                               {planLabel}
                             </span>
                           </div>
@@ -806,63 +782,53 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                             rel="noopener noreferrer"
                             aria-label={txtViewBusiness}
                             title={txtViewBusiness}
-                            className="ring-focus shrink-0 rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted"
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#4F5FE8]/10 text-[#4F5FE8] transition-transform active:scale-95"
                           >
-                            <ExternalLink className="h-3.5 w-3.5" />
+                            <ExternalLink className="h-4 w-4" />
                           </a>
                         )}
                       </div>
 
                       <div className="mt-3 space-y-1.5 text-xs">
-                        <div className="flex items-start gap-2 text-muted-foreground">
-                          <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <div className="flex items-start gap-2 text-[#1A1F36]/60">
+                          <Calendar className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                           <span>
-                            {txtSubmittedAt}
-                            {" "}
-                            {submittedDate}
+                            {txtSubmittedAt} {submittedDate}
                           </span>
                         </div>
 
-                        {receiptValue && (
-                          <div className="flex items-start gap-2 text-muted-foreground">
+                        {sub.receiptReference && (
+                          <div className="flex items-start gap-2 text-[#1A1F36]/60">
                             <Hash className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                            <span className="break-all">
-                              {receiptText}
-                              {" "}
-                              {receiptValue}
+                            <span className="break-all" dir="ltr">
+                              {sub.receiptReference}
                             </span>
                           </div>
                         )}
 
-                        {noteValue && (
-                          <div className="flex items-start gap-2 text-muted-foreground">
+                        {sub.receiptNote && (
+                          <div className="flex items-start gap-2 text-[#1A1F36]/60">
                             <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                             <span className="break-words">
-                              {noteText}
-                              {" "}
-                              {noteValue}
+                              {sub.receiptNote}
                             </span>
                           </div>
                         )}
 
                         {reviewedDate && (
-                          <div className="flex items-start gap-2 text-muted-foreground">
+                          <div className="flex items-start gap-2 text-[#1A1F36]/60">
                             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                             <span>
-                              {txtReviewedAt}
-                              {" "}
-                              {reviewedDate}
+                              {txtReviewedAt} {reviewedDate}
                             </span>
                           </div>
                         )}
 
-                        {adminNoteValue && (
-                          <div className="flex items-start gap-2 text-muted-foreground">
+                        {sub.adminNote && (
+                          <div className="flex items-start gap-2 text-[#1A1F36]/60">
                             <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                             <span className="break-words">
-                              {adminNoteText}
-                              {" "}
-                              {adminNoteValue}
+                              {sub.adminNote}
                             </span>
                           </div>
                         )}
@@ -878,19 +844,19 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                             placeholder={txtRejectPlaceholder}
                             className={INPUT_BASE}
                           />
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="flex gap-2">
                             <button
                               type="button"
                               onClick={() =>
                                 review(sub.id, "reject", rejectNote)
                               }
                               disabled={reviewingId === sub.id}
-                              className={BTN_DANGER_SOLID}
+                              className={BTN_DANGER}
                             >
                               {reviewingId === sub.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (
-                                <XCircle className="h-3.5 w-3.5" />
+                                <XCircle className="h-4 w-4" />
                               )}
                               {txtReject}
                             </button>
@@ -909,7 +875,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                       )}
 
                       {showActions && (
-                        <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="mt-3 flex gap-2">
                           <button
                             type="button"
                             onClick={() => review(sub.id, "approve")}
@@ -917,9 +883,9 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                             className={BTN_PRIMARY}
                           >
                             {reviewingId === sub.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <CheckCircle2 className="h-4 w-4" />
                             )}
                             {txtApprove}
                           </button>
@@ -932,7 +898,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                             disabled={reviewingId === sub.id}
                             className={BTN_DANGER}
                           >
-                            <XCircle className="h-3.5 w-3.5" />
+                            <XCircle className="h-4 w-4" />
                             {txtReject}
                           </button>
                         </div>
@@ -946,17 +912,16 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
         </>
       )}
 
+      {/* =================== BUSINESSES TAB =================== */}
       {tab === "businesses" && (
-        <section className={CARD_SECTION}>
+        <section className={CARD_MAIN}>
           <header className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3">
-              <span className={ICON_TILE}>
-                <Building2 className="h-4 w-4" />
+              <span className={SECTION_ICON}>
+                <Building2 className="h-5 w-5 text-[#4F5FE8]" />
               </span>
               <div>
-                <h2 className="text-lg font-semibold tracking-tight">
-                  {bizTitle}
-                </h2>
+                <h2 className={SECTION_TITLE}>{bizTitle}</h2>
               </div>
             </div>
 
@@ -965,38 +930,37 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
               onClick={() => loadBusinesses(bizStatus, bizQuery)}
               disabled={loadingBiz}
               aria-label={txtLoading}
-              className="ring-focus rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft transition-transform active:scale-95 disabled:opacity-50"
             >
-              <RotateCcw
-                className={loadingBiz ? "h-4 w-4 animate-spin" : "h-4 w-4"}
+              <RefreshCw
+                className={
+                  loadingBiz
+                    ? "h-4 w-4 animate-spin text-[#4F5FE8]"
+                    : "h-4 w-4 text-[#4F5FE8]"
+                }
               />
             </button>
           </header>
 
           <div className="relative mt-4">
-            <Search className="pointer-events-none absolute inset-y-0 start-3 my-auto h-4 w-4 text-muted-foreground" />
+            <Search className="pointer-events-none absolute inset-y-0 start-4 my-auto h-4 w-4 text-[#1A1F36]/40" />
             <input
               value={bizQuery}
               onChange={(event) => setBizQuery(event.target.value)}
               placeholder={bizSearchPlaceholder}
-              className={
-                "ring-focus w-full rounded-lg border border-border/60 bg-background py-2 ps-9 pe-3 text-sm outline-none"
-              }
+              className={INPUT_SEARCH}
             />
           </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
             {BIZ_STATUSES.map((key) => {
               const active = bizStatus === key;
-              const cls = active
-                ? "ring-focus rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-medium text-primary transition-colors"
-                : "ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted";
               return (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setBizStatus(key)}
-                  className={cls}
+                  className={active ? BTN_PILL_ACTIVE : BTN_PILL_IDLE}
                 >
                   {bizStatusLabels[key]}
                 </button>
@@ -1005,24 +969,21 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
           </div>
 
           {loadingBiz ? (
-            <div
-              className={
-                INPUT_BASE +
-                " mt-4 flex items-center gap-2 text-muted-foreground"
-              }
-            >
+            <div className="mt-4 flex items-center justify-center gap-2 rounded-2xl bg-white py-6 text-sm font-medium text-[#1A1F36]/60 shadow-soft">
               <Loader2 className="h-4 w-4 animate-spin" />
               {txtLoading}
             </div>
           ) : bizRows.length === 0 ? (
-            <div className="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center">
-              <Building2 className="h-5 w-5 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">{bizEmpty}</p>
+            <div className="mt-4 rounded-2xl bg-white py-8 text-center shadow-soft">
+              <Building2 className="mx-auto h-6 w-6 text-[#1A1F36]/30" />
+              <p className="mt-2 text-sm font-medium text-[#1A1F36]/50">
+                {bizEmpty}
+              </p>
             </div>
           ) : (
             <div className="mt-4 space-y-3">
               {bizRows.map((biz) => {
-                const badgeClass = bizStatusBadgeClass(biz.status);
+                const badgeCls = bizStatusBadgeClass(biz.status);
                 const ownerName =
                   biz.owner.firstName ||
                   biz.owner.username ||
@@ -1036,36 +997,34 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                 const panelLink = "/app?businessId=" + biz.id;
 
                 return (
-                  <article
-                    key={biz.id}
-                    className="rounded-xl border border-border/60 bg-background p-4"
-                  >
+                  <article key={biz.id} className={CARD_INNER}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="truncate font-semibold">
+                          <h3 className="truncate text-base font-bold text-[#1A1F36]">
                             {biz.name}
                           </h3>
-                          <span
-                            className={
-                              "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium " +
-                              badgeClass
-                            }
-                          >
-                            {biz.status}
+                          <span className={badgeCls}>
+                            {biz.status === "ACTIVE"
+                              ? statActive
+                              : biz.status === "ARCHIVED"
+                              ? statArchived
+                              : biz.status}
                           </span>
                         </div>
 
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                          <span className="font-mono opacity-80">
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-[#1A1F36]/70">
+                          <span className="font-mono">
                             {"/book/" + biz.slug}
                           </span>
                           {biz.country && (
-                            <span className="opacity-50">•</span>
+                            <>
+                              <span className="opacity-50">•</span>
+                              <span>{biz.country}</span>
+                            </>
                           )}
-                          {biz.country && <span>{biz.country}</span>}
                           <span className="opacity-50">•</span>
-                          <span>{biz.currency}</span>
+                          <span className="font-bold">{biz.currency}</span>
                         </div>
                       </div>
 
@@ -1074,9 +1033,9 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                           href={panelLink}
                           aria-label={enterPanelText}
                           title={enterPanelText}
-                          className="ring-focus rounded-lg border border-primary/40 bg-primary/5 p-2 text-primary transition-colors hover:bg-primary/10"
+                          className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#4F5FE8] text-white shadow-soft transition-transform active:scale-95"
                         >
-                          <LogIn className="h-3.5 w-3.5" />
+                          <LogIn className="h-4 w-4" />
                         </a>
 
                         <a
@@ -1085,55 +1044,52 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                           rel="noopener noreferrer"
                           aria-label={txtViewBusiness}
                           title={txtViewBusiness}
-                          className="ring-focus rounded-lg border border-border/60 bg-background p-2 text-muted-foreground transition-colors hover:bg-muted"
+                          className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#1A1F36]/10 text-[#1A1F36]/70 transition-transform active:scale-95"
                         >
-                          <ExternalLink className="h-3.5 w-3.5" />
+                          <ExternalLink className="h-4 w-4" />
                         </a>
                       </div>
                     </div>
 
                     <div className="mt-3 space-y-1.5 text-xs">
-                      <div className="flex items-start gap-2 text-muted-foreground">
+                      <div className="flex items-start gap-2 text-[#1A1F36]/70">
                         <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                         <span>
-                          {bizOwner}
-                          {": "}
+                          {bizOwner}:{" "}
                           {ownerLink ? (
                             <a
                               href={ownerLink}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="font-medium text-foreground underline-offset-2 hover:underline"
+                              className="font-bold text-[#4F5FE8] underline-offset-2 hover:underline"
                             >
                               {ownerName}
                             </a>
                           ) : (
-                            <span className="font-medium text-foreground">
+                            <span className="font-bold text-[#1A1F36]">
                               {ownerName}
                             </span>
                           )}
                         </span>
                       </div>
 
-                      <div className="flex items-start gap-2 text-muted-foreground">
-                        <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <div className="flex items-start gap-2 text-[#1A1F36]/70">
+                        <Calendar className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                         <span>{createdDate}</span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[#1A1F36]/70">
                         <span className="inline-flex items-center gap-1">
                           <Clock className="h-3 w-3" />
-                          {bizServices}
-                          {": "}
-                          <span className="tabular font-medium text-foreground">
+                          {bizServices}:{" "}
+                          <span className="tabular font-bold text-[#1A1F36]">
                             {nf(biz.counts.services)}
                           </span>
                         </span>
                         <span className="inline-flex items-center gap-1">
-                          <CalendarDays className="h-3 w-3" />
-                          {bizBookings}
-                          {": "}
-                          <span className="tabular font-medium text-foreground">
+                          <Calendar className="h-3 w-3" />
+                          {bizBookings}:{" "}
+                          <span className="tabular font-bold text-[#1A1F36]">
                             {nf(biz.counts.bookings)}
                           </span>
                         </span>
@@ -1142,7 +1098,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
 
                     <a
                       href={panelLink}
-                      className="ring-focus mt-3 flex items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                      className="btn-elevated mt-3 flex items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-3 py-3 text-xs font-bold text-white transition-transform active:scale-[0.98]"
                     >
                       <LogIn className="h-3.5 w-3.5" />
                       {enterPanelText}
