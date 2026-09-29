@@ -5,34 +5,34 @@
 @layer base {
   :root,
   .dark {
-    /* Bookora dark theme — سرمه‌ای تیره، نزدیک مشکی */
-    --background: 225 68% 7%;          /* #060B1F */
+    /* Bookora theme — مشکی + سرمه‌ای + تأکید نارنجی طلایی */
+    --background: 0 0% 0%;             /* #000000 */
     --foreground: 0 0% 100%;           /* #FFFFFF */
 
-    --card: 224 55% 10%;               /* #0B1229 */
+    --card: 220 51% 16%;               /* #14213D */
     --card-foreground: 0 0% 100%;
 
-    --popover: 224 55% 10%;
+    --popover: 220 51% 16%;
     --popover-foreground: 0 0% 100%;
 
-    --primary: 217 100% 59%;           /* #2E7DFF */
-    --primary-foreground: 0 0% 100%;
+    --primary: 36 98% 53%;             /* #FCA311 */
+    --primary-foreground: 0 0% 0%;
 
-    --secondary: 226 45% 18%;          /* #1A2244 */
+    --secondary: 220 51% 16%;          /* #14213D */
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 226 45% 18%;              /* #1A2244 */
-    --muted-foreground: 224 23% 63%;   /* #8B95B8 */
+    --muted: 220 51% 16%;              /* #14213D */
+    --muted-foreground: 0 0% 90%;      /* #E5E5E5 */
 
-    --accent: 187 100% 50%;            /* #00E5FF */
-    --accent-foreground: 225 68% 7%;
+    --accent: 36 98% 53%;              /* #FCA311 */
+    --accent-foreground: 0 0% 0%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 226 45% 18%;             /* #1A2244 */
-    --input: 226 45% 18%;
-    --ring: 217 100% 59%;              /* #2E7DFF */
+    --border: 220 40% 22%;             /* روشن‌تر از card، محو ولی دیده‌شدنی */
+    --input: 220 40% 22%;
+    --ring: 36 98% 53%;                /* #FCA311 */
 
     --radius: 0.75rem;
 
@@ -92,8 +92,8 @@
 @layer utilities {
   .shadow-soft {
     box-shadow:
-      0 1px 2px 0 hsl(0 0% 0% / 0.4),
-      0 4px 20px -6px hsl(0 0% 0% / 0.5);
+      0 1px 2px 0 hsl(0 0% 0% / 0.5),
+      0 4px 20px -6px hsl(0 0% 0% / 0.6);
   }
 
   .surface-muted {
@@ -112,7 +112,7 @@
     background-image: linear-gradient(
       135deg,
       hsl(var(--primary)) 0%,
-      hsl(var(--accent)) 100%
+      hsl(28 98% 48%) 100%
     );
   }
 
@@ -123,7 +123,7 @@
   }
 
   .bookora-glass {
-    background: hsl(var(--card) / 0.7);
+    background: hsl(220 51% 16% / 0.7);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid hsl(var(--border) / 0.8);
