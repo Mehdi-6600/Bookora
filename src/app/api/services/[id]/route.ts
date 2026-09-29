@@ -104,10 +104,19 @@ export async function PUT(
     const description = parsed.data.description;
     const price = parsed.data.price;
     const durationMinutes = parsed.data.durationMinutes;
-    const slotIntervalMinutes = parsed.data.slotIntervalMinutes;
     const active = parsed.data.active;
     const depositType = parsed.data.depositType;
     const depositValue = parsed.data.depositValue;
+
+    // اگر slotIntervalMinutes داده نشده بود، برابر durationMinutes شود.
+    let slotIntervalMinutes = parsed.data.slotIntervalMinutes;
+    if (
+      typeof slotIntervalMinutes !== "number" ||
+      slotIntervalMinutes <= 0 ||
+      slotIntervalMinutes > durationMinutes
+    ) {
+      slotIntervalMinutes = durationMinutes;
+    }
 
     const service = await prisma.service.update({
       where: { id: id },
@@ -116,9 +125,7 @@ export async function PUT(
         description: description || null,
         price: price,
         durationMinutes: durationMinutes,
-        ...(slotIntervalMinutes !== undefined
-          ? { slotIntervalMinutes: slotIntervalMinutes }
-          : {}),
+        slotIntervalMinutes: slotIntervalMinutes,
         ...(active !== undefined ? { active: active } : {}),
         ...(depositType !== undefined ? { depositType: depositType } : {}),
         ...(depositValue !== undefined
