@@ -28,7 +28,7 @@ const createServiceSchema = z
       .int()
       .min(5)
       .max(480)
-      .default(30),
+      .optional(),
   })
   .and(depositSchema);
 
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     const services = await prisma.service.findMany({
       where: {
         business: { ownerId: user.id },
-        ...(businessId ? { businessId } : {}),
+        ...(businessId ? { businessId: businessId } : {}),
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     });
@@ -105,9 +105,18 @@ export async function POST(req: NextRequest) {
     const description = parsed.data.description;
     const price = parsed.data.price;
     const durationMinutes = parsed.data.durationMinutes;
-    const slotIntervalMinutes = parsed.data.slotIntervalMinutes;
     const depositType = parsed.data.depositType;
     const depositValue = parsed.data.depositValue;
+
+    // اگر slotIntervalMinutes داده نشده بود، برابر durationMinutes شود.
+    let slotIntervalMinutes = parsed.data.slotIntervalMinutes;
+    if (
+      typeof slotIntervalMinutes !== "number" ||
+      slotIntervalMinutes <= 0 ||
+      slotIntervalMinutes > durationMinutes
+    ) {
+      slotIntervalMinutes = durationMinutes;
+    }
 
     const business = await prisma.business.findFirst({
       where: { id: businessId, ownerId: user.id },
