@@ -3,6 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import {
+  Calendar,
+  CheckCircle2,
+  Clock,
+  CreditCard,
+  Loader2,
+  Scissors,
+  Sparkles,
+  User,
+} from "lucide-react";
 import { formatPrice } from "@/lib/currency";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 
@@ -31,6 +41,43 @@ type PaymentMethodInfo = {
   cardNumber: string | null;
   instructions: string | null;
 };
+
+const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-5 shadow-soft";
+
+const BTN_PRIMARY =
+  "btn-elevated w-full rounded-2xl bg-[#4F5FE8] px-4 py-4 text-base font-bold text-white transition-transform active:scale-[0.98] disabled:opacity-50";
+
+const BTN_SERVICE =
+  "w-full rounded-2xl bg-white p-4 text-start shadow-soft transition-all active:scale-[0.99]";
+
+const BTN_SERVICE_SELECTED =
+  "w-full rounded-2xl bg-white p-4 text-start shadow-elevated ring-2 ring-[#4F5FE8] transition-all active:scale-[0.99]";
+
+const BTN_DATE =
+  "shrink-0 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-[#1A1F36] shadow-soft transition-all active:scale-95";
+
+const BTN_DATE_SELECTED =
+  "shrink-0 rounded-2xl bg-[#4F5FE8] px-4 py-3 text-sm font-bold text-white shadow-elevated transition-all active:scale-95";
+
+const BTN_SLOT =
+  "rounded-2xl bg-white px-3 py-3 text-sm font-semibold text-[#1A1F36] tabular shadow-soft transition-all active:scale-95";
+
+const BTN_SLOT_SELECTED =
+  "rounded-2xl bg-[#4F5FE8] px-3 py-3 text-sm font-bold text-white tabular shadow-elevated transition-all active:scale-95";
+
+const INPUT_BASE =
+  "w-full rounded-2xl bg-white px-4 py-3.5 text-base text-[#1A1F36] outline-none placeholder:text-[#1A1F36]/40";
+
+const ERROR_BOX =
+  "rounded-2xl bg-[#FF4D5E] px-4 py-3 text-sm font-medium text-white shadow-soft";
+
+const SECTION_ICON =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft";
+
+const SECTION_TITLE = "text-sm font-bold text-[#1A1F36]";
+
+const LABEL_SMALL =
+  "text-[11px] font-bold uppercase tracking-wide text-[#1A1F36]/50";
 
 function toISODate(d: Date): string {
   const year = d.getFullYear();
@@ -231,15 +278,20 @@ export default function PublicBookingPage() {
 
   if (loading) {
     return (
-      <div className="p-8 text-center text-sm text-muted-foreground">
-        {t("loading")}
+      <div className="flex min-h-screen items-center justify-center p-8">
+        <div className="flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-medium text-[#1A1F36] shadow-soft">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t("loading")}
+        </div>
       </div>
     );
   }
 
   if (error && !business) {
     return (
-      <div className="p-8 text-center text-sm text-destructive">{error}</div>
+      <div className="mx-auto max-w-md p-6">
+        <div className={ERROR_BOX}>{error}</div>
+      </div>
     );
   }
 
@@ -249,138 +301,237 @@ export default function PublicBookingPage() {
     (s) => s.id === selectedServiceId
   );
 
-  if (confirmedBookingId) {
-    if (!depositDue || depositDue <= 0) {
-      return (
-        <div className="mx-auto max-w-md space-y-4 p-6 text-center">
-          <h1 className="text-xl font-bold">{t("confirmed")}</h1>
-          <p className="text-sm text-muted-foreground">
+  // ==================== CONFIRMED (NO DEPOSIT) ====================
+  if (confirmedBookingId && (!depositDue || depositDue <= 0)) {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center p-6">
+        <div className="w-full space-y-5 rounded-3xl bg-[#B8D4F5] p-6 text-center shadow-elevated">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#34C759] shadow-soft">
+            <CheckCircle2 className="h-10 w-10 text-white" strokeWidth={3} />
+          </div>
+          <h1 className="text-2xl font-bold text-[#1A1F36]">
+            {t("confirmed")}
+          </h1>
+          <p className="text-sm font-medium text-[#1A1F36]/70">
             {t("confirmedDesc", { name: business.name })}
           </p>
         </div>
-      );
-    }
-
-    if (receiptSubmitted) {
-      return (
-        <div className="mx-auto max-w-md space-y-4 p-6 text-center">
-          <h1 className="text-xl font-bold">{t("receiptSubmitted")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t("receiptSubmittedDesc", { name: business.name })}
-          </p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="mx-auto max-w-md space-y-4 p-4 py-8">
-        <h1 className="text-xl font-bold">{t("depositTitle")}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t("depositDesc", {
-            amount: formatPrice(
-              depositDue,
-              selectedService?.currency || business.currency
-            ),
-          })}
-        </p>
-
-        {error && (
-          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-            {error}
-          </div>
-        )}
-
-        {paymentMethod ? (
-          <div className="space-y-1 rounded-lg bg-muted p-3 text-sm">
-            {paymentMethod.cardNumber && (
-              <p>{t("cardNumber", { value: paymentMethod.cardNumber })}</p>
-            )}
-            {paymentMethod.accountHolder && (
-              <p>{t("accountHolder", { value: paymentMethod.accountHolder })}</p>
-            )}
-            {paymentMethod.bankName && (
-              <p>{t("bankName", { value: paymentMethod.bankName })}</p>
-            )}
-            {paymentMethod.instructions && (
-              <p className="text-muted-foreground">
-                {paymentMethod.instructions}
-              </p>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-destructive">{t("paymentInfoMissing")}</p>
-        )}
-
-        <input
-          value={receiptRef}
-          onChange={(e) => setReceiptRef(e.target.value)}
-          placeholder={t("receiptPlaceholder")}
-          className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-        />
-
-        <button
-          type="button"
-          onClick={submitReceipt}
-          disabled={submittingReceipt}
-          className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
-        >
-          {submittingReceipt ? t("submitting") : t("submitReceipt")}
-        </button>
       </div>
     );
   }
 
+  // ==================== RECEIPT SUBMITTED ====================
+  if (confirmedBookingId && receiptSubmitted) {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center p-6">
+        <div className="w-full space-y-5 rounded-3xl bg-[#B8D4F5] p-6 text-center shadow-elevated">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#34C759] shadow-soft">
+            <CheckCircle2 className="h-10 w-10 text-white" strokeWidth={3} />
+          </div>
+          <h1 className="text-2xl font-bold text-[#1A1F36]">
+            {t("receiptSubmitted")}
+          </h1>
+          <p className="text-sm font-medium text-[#1A1F36]/70">
+            {t("receiptSubmittedDesc", { name: business.name })}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== DEPOSIT PAYMENT ====================
+  if (confirmedBookingId) {
+    return (
+      <div className="mx-auto max-w-md space-y-5 p-4 py-8">
+        <div className="rounded-3xl bg-[#B8D4F5] p-6 shadow-elevated">
+          <div className="flex items-center gap-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white shadow-soft">
+              <CreditCard className="h-6 w-6 text-[#4F5FE8]" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-lg font-bold text-[#1A1F36]">
+                {t("depositTitle")}
+              </h1>
+              <p className="mt-0.5 text-xs font-medium text-[#1A1F36]/60">
+                {t("depositDesc", {
+                  amount: formatPrice(
+                    depositDue,
+                    selectedService?.currency || business.currency
+                  ),
+                })}
+              </p>
+            </div>
+          </div>
+
+          {error && <div className={ERROR_BOX + " mt-4"}>{error}</div>}
+
+          {paymentMethod ? (
+            <div className="mt-5 space-y-3">
+              {paymentMethod.cardNumber && (
+                <div className="rounded-2xl bg-white p-4 shadow-soft">
+                  <p className={LABEL_SMALL}>{t("cardNumberLabel")}</p>
+                  <p className="mt-1 tabular text-lg font-bold tracking-wider text-[#1A1F36]">
+                    {paymentMethod.cardNumber}
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                {paymentMethod.accountHolder && (
+                  <div className="rounded-2xl bg-white p-3 shadow-soft">
+                    <p className={LABEL_SMALL}>{t("accountHolderLabel")}</p>
+                    <p className="mt-1 text-sm font-semibold text-[#1A1F36]">
+                      {paymentMethod.accountHolder}
+                    </p>
+                  </div>
+                )}
+                {paymentMethod.bankName && (
+                  <div className="rounded-2xl bg-white p-3 shadow-soft">
+                    <p className={LABEL_SMALL}>{t("bankNameLabel")}</p>
+                    <p className="mt-1 text-sm font-semibold text-[#1A1F36]">
+                      {paymentMethod.bankName}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {paymentMethod.instructions && (
+                <div className="rounded-2xl bg-white/60 p-4 shadow-soft">
+                  <p className="text-sm font-medium text-[#1A1F36]/80">
+                    {paymentMethod.instructions}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-5 rounded-2xl bg-[#FF4D5E]/15 p-4 text-sm font-medium text-[#FF4D5E]">
+              {t("paymentInfoMissing")}
+            </div>
+          )}
+
+          <div className="mt-5 space-y-3">
+            <input
+              value={receiptRef}
+              onChange={(e) => setReceiptRef(e.target.value)}
+              placeholder={t("receiptPlaceholder")}
+              className={INPUT_BASE}
+            />
+
+            <button
+              type="button"
+              onClick={submitReceipt}
+              disabled={submittingReceipt}
+              className={BTN_PRIMARY}
+            >
+              {submittingReceipt ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t("submitting")}
+                </span>
+              ) : (
+                t("submitReceipt")
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== MAIN BOOKING ====================
   return (
-    <div className="mx-auto max-w-md space-y-6 p-4 py-8">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">{business.name}</h1>
+    <div className="mx-auto max-w-md space-y-5 p-4 py-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 rounded-3xl bg-[#B8D4F5] p-5 shadow-elevated">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-xl font-bold text-[#1A1F36]">
+            {business.name}
+          </h1>
           {business.description && (
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 line-clamp-2 text-xs font-medium text-[#1A1F36]/60">
               {business.description}
             </p>
           )}
         </div>
-
         <LocaleSwitcher />
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
+      {error && <div className={ERROR_BOX}>{error}</div>}
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium">{t("selectService")}</p>
-        <div className="space-y-2">
-          {business.services.map((service) => (
-            <button
-              key={service.id}
-              type="button"
-              onClick={() => setSelectedServiceId(service.id)}
-              className={`w-full rounded-xl border p-3 text-right ${
-                selectedServiceId === service.id
-                  ? "border-primary bg-primary/10"
-                  : "bg-background"
-              }`}
-            >
-              <div className="font-semibold">{service.name}</div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                {formatPrice(service.price, service.currency)} —{" "}
-                {tSvc("minutes", { count: service.durationMinutes })}
-                {service.depositType !== "NONE" && (
-                  <span> — {t("requiresDeposit")}</span>
-                )}
-              </div>
-            </button>
-          ))}
+      {/* Services */}
+      <div className={CARD_MAIN}>
+        <div className="mb-4 flex items-center gap-2">
+          <span className={SECTION_ICON}>
+            <Scissors className="h-4 w-4 text-[#4F5FE8]" />
+          </span>
+          <h2 className={SECTION_TITLE}>{t("selectService")}</h2>
+        </div>
+
+        <div className="space-y-3">
+          {business.services.map((service) => {
+            const isSelected = selectedServiceId === service.id;
+            const cls = isSelected ? BTN_SERVICE_SELECTED : BTN_SERVICE;
+            return (
+              <button
+                key={service.id}
+                type="button"
+                onClick={() => setSelectedServiceId(service.id)}
+                className={cls}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-base font-bold text-[#1A1F36]">
+                      {service.name}
+                    </div>
+                    {service.description && (
+                      <div className="mt-0.5 line-clamp-2 text-xs font-medium text-[#1A1F36]/60">
+                        {service.description}
+                      </div>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                      <span className="inline-flex items-center gap-1 font-semibold text-[#4F5FE8]">
+                        <Clock className="h-3.5 w-3.5" />
+                        {tSvc("minutes", { count: service.durationMinutes })}
+                      </span>
+                      {service.depositType !== "NONE" && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#4F5FE8]/15 px-2 py-0.5 text-[10px] font-bold text-[#4F5FE8]">
+                          {t("requiresDeposit")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-end">
+                    <div className="tabular text-base font-bold text-[#1A1F36]">
+                      {formatPrice(service.price, service.currency)}
+                    </div>
+                    {isSelected && (
+                      <div className="mt-1 flex justify-end">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#34C759] shadow-soft">
+                          <CheckCircle2
+                            className="h-3.5 w-3.5 text-white"
+                            strokeWidth={3}
+                          />
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium">{t("selectDate")}</p>
-        <div className="flex gap-2 overflow-x-auto pb-1">
+      {/* Date */}
+      <div className={CARD_MAIN}>
+        <div className="mb-4 flex items-center gap-2">
+          <span className={SECTION_ICON}>
+            <Calendar className="h-4 w-4 text-[#4F5FE8]" />
+          </span>
+          <h2 className={SECTION_TITLE}>{t("selectDate")}</h2>
+        </div>
+
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
           {nextDays.map((d) => {
             const iso = toISODate(d);
             const label = d.toLocaleDateString(locale, {
@@ -388,16 +539,13 @@ export default function PublicBookingPage() {
               day: "numeric",
               month: "short",
             });
+            const isSelected = date === iso;
             return (
               <button
                 key={iso}
                 type="button"
                 onClick={() => setDate(iso)}
-                className={`shrink-0 rounded-lg border px-3 py-2 text-xs whitespace-nowrap ${
-                  date === iso
-                    ? "border-primary bg-primary/10 font-medium"
-                    : "bg-background"
-                }`}
+                className={isSelected ? BTN_DATE_SELECTED : BTN_DATE}
               >
                 {label}
               </button>
@@ -406,12 +554,24 @@ export default function PublicBookingPage() {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium">{t("availableSlots")}</p>
+      {/* Slots */}
+      <div className={CARD_MAIN}>
+        <div className="mb-4 flex items-center gap-2">
+          <span className={SECTION_ICON}>
+            <Clock className="h-4 w-4 text-[#4F5FE8]" />
+          </span>
+          <h2 className={SECTION_TITLE}>{t("availableSlots")}</h2>
+        </div>
+
         {loadingSlots ? (
-          <p className="text-sm text-muted-foreground">{t("loading")}</p>
+          <div className="flex items-center justify-center gap-2 rounded-2xl bg-white py-6 text-sm font-medium text-[#1A1F36]/60 shadow-soft">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t("loading")}
+          </div>
         ) : slots.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("noSlots")}</p>
+          <div className="rounded-2xl bg-white py-6 text-center text-sm font-medium text-[#1A1F36]/60 shadow-soft">
+            {t("noSlots")}
+          </div>
         ) : (
           <div className="grid grid-cols-3 gap-2">
             {slots.map((slot) => {
@@ -420,16 +580,13 @@ export default function PublicBookingPage() {
                 hour: "2-digit",
                 minute: "2-digit",
               });
+              const isSelected = selectedSlot === slot;
               return (
                 <button
                   key={slot}
                   type="button"
                   onClick={() => setSelectedSlot(slot)}
-                  className={`rounded-lg border px-2 py-2 text-sm ${
-                    selectedSlot === slot
-                      ? "border-primary bg-primary/10"
-                      : "bg-background"
-                  }`}
+                  className={isSelected ? BTN_SLOT_SELECTED : BTN_SLOT}
                 >
                   {label}
                 </button>
@@ -439,44 +596,64 @@ export default function PublicBookingPage() {
         )}
       </div>
 
+      {/* Customer info */}
       {selectedSlot && (
-        <div className="space-y-3 rounded-xl border p-4">
-          <p className="text-sm font-medium">{t("yourInfo")}</p>
-          <input
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-            placeholder={t("namePlaceholder")}
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-          />
-          <input
-            value={customerPhone}
-            onChange={(e) => setCustomerPhone(e.target.value)}
-            placeholder={t("phonePlaceholder")}
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-          />
-          <input
-            value={customerEmail}
-            onChange={(e) => setCustomerEmail(e.target.value)}
-            placeholder={t("emailPlaceholder")}
-            className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none"
-          />
-          <button
-            type="button"
-            onClick={submitBooking}
-            disabled={submitting}
-            className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
-          >
-            {submitting
-              ? t("confirming")
-              : t("confirmButton", {
-                  price: selectedService
-                    ? formatPrice(
-                        selectedService.price,
-                        selectedService.currency
-                      )
-                    : "",
-                })}
-          </button>
+        <div className={CARD_MAIN}>
+          <div className="mb-4 flex items-center gap-2">
+            <span className={SECTION_ICON}>
+              <User className="h-4 w-4 text-[#4F5FE8]" />
+            </span>
+            <h2 className={SECTION_TITLE}>{t("yourInfo")}</h2>
+          </div>
+
+          <div className="space-y-3">
+            <input
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder={t("namePlaceholder")}
+              className={INPUT_BASE}
+            />
+            <input
+              value={customerPhone}
+              onChange={(e) => setCustomerPhone(e.target.value)}
+              placeholder={t("phonePlaceholder")}
+              inputMode="tel"
+              className={INPUT_BASE}
+            />
+            <input
+              value={customerEmail}
+              onChange={(e) => setCustomerEmail(e.target.value)}
+              placeholder={t("emailPlaceholder")}
+              inputMode="email"
+              className={INPUT_BASE}
+            />
+
+            <button
+              type="button"
+              onClick={submitBooking}
+              disabled={submitting}
+              className={BTN_PRIMARY + " mt-2"}
+            >
+              {submitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t("confirming")}
+                </span>
+              ) : (
+                <span className="flex items-center justify-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  {t("confirmButton", {
+                    price: selectedService
+                      ? formatPrice(
+                          selectedService.price,
+                          selectedService.currency
+                        )
+                      : "",
+                  })}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       )}
     </div>
