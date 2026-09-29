@@ -166,6 +166,9 @@
     "cardNumber": "شماره کارت: {value}",
     "accountHolder": "به نام: {value}",
     "bankName": "بانک: {value}",
+    "cardNumberLabel": "شماره کارت",
+    "accountHolderLabel": "به نام",
+    "bankNameLabel": "بانک",
     "receiptPlaceholder": "کد رهگیری یا شماره تراکنش",
     "submitReceipt": "ثبت پرداخت",
     "submitting": "در حال ثبت...",
@@ -231,7 +234,17 @@
     "receiptLabel": "کد رهگیری ارسالی: {ref}",
     "receiptNotSent": "هنوز ارسال نشده",
     "approveButton": "تأیید پرداخت",
-    "rejectButton": "رد"
+    "rejectButton": "رد",
+    "filterPending": "در انتظار تأیید",
+    "filterConfirmed": "تأییدشده",
+    "filterAll": "همه",
+    "totalLabel": "رزرو",
+    "searchPlaceholder": "جستجو بر اساس نام یا شماره...",
+    "statusPending": "در انتظار",
+    "statusConfirmed": "تأییدشده",
+    "statusCancelled": "کنسل‌شده",
+    "depositLabelShort": "بیعانه",
+    "receiptLabelShort": "کد پیگیری"
   },
   "subscription": {
     "title": "اشتراک",
