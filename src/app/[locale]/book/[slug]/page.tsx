@@ -33,7 +33,10 @@ type PaymentMethodInfo = {
 };
 
 function toISODate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return year + "-" + month + "-" + day;
 }
 
 function buildNextDays(count: number): Date[] {
@@ -181,7 +184,7 @@ export default function PublicBookingPage() {
       }
 
       setConfirmedBookingId(data.booking.id);
-      setDepositDue(data.booking.depositDue);
+      setDepositDue(Number(data.booking.depositDue) || 0);
       setPaymentMethod(data.paymentMethod);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("bookingError"));
@@ -247,7 +250,7 @@ export default function PublicBookingPage() {
   );
 
   if (confirmedBookingId) {
-    if (depositDue <= 0) {
+    if (!depositDue || depositDue <= 0) {
       return (
         <div className="mx-auto max-w-md space-y-4 p-6 text-center">
           <h1 className="text-xl font-bold">{t("confirmed")}</h1>
