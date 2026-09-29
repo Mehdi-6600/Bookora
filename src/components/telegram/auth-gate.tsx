@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Loader2, ShieldCheck } from "lucide-react";
 
 type TelegramUser = {
   id: string;
@@ -111,13 +112,15 @@ export function TelegramAuthGate({ children }: Props) {
     };
   }, []);
 
+  // ==================== LOADING ====================
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-
-          <p className="text-sm text-muted-foreground">
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-3xl bg-[#B8D4F5] p-8 text-center shadow-elevated">
+          <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-soft">
+            <Loader2 className="h-8 w-8 animate-spin text-[#4F5FE8]" />
+          </span>
+          <p className="text-base font-bold text-[#1A1F36]">
             در حال ورود به Bookora...
           </p>
         </div>
@@ -125,13 +128,22 @@ export function TelegramAuthGate({ children }: Props) {
     );
   }
 
+  // ==================== ERROR ====================
   if (error) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-2xl border bg-card p-6 text-center shadow-sm">
-          <h1 className="text-xl font-bold">ورود به Bookora</h1>
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-3xl bg-[#B8D4F5] p-8 text-center shadow-elevated">
+          <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-[#4F5FE8] shadow-soft">
+            <ShieldCheck className="h-8 w-8 text-white" />
+          </span>
 
-          <p className="mt-3 text-sm text-muted-foreground">{error}</p>
+          <h1 className="text-xl font-bold text-[#1A1F36]">
+            ورود به Bookora
+          </h1>
+
+          <p className="mt-3 text-sm font-medium text-[#1A1F36]/70">
+            {error}
+          </p>
         </div>
       </div>
     );
