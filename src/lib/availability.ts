@@ -23,10 +23,14 @@ export function computeAvailableSlots(params: {
   const durationMinutes = params.durationMinutes;
   const busyRanges = params.busyRanges;
 
-  let step = 30;
+  // فاصله‌ی نوبت‌ها:
+  // - اگر صاحب کسب‌وکار مقدار مشخصی داده باشد (و معتبر باشد)، همان استفاده می‌شود.
+  // - در غیر این صورت، فاصله = مدت سرویس (پیش‌فرض منطقی).
+  let step = durationMinutes;
   if (
     typeof params.slotIntervalMinutes === "number" &&
-    params.slotIntervalMinutes > 0
+    params.slotIntervalMinutes > 0 &&
+    params.slotIntervalMinutes <= durationMinutes
   ) {
     step = params.slotIntervalMinutes;
   }
