@@ -65,19 +65,20 @@ model Business {
 }
 
 model Service {
-  id              String   @id @default(cuid())
-  businessId      String
-  name            String
-  description     String?
-  price           Decimal  @db.Decimal(10, 2)
-  currency        String   @default("EUR")
-  durationMinutes Int
-  active          Boolean  @default(true)
-  sortOrder       Int      @default(0)
-  depositType     String   @default("NONE")
-  depositValue    Decimal  @default(0) @db.Decimal(10, 2)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  businessId          String
+  name                String
+  description         String?
+  price               Decimal  @db.Decimal(10, 2)
+  currency            String   @default("EUR")
+  durationMinutes     Int
+  slotIntervalMinutes Int      @default(30)
+  active              Boolean  @default(true)
+  sortOrder           Int      @default(0)
+  depositType         String   @default("NONE")
+  depositValue        Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   bookings Booking[]
