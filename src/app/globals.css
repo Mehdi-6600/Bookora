@@ -3,52 +3,41 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 10% 3.9%;
-    --radius: 0.5rem;
+  :root,
+  .dark {
+    /* Bookora dark theme — هم‌رنگ پس‌زمینه‌ی لوگو */
+    --background: 223 68% 13%;         /* #0B1437 */
+    --foreground: 0 0% 100%;           /* #FFFFFF */
+
+    --card: 228 66% 17%;               /* #0F1B4A */
+    --card-foreground: 0 0% 100%;
+
+    --popover: 228 66% 17%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 217 100% 59%;           /* #2E7DFF */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 228 51% 24%;          /* #1E2A5C */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 228 51% 24%;              /* #1E2A5C */
+    --muted-foreground: 224 32% 67%;   /* #94A3C4 */
+
+    --accent: 187 100% 50%;            /* #00E5FF */
+    --accent-foreground: 223 68% 13%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 228 51% 24%;             /* #1E2A5C */
+    --input: 228 51% 24%;
+    --ring: 217 100% 59%;              /* #2E7DFF */
+
+    --radius: 0.75rem;
 
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-bottom: env(safe-area-inset-bottom, 0px);
-  }
-
-  .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
   }
 }
 
@@ -62,6 +51,7 @@
     /* وقتی کیبورد بالا می‌آید و یک Input فوکوس می‌شود، این فاصله باعث می‌شود
        Input درست بالای کیبورد بنشیند، نه چسبیده به لبه‌ی پایین صفحه‌ی مرئی. */
     scroll-padding-bottom: 80px;
+    color-scheme: dark;
   }
 
   body {
@@ -76,20 +66,39 @@
   textarea {
     font-size: 16px;
   }
+
+  /* انتخاب متن با رنگ آبی برند */
+  ::selection {
+    background: hsl(var(--primary) / 0.35);
+    color: hsl(var(--foreground));
+  }
+
+  /* اسکرول‌بار تیره */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.6);
+  }
 }
 
 @layer utilities {
-  /* Soft, low-contrast shadow suitable for cards on both light and dark themes. */
+  /* Soft shadow suitable for cards on dark theme. */
   .shadow-soft {
     box-shadow:
-      0 1px 2px 0 hsl(240 5.9% 10% / 0.04),
-      0 4px 16px -6px hsl(240 5.9% 10% / 0.06);
-  }
-
-  .dark .shadow-soft {
-    box-shadow:
       0 1px 2px 0 hsl(0 0% 0% / 0.4),
-      0 4px 16px -6px hsl(0 0% 0% / 0.5);
+      0 4px 20px -6px hsl(0 0% 0% / 0.5);
   }
 
   /* Subtle inner surface used inside cards (sections, muted blocks). */
@@ -105,5 +114,29 @@
   /* Unified numeric/currency text in cards. */
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Bookora brand gradient — برای دکمه‌های CTA */
+  .bookora-gradient {
+    background-image: linear-gradient(
+      135deg,
+      hsl(var(--primary)) 0%,
+      hsl(var(--accent)) 100%
+    );
+  }
+
+  /* Glow effect برای کارت‌های فعال */
+  .bookora-glow {
+    box-shadow:
+      0 0 0 1px hsl(var(--primary) / 0.4),
+      0 8px 32px -8px hsl(var(--primary) / 0.5);
+  }
+
+  /* Glassy surface برای هدرها و کارت‌های شاخص */
+  .bookora-glass {
+    background: hsl(var(--card) / 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--border) / 0.8);
   }
 }
