@@ -211,7 +211,11 @@
     "requiredError": "الرجاء إدخال تاريخ البداية والنهاية.",
     "addError": "فشلت إضافة الإجازة.",
     "deleteButton": "حذف",
-    "toLabel": "إلى"
+    "toLabel": "إلى",
+    "startLabel": "من",
+    "endLabel": "إلى",
+    "loading": "جارٍ التحميل...",
+    "empty": "لم تُضف أي إجازة بعد."
   },
   "paymentMethod": {
     "title": "طريقة استلام العربون",
