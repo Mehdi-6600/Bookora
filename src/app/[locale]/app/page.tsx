@@ -6,7 +6,6 @@ import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Building2,
-  CalendarDays,
   Check,
   ChevronDown,
   Clock,
@@ -22,7 +21,6 @@ import {
   ShieldCheck,
   Trash2,
   Users,
-  X,
 } from "lucide-react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
@@ -33,7 +31,6 @@ import { BookingsPanel } from "@/components/bookings-panel";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { Link } from "@/i18n/navigation";
 import {
-  COUNTRY_LABELS,
   CountryCode,
   formatPrice,
   isCountryCode,
@@ -56,6 +53,7 @@ type Service = {
   price: string;
   currency: string;
   durationMinutes: number;
+  slotIntervalMinutes: number;
   active: boolean;
   depositType: string;
   depositValue: string;
@@ -127,6 +125,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [serviceDescription, setServiceDescription] = useState("");
   const [servicePrice, setServicePrice] = useState("");
   const [serviceDuration, setServiceDuration] = useState("60");
+  const [serviceSlotInterval, setServiceSlotInterval] = useState("30");
   const [serviceDepositType, setServiceDepositType] = useState<
     "NONE" | "PERCENTAGE" | "FIXED"
   >("NONE");
@@ -139,6 +138,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [editDescription, setEditDescription] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editDuration, setEditDuration] = useState("");
+  const [editSlotInterval, setEditSlotInterval] = useState("30");
   const [editDepositType, setEditDepositType] = useState<
     "NONE" | "PERCENTAGE" | "FIXED"
   >("NONE");
@@ -346,7 +346,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setSavingBusinessEdit(true);
       setMessage(null);
 
-      const response = await fetch(`/api/business/${businessId}`, {
+      const response = await fetch("/api/business/" + businessId, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -383,7 +383,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setDeletingBusiness(true);
       setMessage(null);
 
-      const response = await fetch(`/api/business/${businessId}`, {
+      const response = await fetch("/api/business/" + businessId, {
         method: "DELETE",
       });
 
@@ -413,7 +413,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setReactivating(true);
       setMessage(null);
 
-      const response = await fetch(`/api/business/${business.id}`, {
+      const response = await fetch("/api/business/" + business.id, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -451,6 +451,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
     setServiceDescription("");
     setServicePrice("");
     setServiceDuration("60");
+    setServiceSlotInterval("30");
     setServiceDepositType("NONE");
     setServiceDepositValue("");
   }
@@ -470,8 +471,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
     const price = Number(servicePrice);
     const durationMinutes = Number(serviceDuration);
+    const slotIntervalMinutes = Number(serviceSlotInterval);
     const depositValue =
-      serviceDepositType === "NONE" ? 0 : Number(serviceDepositValue || "0");
+      serviceDepositType === "NONE"
+        ? 0
+        : Number(serviceDepositValue || "0");
 
     if (!Number.isFinite(price) || price < 0) {
       setMessage(tMsg("servicePriceInvalid"));
@@ -480,6 +484,14 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
       setMessage(tMsg("serviceDurationInvalid"));
+      return;
+    }
+
+    if (
+      !Number.isInteger(slotIntervalMinutes) ||
+      slotIntervalMinutes < 5
+    ) {
+      setMessage(tMsg("serviceSlotIntervalInvalid"));
       return;
     }
 
@@ -507,10 +519,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
           businessId: selectedBusiness.id,
           name: serviceName.trim(),
           description: serviceDescription.trim() || null,
-          price,
-          durationMinutes,
+          price: price,
+          durationMinutes: durationMinutes,
+          slotIntervalMinutes: slotIntervalMinutes,
           depositType: serviceDepositType,
-          depositValue,
+          depositValue: depositValue,
         }),
       });
 
@@ -538,6 +551,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
     setEditDescription(service.description || "");
     setEditPrice(service.price);
     setEditDuration(String(service.durationMinutes));
+    setEditSlotInterval(String(service.slotIntervalMinutes || 30));
     setEditDepositType(
       (service.depositType as "NONE" | "PERCENTAGE" | "FIXED") || "NONE"
     );
@@ -552,6 +566,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
   async function saveEdit(serviceId: string) {
     const price = Number(editPrice);
     const durationMinutes = Number(editDuration);
+    const slotIntervalMinutes = Number(editSlotInterval);
     const depositValue =
       editDepositType === "NONE" ? 0 : Number(editDepositValue || "0");
 
@@ -571,6 +586,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
     }
 
     if (
+      !adminView &&
+      (!Number.isInteger(slotIntervalMinutes) ||
+        slotIntervalMinutes < 5)
+    ) {
+      setMessage(tMsg("serviceSlotIntervalInvalid"));
+      return;
+    }
+
+    if (
       editDepositType === "PERCENTAGE" &&
       (depositValue < 0 || depositValue > 100)
     ) {
@@ -584,21 +608,22 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
       const payload = adminView
         ? {
-            price,
+            price: price,
             name: editName.trim(),
-            durationMinutes,
+            durationMinutes: durationMinutes,
             description: editDescription.trim() || null,
           }
         : {
             name: editName.trim(),
             description: editDescription.trim() || null,
-            price,
-            durationMinutes,
+            price: price,
+            durationMinutes: durationMinutes,
+            slotIntervalMinutes: slotIntervalMinutes,
             depositType: editDepositType,
-            depositValue,
+            depositValue: depositValue,
           };
 
-      const response = await fetch(`/api/services/${serviceId}`, {
+      const response = await fetch("/api/services/" + serviceId, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -626,7 +651,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
     try {
       setMessage(null);
 
-      const response = await fetch(`/api/services/${service.id}`, {
+      const response = await fetch("/api/services/" + service.id, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -634,6 +659,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
           description: service.description,
           price: Number(service.price),
           durationMinutes: service.durationMinutes,
+          slotIntervalMinutes: service.slotIntervalMinutes,
           active: !service.active,
           depositType: service.depositType,
           depositValue: Number(service.depositValue),
@@ -659,7 +685,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setDeletingId(serviceId);
       setMessage(null);
 
-      const response = await fetch(`/api/services/${serviceId}`, {
+      const response = await fetch("/api/services/" + serviceId, {
         method: "DELETE",
       });
 
@@ -735,9 +761,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   const bookingUrl =
     typeof window !== "undefined" && selectedBusiness
-      ? `${window.location.origin}/book/${selectedBusiness.slug}`
+      ? window.location.origin + "/book/" + selectedBusiness.slug
       : selectedBusiness
-      ? `/book/${selectedBusiness.slug}`
+      ? "/book/" + selectedBusiness.slug
       : "";
 
   const activeServices = selectedBusiness
@@ -900,7 +926,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 disabled={savingBusiness}
                 className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
               >
-                {savingBusiness && <Loader2 className="h-4 w-4 animate-spin" />}
+                {savingBusiness && (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
                 {savingBusiness
                   ? tWizard("creating")
                   : tWizard("createButton")}
@@ -934,7 +962,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   <option key={business.id} value={business.id}>
                     {business.name}
                     {business.status === "ARCHIVED"
-                      ? ` ${tBiz("archivedTag")}`
+                      ? " " + tBiz("archivedTag")
                       : ""}
                   </option>
                 ))}
@@ -972,7 +1000,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
                       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                         <span>
-                          {tBiz("countryLabel")}:{" "}
+                          {tBiz("countryLabel")}
+                          {": "}
                           <span className="font-medium text-foreground">
                             {selectedBusinessCountry
                               ? selectedBusinessCountry === "IR"
@@ -983,7 +1012,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         </span>
                         <span className="opacity-50">•</span>
                         <span>
-                          {tBiz("currencyLabel")}:{" "}
+                          {tBiz("currencyLabel")}
+                          {": "}
                           <span className="font-medium text-foreground">
                             {selectedBusiness.currency}
                           </span>
@@ -1050,11 +1080,12 @@ function Dashboard({ user }: { user: TelegramUser }) {
                             key={code}
                             type="button"
                             onClick={() => setEditBusinessCountry(code)}
-                            className={`ring-focus rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                              editBusinessCountry === code
+                            className={
+                              "ring-focus rounded-lg border px-3 py-2 text-sm font-medium transition-colors " +
+                              (editBusinessCountry === code
                                 ? "border-primary bg-primary/10 text-primary"
-                                : "border-border/60 bg-background"
-                            }`}
+                                : "border-border/60 bg-background")
+                            }
                           >
                             {code === "IR"
                               ? tWizard("countryIR")
@@ -1121,7 +1152,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           </button>
 
                           <a
-                            href={`/book/${selectedBusiness.slug}`}
+                            href={"/book/" + selectedBusiness.slug}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
@@ -1267,6 +1298,18 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           />
                         </div>
 
+                        <input
+                          value={serviceSlotInterval}
+                          onChange={(event) =>
+                            setServiceSlotInterval(event.target.value)
+                          }
+                          type="number"
+                          min="5"
+                          step="5"
+                          placeholder={tSvc("slotIntervalPlaceholder")}
+                          className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                        />
+
                         <div>
                           <p className="mb-2 text-sm font-medium">
                             {tSvc("depositLabel")}
@@ -1279,11 +1322,12 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 key={type}
                                 type="button"
                                 onClick={() => setServiceDepositType(type)}
-                                className={`ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
-                                  serviceDepositType === type
+                                className={
+                                  "ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors " +
+                                  (serviceDepositType === type
                                     ? "border-primary bg-primary/10 text-primary"
-                                    : "border-border/60 bg-background hover:bg-muted"
-                                }`}
+                                    : "border-border/60 bg-background hover:bg-muted")
+                                }
                               >
                                 {depositLabels[type]}
                               </button>
@@ -1401,6 +1445,22 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 </div>
 
                                 {!adminView && (
+                                  <input
+                                    value={editSlotInterval}
+                                    onChange={(event) =>
+                                      setEditSlotInterval(event.target.value)
+                                    }
+                                    type="number"
+                                    min="5"
+                                    step="5"
+                                    placeholder={tSvc(
+                                      "slotIntervalPlaceholder"
+                                    )}
+                                    className="ring-focus tabular w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                                  />
+                                )}
+
+                                {!adminView && (
                                   <div>
                                     <div className="grid grid-cols-3 gap-2">
                                       {(
@@ -1416,11 +1476,12 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                           onClick={() =>
                                             setEditDepositType(type)
                                           }
-                                          className={`ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
-                                            editDepositType === type
+                                          className={
+                                            "ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors " +
+                                            (editDepositType === type
                                               ? "border-primary bg-primary/10 text-primary"
-                                              : "border-border/60 bg-background hover:bg-muted"
-                                          }`}
+                                              : "border-border/60 bg-background hover:bg-muted")
+                                          }
                                         >
                                           {depositLabels[type]}
                                         </button>
@@ -1477,18 +1538,20 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                         {service.name}
                                       </h3>
                                       <span
-                                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                                          service.active
+                                        className={
+                                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                                          (service.active
                                             ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                            : "bg-muted text-muted-foreground"
-                                        }`}
+                                            : "bg-muted text-muted-foreground")
+                                        }
                                       >
                                         <span
-                                          className={`h-1.5 w-1.5 rounded-full ${
-                                            service.active
+                                          className={
+                                            "h-1.5 w-1.5 rounded-full " +
+                                            (service.active
                                               ? "bg-emerald-500"
-                                              : "bg-muted-foreground/60"
-                                          }`}
+                                              : "bg-muted-foreground/60")
+                                          }
                                         />
                                         {service.active
                                           ? tSvc("activate")
@@ -1511,7 +1574,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                           value:
                                             service.depositType ===
                                             "PERCENTAGE"
-                                              ? `${service.depositValue}%`
+                                              ? service.depositValue + "%"
                                               : formatPrice(
                                                   service.depositValue,
                                                   service.currency
@@ -1576,7 +1639,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                         onClick={() =>
                                           deleteService(service.id)
                                         }
-                                        disabled={deletingId === service.id}
+                                        disabled={
+                                          deletingId === service.id
+                                        }
                                         className="ring-focus flex items-center justify-center gap-1.5 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                                       >
                                         {deletingId === service.id ? (
