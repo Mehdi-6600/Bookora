@@ -15,7 +15,10 @@ const createBookingSchema = z.object({
   serviceId: z.string().min(1),
   startAt: z.string().datetime(),
   customerName: z.string().trim().min(1).max(120),
-  customerPhone: z.string().trim().regex(phonePattern, "شماره تلفن معتبر نیست."),
+  customerPhone: z
+    .string()
+    .trim()
+    .regex(phonePattern, "شماره تلفن معتبر نیست."),
   customerEmail: z.string().trim().email().nullable().optional(),
 });
 
@@ -43,10 +46,11 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
-    const { slug } = await params;
+    const resolved = await params;
+    const slug = resolved.slug;
     const ip = getClientIp(req);
 
-    if (await isRateLimited(`booking:${ip}`, 10, 10 * 60 * 1000)) {
+    if (await isRateLimited("booking:" + ip, 10, 10 * 60 * 1000)) {
       return NextResponse.json(
         { error: "درخواست‌های زیاد. کمی صبر کنید." },
         { status: 429 }
@@ -69,7 +73,7 @@ export async function POST(
     }
 
     const business = await prisma.business.findFirst({
-      where: { slug, status: "ACTIVE" },
+      where: { slug: slug, status: "ACTIVE" },
       include: { owner: { select: { telegramId: true } } },
     });
     if (!business) {
@@ -124,11 +128,11 @@ export async function POST(
     }
 
     const dayStart = fromZonedTime(
-      `${dateStr}T00:00:00`,
+      dateStr + "T00:00:00",
       business.timezone
     );
     const dayEnd = fromZonedTime(
-      `${dateStr}T23:59:59`,
+      dateStr + "T23:59:59",
       business.timezone
     );
 
@@ -169,6 +173,7 @@ export async function POST(
       breakStart: workingHour.breakStart,
       breakEnd: workingHour.breakEnd,
       durationMinutes: service.durationMinutes,
+      slotIntervalMinutes: service.slotIntervalMinutes,
       busyRanges: busyRanges,
     });
 
@@ -178,7 +183,9 @@ export async function POST(
 
     if (!isValid) {
       return NextResponse.json(
-        { error: "این زمان دیگر آزاد نیست، لطفاً زمان دیگری انتخاب کنید." },
+        {
+          error: "این زمان دیگر آزاد نیست، لطفاً زمان دیگری انتخاب کنید.",
+        },
         { status: 409 }
       );
     }
@@ -264,11 +271,15 @@ export async function POST(
         const priceLabel = formatPrice(price, business.currency);
 
         const lines = [
-          `📅 رزرو جدید در ${business.name}`,
-          `سرویس: ${service.name}`,
-          `مشتری: ${parsed.data.customerName} (${parsed.data.customerPhone})`,
-          `زمان: ${timeLabel}`,
-          `مبلغ: ${priceLabel}`,
+          "📅 رزرو جدید در " + business.name,
+          "سرویس: " + service.name,
+          "مشتری: " +
+            parsed.data.customerName +
+            " (" +
+            parsed.data.customerPhone +
+            ")",
+          "زمان: " + timeLabel,
+          "مبلغ: " + priceLabel,
         ];
 
         void notifyUser(business.owner.telegramId, lines.join("\n"));
