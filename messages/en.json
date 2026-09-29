@@ -166,6 +166,9 @@
     "cardNumber": "Card number: {value}",
     "accountHolder": "Account holder: {value}",
     "bankName": "Bank: {value}",
+    "cardNumberLabel": "Card number",
+    "accountHolderLabel": "Account holder",
+    "bankNameLabel": "Bank",
     "receiptPlaceholder": "Reference or transaction number",
     "submitReceipt": "Submit payment",
     "submitting": "Submitting...",
@@ -231,7 +234,17 @@
     "receiptLabel": "Submitted reference: {ref}",
     "receiptNotSent": "Not submitted yet",
     "approveButton": "Approve payment",
-    "rejectButton": "Reject"
+    "rejectButton": "Reject",
+    "filterPending": "Pending",
+    "filterConfirmed": "Confirmed",
+    "filterAll": "All",
+    "totalLabel": "bookings",
+    "searchPlaceholder": "Search by name or phone...",
+    "statusPending": "Pending",
+    "statusConfirmed": "Confirmed",
+    "statusCancelled": "Cancelled",
+    "depositLabelShort": "Deposit",
+    "receiptLabelShort": "Reference"
   },
   "subscription": {
     "title": "Subscription",
