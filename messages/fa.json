@@ -211,7 +211,11 @@
     "requiredError": "تاریخ شروع و پایان را وارد کنید.",
     "addError": "ثبت تعطیلی ناموفق بود.",
     "deleteButton": "حذف",
-    "toLabel": "تا"
+    "toLabel": "تا",
+    "startLabel": "از",
+    "endLabel": "تا",
+    "loading": "در حال بارگذاری...",
+    "empty": "هنوز تعطیلی ثبت نشده."
   },
   "paymentMethod": {
     "title": "روش دریافت بیعانه",
