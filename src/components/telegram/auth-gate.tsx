@@ -17,6 +17,133 @@ type Props = {
   children: (user: TelegramUser) => React.ReactNode;
 };
 
+const TELEGRAM_SCRIPT_ID = "telegram-web-app";
+const TELEGRAM_SCRIPT_URL =
+  "https://telegram.org/js/telegram-web-app.js?63";
+
+function getTelegramWebApp() {
+  return window.Telegram?.WebApp;
+}
+
+function waitForTelegramWebApp(
+  timeoutMs = 15000
+): Promise<NonNullable<ReturnType<typeof getTelegramWebApp>>> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+
+    const check = () => {
+      const tg = getTelegramWebApp();
+
+      if (tg) {
+        resolve(tg);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(
+          new Error(
+            "Telegram WebApp SDK بارگذاری نشد. لطفاً Mini App را دوباره باز کنید."
+          )
+        );
+        return;
+      }
+
+      window.setTimeout(check, 100);
+    };
+
+    check();
+  });
+}
+
+function ensureTelegramScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (getTelegramWebApp()) {
+      resolve();
+      return;
+    }
+
+    const existingScript = document.getElementById(
+      TELEGRAM_SCRIPT_ID
+    ) as HTMLScriptElement | null;
+
+    if (existingScript) {
+      const startedAt = Date.now();
+
+      const checkExisting = () => {
+        if (getTelegramWebApp()) {
+          resolve();
+          return;
+        }
+
+        if (Date.now() - startedAt >= 5000) {
+          const fallbackScript = document.createElement("script");
+          fallbackScript.id = `${TELEGRAM_SCRIPT_ID}-fallback`;
+          fallbackScript.src = TELEGRAM_SCRIPT_URL;
+          fallbackScript.async = false;
+
+          fallbackScript.onload = () => resolve();
+          fallbackScript.onerror = () =>
+            reject(
+              new Error(
+                "بارگذاری Telegram WebApp SDK ناموفق بود."
+              )
+            );
+
+          document.head.appendChild(fallbackScript);
+          return;
+        }
+
+        window.setTimeout(checkExisting, 100);
+      };
+
+      existingScript.addEventListener("load", () => resolve(), {
+        once: true,
+      });
+
+      existingScript.addEventListener(
+        "error",
+        () => {
+          const fallbackScript = document.createElement("script");
+          fallbackScript.id = `${TELEGRAM_SCRIPT_ID}-fallback`;
+          fallbackScript.src = TELEGRAM_SCRIPT_URL;
+          fallbackScript.async = false;
+
+          fallbackScript.onload = () => resolve();
+          fallbackScript.onerror = () =>
+            reject(
+              new Error(
+                "بارگذاری Telegram WebApp SDK ناموفق بود."
+              )
+            );
+
+          document.head.appendChild(fallbackScript);
+        },
+        { once: true }
+      );
+
+      checkExisting();
+      return;
+    }
+
+    const script = document.createElement("script");
+
+    script.id = TELEGRAM_SCRIPT_ID;
+    script.src = TELEGRAM_SCRIPT_URL;
+    script.async = false;
+
+    script.onload = () => resolve();
+
+    script.onerror = () =>
+      reject(
+        new Error(
+          "بارگذاری Telegram WebApp SDK ناموفق بود."
+        )
+      );
+
+    document.head.appendChild(script);
+  });
+}
+
 export function TelegramAuthGate({ children }: Props) {
   const [user, setUser] = useState<TelegramUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,25 +151,14 @@ export function TelegramAuthGate({ children }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    async function authenticate(attempt = 0) {
+    async function authenticate() {
       try {
-        const tg = window.Telegram?.WebApp;
+        await ensureTelegramScript();
 
-        if (!tg) {
-          if (attempt < 20) {
-            timer = setTimeout(() => {
-              authenticate(attempt + 1);
-            }, 250);
-            return;
-          }
+        const tg = await waitForTelegramWebApp();
 
-          if (!cancelled) {
-            setError("این صفحه باید داخل تلگرام باز شود.");
-            setLoading(false);
-          }
-
+        if (cancelled) {
           return;
         }
 
@@ -50,54 +166,72 @@ export function TelegramAuthGate({ children }: Props) {
         tg.expand();
 
         if (!tg.initData) {
-          if (attempt < 20) {
-            timer = setTimeout(() => {
-              authenticate(attempt + 1);
-            }, 250);
-            return;
-          }
-
-          if (!cancelled) {
-            setError("اطلاعات احراز هویت تلگرام دریافت نشد.");
-            setLoading(false);
-          }
-
-          return;
+          throw new Error(
+            "اطلاعات احراز هویت تلگرام دریافت نشد."
+          );
         }
 
-        const response = await fetch("/api/auth/telegram", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            initData: tg.initData,
-          }),
-        });
+        const response = await fetch(
+          "/api/auth/telegram",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            credentials: "include",
+            cache: "no-store",
+            body: JSON.stringify({
+              initData: tg.initData,
+            }),
+          }
+        );
 
-        const data = await response.json();
+        let data: {
+          user?: TelegramUser;
+          error?: string;
+          reason?: string;
+        } = {};
+
+        try {
+          data = await response.json();
+        } catch {
+          throw new Error(
+            "پاسخ نامعتبر از سرور دریافت شد."
+          );
+        }
 
         if (!response.ok) {
           throw new Error(
-            data?.reason
-              ? `${data.error}: ${data.reason}`
-              : data?.error || "احراز هویت تلگرام ناموفق بود."
+            data.reason
+              ? `${data.error || "احراز هویت ناموفق بود."}: ${data.reason}`
+              : data.error ||
+                  "احراز هویت تلگرام ناموفق بود."
+          );
+        }
+
+        if (!data.user) {
+          throw new Error(
+            "اطلاعات کاربر از سرور دریافت نشد."
           );
         }
 
         if (!cancelled) {
           setUser(data.user);
+          setError(null);
           setLoading(false);
         }
       } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "خطایی در احراز هویت رخ داد."
-          );
-          setLoading(false);
+        if (cancelled) {
+          return;
         }
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "خطایی در احراز هویت رخ داد."
+        );
+
+        setLoading(false);
       }
     }
 
@@ -105,14 +239,9 @@ export function TelegramAuthGate({ children }: Props) {
 
     return () => {
       cancelled = true;
-
-      if (timer) {
-        clearTimeout(timer);
-      }
     };
   }, []);
 
-  // ==================== LOADING ====================
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
@@ -120,6 +249,7 @@ export function TelegramAuthGate({ children }: Props) {
           <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-soft">
             <Loader2 className="h-8 w-8 animate-spin text-[#4F5FE8]" />
           </span>
+
           <p className="text-base font-bold text-[#1A1F36]">
             در حال ورود به Bookora...
           </p>
@@ -128,7 +258,6 @@ export function TelegramAuthGate({ children }: Props) {
     );
   }
 
-  // ==================== ERROR ====================
   if (error) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
