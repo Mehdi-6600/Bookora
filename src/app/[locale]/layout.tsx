@@ -51,9 +51,11 @@ export default async function LocaleLayout({
     >
       <body className="min-h-screen bg-background text-foreground antialiased">
         <Script
-          src="https://telegram.org/js/telegram-web-app.js"
+          id="telegram-web-app"
+          src="https://telegram.org/js/telegram-web-app.js?63"
           strategy="beforeInteractive"
         />
+
         <NextIntlClientProvider messages={messages}>
           <TelegramThemeSync />
           {children}
