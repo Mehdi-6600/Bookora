@@ -173,22 +173,28 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (user.isAdmin) {
-      return NextResponse.json(
-        { error: "ادمین اجازه‌ی حذف سرویس را ندارد." },
-        { status: 403 }
-      );
-    }
-
     const existing = await prisma.service.findFirst({
-      where: { id: id, business: { ownerId: user.id } },
-      select: { id: true, _count: { select: { bookings: true } } },
+      where: { id: id, ...serviceOwnerFilter(user) },
+      select: {
+        id: true,
+        business: { select: { ownerId: true } },
+        _count: { select: { bookings: true } },
+      },
     });
 
     if (!existing) {
       return NextResponse.json(
         { error: "سرویس پیدا نشد." },
         { status: 404 }
+      );
+    }
+
+    // ادمین فقط اجازه‌ی حذف سرویسِ کسب‌وکار *دیگران* را ندارد؛
+    // حذف سرویس کسب‌وکار خودش مثل هر صاحب کسب‌وکار دیگری مجاز است.
+    if (user.isAdmin && existing.business.ownerId !== user.id) {
+      return NextResponse.json(
+        { error: "ادمین اجازه‌ی حذف سرویس کسب‌وکار دیگران را ندارد." },
+        { status: 403 }
       );
     }
 
