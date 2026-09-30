@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import {
@@ -276,7 +276,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function createBusiness(event: React.FormEvent) {
+  async function createBusiness(event: FormEvent) {
     event.preventDefault();
 
     if (!businessCountry) {
@@ -456,7 +456,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
     setServiceDepositValue("");
   }
 
-  async function createService(event: React.FormEvent) {
+  async function createService(event: FormEvent) {
     event.preventDefault();
 
     if (!selectedBusiness) {
