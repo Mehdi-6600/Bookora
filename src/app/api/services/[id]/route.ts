@@ -77,7 +77,9 @@ export async function PUT(
       );
     }
 
-    if (isPriceOnlyAdminEdit(user)) {
+    const priceOnly = await isPriceOnlyAdminEdit(user, id);
+
+    if (priceOnly) {
       const service = await prisma.service.update({
         where: { id: id },
         data: { price: parsed.data.price },
