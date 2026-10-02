@@ -19,6 +19,11 @@ export type ValidatedInitData = {
   raw: URLSearchParams;
 };
 
+// initData باید در این بازه معتبر باشد (۲۴ ساعت).
+const MAX_AGE_SECONDS = 60 * 60 * 24;
+// clock skew مجاز برای auth_date در آینده (۶۰ ثانیه).
+const CLOCK_SKEW_SECONDS = 60;
+
 export function validateInitData(initData: string): ValidatedInitData {
   if (!initData || typeof initData !== "string") {
     throw new Error("initData is empty");
@@ -26,12 +31,22 @@ export function validateInitData(initData: string): ValidatedInitData {
 
   const params = new URLSearchParams(initData);
   const hash = params.get("hash");
-  if (!hash) throw new Error("Missing hash");
+
+  if (!hash || typeof hash !== "string") {
+    throw new Error("Missing hash");
+  }
+
+  // HMAC-SHA256 در hex دقیقاً ۶۴ کاراکتر است. قبل از مقایسه، طول را چک کن
+  // تا از خطای timingSafeEqual جلوگیری شود.
+  if (hash.length !== 64 || !/^[0-9a-f]+$/i.test(hash)) {
+    throw new Error("Invalid hash format");
+  }
 
   params.delete("hash");
 
+  // طبق مستندات Telegram، ترتیب باید byte-wise باشد، نه locale-aware.
   const dataCheckString = Array.from(params.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([k, v]) => `${k}=${v}`)
     .join("\n");
 
@@ -45,15 +60,31 @@ export function validateInitData(initData: string): ValidatedInitData {
     .update(dataCheckString)
     .digest("hex");
 
-  if (computedHash !== hash) {
+  // مقایسه‌ی constant-time برای جلوگیری از timing attack.
+  const computedBuffer = Buffer.from(computedHash, "hex");
+  const providedBuffer = Buffer.from(hash, "hex");
+
+  if (
+    computedBuffer.length !== providedBuffer.length ||
+    !crypto.timingSafeEqual(computedBuffer, providedBuffer)
+  ) {
     throw new Error("Invalid initData hash");
   }
 
-  const authDate = Number(params.get("auth_date") ?? 0);
-  if (!authDate) throw new Error("Missing auth_date");
+  const authDateRaw = params.get("auth_date");
+  if (!authDateRaw) throw new Error("Missing auth_date");
 
-  const MAX_AGE_SECONDS = 60 * 60 * 24;
+  const authDate = Number(authDateRaw);
+  if (!Number.isFinite(authDate) || authDate <= 0) {
+    throw new Error("Invalid auth_date");
+  }
+
   const now = Math.floor(Date.now() / 1000);
+
+  if (authDate > now + CLOCK_SKEW_SECONDS) {
+    throw new Error("initData auth_date is in the future");
+  }
+
   if (now - authDate > MAX_AGE_SECONDS) {
     throw new Error("initData expired");
   }
@@ -68,7 +99,18 @@ export function validateInitData(initData: string): ValidatedInitData {
     throw new Error("Invalid user JSON");
   }
 
-  if (!user.id) throw new Error("Invalid user");
+  if (
+    !user ||
+    typeof user.id !== "number" ||
+    !Number.isInteger(user.id) ||
+    user.id <= 0
+  ) {
+    throw new Error("Invalid user id");
+  }
+
+  if (user.is_bot === true) {
+    throw new Error("Bots are not allowed");
+  }
 
   return {
     user,
