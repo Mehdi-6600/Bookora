@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { COUNTRY_CURRENCY, isCountryCode } from "@/lib/currency";
@@ -20,17 +21,6 @@ function createBaseSlug(name: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 70);
   return slug || "business";
-}
-
-async function createUniqueSlug(name: string): Promise<string> {
-  const base = createBaseSlug(name);
-  let slug = base;
-  let counter = 2;
-  while (await prisma.business.findUnique({ where: { slug: slug } })) {
-    slug = base + "-" + counter;
-    counter += 1;
-  }
-  return slug;
 }
 
 function resolveTimezone(country: string): string {
@@ -113,65 +103,112 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const existingCount = await prisma.business.count({
-      where: { ownerId: user.id },
-    });
-
-    if (existingCount >= FREE_BUSINESS_LIMIT) {
-      const activeSubscription = await prisma.subscription.findFirst({
-        where: { userId: user.id, status: "ACTIVE" },
-      });
-
-      if (!activeSubscription) {
-        return NextResponse.json(
-          {
-            error:
-              "برای ساخت بیش از یک کسب‌وکار، ابتدا باید اشتراک بخرید.",
-            code: "SUBSCRIPTION_REQUIRED",
-          },
-          { status: 403 }
-        );
-      }
-    }
-
     const name = parsed.data.name;
     const description = parsed.data.description || null;
     const country = parsed.data.country;
     const currency = COUNTRY_CURRENCY[country];
     const timezone = resolveTimezone(country);
-    const slug = await createUniqueSlug(name);
 
-    const business = await prisma.business.create({
-      data: {
-        ownerId: user.id,
-        name: name,
-        slug: slug,
-        description: description,
-        country: country,
-        currency: currency,
-        timezone: timezone,
-      },
-      include: {
-        services: true,
-        _count: { select: { bookings: true } },
-      },
-    });
+    // استفاده از advisory lock برای جلوگیری از race در free business limit.
+    // همچنین retry برای P2002 (unique constraint) در صورت collision slug.
+    let lastError: unknown = null;
 
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const business = await prisma.$transaction(async (tx) => {
+          // قفل اتمیک روی free-limit این کاربر.
+          await tx.$executeRaw`
+            SELECT pg_advisory_xact_lock(
+              hashtext(${user.id}::text),
+              hashtext('business-limit'::text)
+            )
+          `;
+
+          const existingCount = await tx.business.count({
+            where: { ownerId: user.id },
+          });
+
+          if (existingCount >= FREE_BUSINESS_LIMIT) {
+            const activeSubscription = await tx.subscription.findFirst({
+              where: { userId: user.id, status: "ACTIVE" },
+            });
+
+            if (!activeSubscription) {
+              throw new Error("SUBSCRIPTION_REQUIRED");
+            }
+          }
+
+          // ساخت slug یکتا داخل transaction.
+          const base = createBaseSlug(name);
+          let slug = base;
+          let counter = 2;
+
+          while (
+            await tx.business.findUnique({ where: { slug: slug } })
+          ) {
+            slug = base + "-" + counter;
+            counter += 1;
+          }
+
+          const created = await tx.business.create({
+            data: {
+              ownerId: user.id,
+              name: name,
+              slug: slug,
+              description: description,
+              country: country,
+              currency: currency,
+              timezone: timezone,
+            },
+          });
+
+          return created;
+        });
+
+        return NextResponse.json(
+          {
+            business: {
+              id: business.id,
+              name: business.name,
+              slug: business.slug,
+              description: business.description,
+              country: business.country,
+              currency: business.currency,
+              status: business.status,
+              services: [],
+              _count: { bookings: 0 },
+            },
+          },
+          { status: 201 }
+        );
+      } catch (err) {
+        if (err instanceof Error && err.message === "SUBSCRIPTION_REQUIRED") {
+          return NextResponse.json(
+            {
+              error:
+                "برای ساخت بیش از یک کسب‌وکار، ابتدا باید اشتراک بخرید.",
+              code: "SUBSCRIPTION_REQUIRED",
+            },
+            { status: 403 }
+          );
+        }
+
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === "P2002"
+        ) {
+          lastError = err;
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    console.error("POST /api/business failed after retries:", lastError);
     return NextResponse.json(
-      {
-        business: {
-          id: business.id,
-          name: business.name,
-          slug: business.slug,
-          description: business.description,
-          country: business.country,
-          currency: business.currency,
-          status: business.status,
-          services: [],
-          _count: { bookings: 0 },
-        },
-      },
-      { status: 201 }
+      { error: "ساخت کسب‌وکار ناموفق بود." },
+      { status: 500 }
     );
   } catch (error) {
     console.error("POST /api/business failed:", error);
