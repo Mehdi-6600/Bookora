@@ -1,5 +1,4 @@
 import type { CurrentUser } from "@/lib/auth/session";
-import { prisma } from "@/lib/prisma";
 
 /**
  * Helper برای شرط مالکیت Business.
@@ -23,26 +22,4 @@ export function serviceOwnerFilter(user: CurrentUser): {
 } {
   if (user.isAdmin) return {};
   return { business: { ownerId: user.id } };
-}
-
-/**
- * چک می‌کند که آیا این ویرایش باید محدود به «فقط تغییر price» باشد یا نه.
- * این محدودیت فقط برای زمانی است که یک ادمین دارد سرویسِ متعلق به یک صاحب
- * کسب‌وکار *دیگر* را ویرایش می‌کند. اگر ادمین دارد سرویس کسب‌وکار خودش را
- * ویرایش می‌کند، این محدودیت اعمال نمی‌شود.
- */
-export async function isPriceOnlyAdminEdit(
-  user: CurrentUser,
-  serviceId: string
-): Promise<boolean> {
-  if (!user.isAdmin) return false;
-
-  const service = await prisma.service.findUnique({
-    where: { id: serviceId },
-    select: { business: { select: { ownerId: true } } },
-  });
-
-  if (!service) return false;
-
-  return service.business.ownerId !== user.id;
 }
