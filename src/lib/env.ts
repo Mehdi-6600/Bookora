@@ -27,7 +27,10 @@ const serverEnv = serverSchema.safeParse({
 });
 
 if (!serverEnv.success) {
-  console.error("❌ Invalid server env:", serverEnv.error.flatten().fieldErrors);
+  console.error(
+    "❌ Invalid server env:",
+    serverEnv.error.flatten().fieldErrors
+  );
   throw new Error("Invalid server environment variables");
 }
 
@@ -37,4 +40,11 @@ export const adminTelegramIds: bigint[] = (env.ADMIN_TELEGRAM_IDS ?? "")
   .split(",")
   .map((id) => id.trim())
   .filter((id) => id.length > 0)
-  .map((id) => BigInt(id));
+  .flatMap((id) => {
+    try {
+      return [BigInt(id)];
+    } catch {
+      console.error(`Invalid ADMIN_TELEGRAM_IDS entry: ${id}`);
+      return [];
+    }
+  });
