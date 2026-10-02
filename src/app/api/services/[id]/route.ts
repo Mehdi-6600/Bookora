@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
-import {
-  serviceOwnerFilter,
-  isPriceOnlyAdminEdit,
-} from "@/lib/auth/ownership";
+import { serviceOwnerFilter } from "@/lib/auth/ownership";
 
 const updateServiceSchema = z
   .object({
@@ -67,7 +64,10 @@ export async function PUT(
 
     const existing = await prisma.service.findFirst({
       where: { id: id, ...serviceOwnerFilter(user) },
-      select: { id: true },
+      select: {
+        id: true,
+        business: { select: { ownerId: true } },
+      },
     });
 
     if (!existing) {
@@ -77,7 +77,9 @@ export async function PUT(
       );
     }
 
-    const priceOnly = await isPriceOnlyAdminEdit(user, id);
+    // ادمین فقط وقتی مجاز به ویرایش کامل است که مالک این سرویس باشد.
+    // در غیر این صورت فقط اجازه‌ی تغییر price را دارد.
+    const priceOnly = user.isAdmin && existing.business.ownerId !== user.id;
 
     if (priceOnly) {
       const service = await prisma.service.update({
@@ -110,7 +112,6 @@ export async function PUT(
     const depositType = parsed.data.depositType;
     const depositValue = parsed.data.depositValue;
 
-    // اگر slotIntervalMinutes داده نشده بود، برابر durationMinutes شود.
     let slotIntervalMinutes = parsed.data.slotIntervalMinutes;
     if (
       typeof slotIntervalMinutes !== "number" ||
@@ -189,8 +190,6 @@ export async function DELETE(
       );
     }
 
-    // ادمین فقط اجازه‌ی حذف سرویسِ کسب‌وکار *دیگران* را ندارد؛
-    // حذف سرویس کسب‌وکار خودش مثل هر صاحب کسب‌وکار دیگری مجاز است.
     if (user.isAdmin && existing.business.ownerId !== user.id) {
       return NextResponse.json(
         { error: "ادمین اجازه‌ی حذف سرویس کسب‌وکار دیگران را ندارد." },
