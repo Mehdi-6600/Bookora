@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/get-client-ip";
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,9 +12,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const ip = getClientIp(req);
+    if (await isRateLimited(`bookings:${user.id}:${ip}`, 100, 10 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { status: 429 }
+      );
+    }
+
+    triggerRateLimitCleanup();
+
     const businessId = req.nextUrl.searchParams.get("businessId");
 
-    if (!businessId) {
+    if (!businessId || businessId.length > 100) {
       return NextResponse.json(
         { error: "businessId لازم است." },
         { status: 400 }
@@ -67,7 +79,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error("GET /api/bookings failed:", error);
-
     return NextResponse.json(
       { error: "خطا در دریافت رزروها" },
       { status: 500 }
