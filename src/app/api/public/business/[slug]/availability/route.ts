@@ -2,12 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { fromZonedTime } from "date-fns-tz";
 import { prisma } from "@/lib/prisma";
 import { computeAvailableSlots } from "@/lib/availability";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/get-client-ip";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
+    const ip = getClientIp(req);
+
+    // نرخ سبک برای endpoint پرترافیک.
+    if (await isRateLimited("avail:" + ip, 60, 10 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { status: 429 }
+      );
+    }
+
+    triggerRateLimitCleanup();
+
     const resolved = await params;
     const slug = resolved.slug;
     const serviceId = req.nextUrl.searchParams.get("serviceId");
@@ -62,14 +76,8 @@ export async function GET(
       return NextResponse.json({ slots: [] });
     }
 
-    const dayStart = fromZonedTime(
-      date + "T00:00:00",
-      business.timezone
-    );
-    const dayEnd = fromZonedTime(
-      date + "T23:59:59",
-      business.timezone
-    );
+    const dayStart = fromZonedTime(date + "T00:00:00", business.timezone);
+    const dayEnd = fromZonedTime(date + "T23:59:59", business.timezone);
 
     const timeOffs = await prisma.timeOff.findMany({
       where: {
