@@ -22,7 +22,6 @@ export async function POST(
     }
 
     let body: unknown;
-
     try {
       body = await req.json();
     } catch {
@@ -30,7 +29,6 @@ export async function POST(
     }
 
     const parsed = reviewSchema.safeParse(body);
-
     if (!parsed.success) {
       return NextResponse.json(
         { error: "اطلاعات معتبر نیست." },
@@ -49,7 +47,6 @@ export async function POST(
       );
     }
 
-    // Idempotency: هر درخواست فقط یک‌بار قابل بررسی است.
     if (subscription.status !== "PENDING") {
       return NextResponse.json(
         { error: "این درخواست قبلاً بررسی شده است." },
@@ -58,8 +55,9 @@ export async function POST(
     }
 
     if (parsed.data.action === "reject") {
-      const rejected = await prisma.subscription.update({
-        where: { id },
+      // Atomic compare-and-update برای جلوگیری از race condition.
+      const updateResult = await prisma.subscription.updateMany({
+        where: { id, status: "PENDING" },
         data: {
           status: "REJECTED",
           reviewedAt: new Date(),
@@ -67,9 +65,14 @@ export async function POST(
         },
       });
 
-      return NextResponse.json({
-        subscription: { id: rejected.id, status: rejected.status },
-      });
+      if (updateResult.count === 0) {
+        return NextResponse.json(
+          { error: "این درخواست قبلاً بررسی شده است." },
+          { status: 409 }
+        );
+      }
+
+      return NextResponse.json({ status: "REJECTED" });
     }
 
     if (!isPlanCode(subscription.plan)) {
@@ -85,8 +88,9 @@ export async function POST(
       now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
     );
 
-    const approved = await prisma.subscription.update({
-      where: { id },
+    // Atomic compare-and-update.
+    const updateResult = await prisma.subscription.updateMany({
+      where: { id, status: "PENDING" },
       data: {
         status: "ACTIVE",
         startedAt: now,
@@ -96,16 +100,19 @@ export async function POST(
       },
     });
 
+    if (updateResult.count === 0) {
+      return NextResponse.json(
+        { error: "این درخواست قبلاً بررسی شده است." },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json({
-      subscription: {
-        id: approved.id,
-        status: approved.status,
-        expiresAt: approved.expiresAt,
-      },
+      status: "ACTIVE",
+      expiresAt: expiresAt.toISOString(),
     });
   } catch (error) {
     console.error("POST /api/admin/subscriptions/[id]/review failed:", error);
-
     return NextResponse.json(
       { error: "بررسی درخواست ناموفق بود." },
       { status: 500 }
