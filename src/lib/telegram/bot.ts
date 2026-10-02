@@ -7,10 +7,32 @@ let bot: Bot | null = null;
 
 function registerPaymentHandlers(instance: Bot) {
   instance.on("pre_checkout_query", async (ctx) => {
-    const parsed = parseInvoicePayload(ctx.preCheckoutQuery.invoice_payload);
+    const query = ctx.preCheckoutQuery;
+    const parsed = parseInvoicePayload(query.invoice_payload);
 
     if (!parsed) {
       await ctx.answerPreCheckoutQuery(false, "اطلاعات پرداخت نامعتبر است.");
+      return;
+    }
+
+    // مطمئن شو کاربری که پرداخت می‌کند همان کاربری است که invoice برایش صادر شده.
+    const fromId = ctx.from?.id;
+    if (!fromId) {
+      await ctx.answerPreCheckoutQuery(false, "کاربر نامعتبر است.");
+      return;
+    }
+
+    const payer = await prisma.user.findUnique({
+      where: { telegramId: String(fromId) },
+      select: { id: true },
+    });
+
+    if (!payer || payer.id !== parsed.userId) {
+      console.error("pre_checkout_query userId mismatch", {
+        fromId,
+        payloadUserId: parsed.userId,
+      });
+      await ctx.answerPreCheckoutQuery(false, "این پرداخت برای شما صادر نشده است.");
       return;
     }
 
@@ -29,13 +51,45 @@ function registerPaymentHandlers(instance: Bot) {
       return;
     }
 
+    const fromId = ctx.from?.id;
+    if (!fromId) return;
+
+    const payer = await prisma.user.findUnique({
+      where: { telegramId: String(fromId) },
+      select: { id: true },
+    });
+
+    if (!payer || payer.id !== parsed.userId) {
+      console.error("successful_payment userId mismatch", {
+        fromId,
+        payloadUserId: parsed.userId,
+      });
+      return;
+    }
+
     const plan = PLANS[parsed.plan];
+    if (!plan) {
+      console.error("Unknown plan in payload:", parsed.plan);
+      return;
+    }
+
     const now = new Date();
     const expiresAt = new Date(
       now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
     );
 
     try {
+      // idempotency: بر اساس providerPaymentId یکتا. اگر قبلاً ثبت شده، همان را برگردان.
+      const existing = await prisma.subscription.findFirst({
+        where: { providerPaymentId: payment.telegram_payment_charge_id },
+        select: { id: true },
+      });
+
+      if (existing) {
+        await ctx.reply("این پرداخت قبلاً ثبت شده است.");
+        return;
+      }
+
       await prisma.subscription.create({
         data: {
           userId: parsed.userId,
