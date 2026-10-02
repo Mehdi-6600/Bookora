@@ -3,24 +3,29 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { validateInitData } from "@/lib/telegram/initData";
 import { signSession } from "@/lib/auth/jwt";
+import { SESSION_COOKIE } from "@/lib/auth/session";
 import { cookies } from "next/headers";
-import { isRateLimited } from "@/lib/rate-limit";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
 
 const bodySchema = z.object({
   initData: z.string().min(1),
 });
 
-const SESSION_COOKIE = "bookora_session";
 const THIRTY_DAYS_SECONDS = 60 * 60 * 24 * 30;
 
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
 
-  // حداکثر ۲۰ تلاش ورود در ۱۰ دقیقه از هر IP — جلوگیری از فشار روی این Endpoint بدون Auth.
+  // حداکثر ۲۰ تلاش ورود در ۱۰ دقیقه از هر IP.
   if (await isRateLimited(`auth:${ip}`, 20, 10 * 60 * 1000)) {
-    return NextResponse.json({ error: "درخواست‌های زیاد. کمی صبر کنید." }, { status: 429 });
+    return NextResponse.json(
+      { error: "درخواست‌های زیاد. کمی صبر کنید." },
+      { status: 429 }
+    );
   }
+
+  triggerRateLimitCleanup();
 
   let body: unknown;
   try {
@@ -82,7 +87,9 @@ export async function POST(req: NextRequest) {
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,
-    sameSite: "none",
+    // sameSite: "lax" — نه "none" — برای جلوگیری از CSRF.
+    // Telegram Mini App در همان دامنه اجرا می‌شود، پس "lax" کافی است.
+    sameSite: "lax",
     maxAge: THIRTY_DAYS_SECONDS,
     path: "/",
   });
