@@ -5,7 +5,7 @@ import { toZonedTime } from "date-fns-tz";
 import { prisma } from "@/lib/prisma";
 import { notifyUser } from "@/lib/telegram/notify";
 import { formatPrice } from "@/lib/currency";
-import { isRateLimited } from "@/lib/rate-limit";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
 
 const receiptSchema = z.object({
@@ -21,12 +21,22 @@ export async function POST(
     const { id } = await params;
     const ip = getClientIp(req);
 
-    if (await isRateLimited(`receipt:${ip}`, 20, 10 * 60 * 1000)) {
+    // rate limit دو لایه: بر اساس IP و بر اساس bookingId.
+    if (await isRateLimited(`receipt:ip:${ip}`, 20, 10 * 60 * 1000)) {
       return NextResponse.json(
         { error: "درخواست‌های زیاد. کمی صبر کنید." },
         { status: 429 }
       );
     }
+
+    if (await isRateLimited(`receipt:booking:${id}`, 5, 10 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد برای این رزرو. کمی صبر کنید." },
+        { status: 429 }
+      );
+    }
+
+    triggerRateLimitCleanup();
 
     let body: unknown;
     try {
@@ -51,14 +61,10 @@ export async function POST(
       include: {
         business: {
           include: {
-            owner: {
-              select: { telegramId: true },
-            },
+            owner: { select: { telegramId: true } },
           },
         },
-        service: {
-          select: { name: true },
-        },
+        service: { select: { name: true } },
       },
     });
 
@@ -70,10 +76,7 @@ export async function POST(
     }
 
     const payment = await prisma.payment.findFirst({
-      where: {
-        bookingId: booking.id,
-        type: "DEPOSIT",
-      },
+      where: { bookingId: booking.id, type: "DEPOSIT" },
     });
 
     if (!payment) {
@@ -93,19 +96,22 @@ export async function POST(
       );
     }
 
+    // جلوگیری از overwrite شدن reference قبلی.
+    if (payment.transactionReference) {
+      return NextResponse.json(
+        { error: "شماره تراکنش قبلاً ثبت شده است." },
+        { status: 409 }
+      );
+    }
+
     await prisma.payment.update({
       where: { id: payment.id },
-      data: {
-        transactionReference: parsed.data.transactionReference,
-      },
+      data: { transactionReference: parsed.data.transactionReference },
     });
 
     const localTime = toZonedTime(booking.startAt, booking.timezone);
     const timeLabel = format(localTime, "yyyy-MM-dd HH:mm");
-    const amountLabel = formatPrice(
-      Number(payment.amount),
-      payment.currency
-    );
+    const amountLabel = formatPrice(Number(payment.amount), payment.currency);
     const customerLabel =
       booking.customerName + " (" + booking.customerPhone + ")";
 
@@ -122,9 +128,10 @@ export async function POST(
       "برای تأیید یا رد، به بخش «رزروها» در Bookora مراجعه کنید.",
     ];
 
-    void notifyUser(
-      booking.business.owner.telegramId,
-      lines.join("\n")
+    void notifyUser(booking.business.owner.telegramId, lines.join("\n")).catch(
+      (err) => {
+        console.error("notifyUser failed (receipt):", err);
+      }
     );
 
     return NextResponse.json({ submitted: true });
