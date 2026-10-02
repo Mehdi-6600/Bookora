@@ -24,7 +24,6 @@ export async function PUT(
     }
 
     let body: unknown;
-
     try {
       body = await req.json();
     } catch {
@@ -32,7 +31,6 @@ export async function PUT(
     }
 
     const parsed = updateBusinessSchema.safeParse(body);
-
     if (!parsed.success) {
       return NextResponse.json(
         {
@@ -63,51 +61,52 @@ export async function PUT(
     const status =
       reactivate && existing.status === "ARCHIVED" ? "ACTIVE" : undefined;
 
-    const business = await prisma.business.update({
-      where: { id },
-      data: {
-        name,
-        description: description || null,
-        country,
-        ...(currency ? { currency } : {}),
-        ...(status ? { status } : {}),
-      },
-      include: {
-        services: {
-          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    // همه‌ی تغییرات در یک transaction برای حفظ سازگاری business + services.
+    const result = await prisma.$transaction(async (tx) => {
+      const business = await tx.business.update({
+        where: { id },
+        data: {
+          name,
+          description: description || null,
+          country,
+          ...(currency ? { currency } : {}),
+          ...(status ? { status } : {}),
         },
-        _count: { select: { bookings: true } },
-      },
-    });
-
-    // ارز خود Business عوض شد؛ برای جلوگیری از ناسازگاری نمایشی (سرویس قدیمی با
-    // ارز قدیمی نمایش داده شود درحالی‌که Business ارز جدید دارد)، ارز همه‌ی
-    // سرویس‌های این Business هم به‌روزرسانی می‌شود. این کار مبلغ قیمت را تغییر
-    // نمی‌دهد و رزروهای گذشته (که ارز خودشان را جدا ذخیره کرده‌اند) دست‌نخورده می‌مانند.
-    if (currency) {
-      await prisma.service.updateMany({
-        where: { businessId: id },
-        data: { currency },
+        include: {
+          services: {
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          },
+          _count: { select: { bookings: true } },
+        },
       });
-    }
 
-    const refreshedServices = currency
-      ? await prisma.service.findMany({
+      if (currency) {
+        await tx.service.updateMany({
+          where: { businessId: id },
+          data: { currency },
+        });
+
+        const refreshed = await tx.service.findMany({
           where: { businessId: id },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        })
-      : business.services;
+        });
+
+        return { business, services: refreshed };
+      }
+
+      return { business, services: business.services };
+    });
 
     return NextResponse.json({
       business: {
-        id: business.id,
-        name: business.name,
-        slug: business.slug,
-        description: business.description,
-        country: business.country,
-        currency: business.currency,
-        status: business.status,
-        services: refreshedServices.map((service) => ({
+        id: result.business.id,
+        name: result.business.name,
+        slug: result.business.slug,
+        description: result.business.description,
+        country: result.business.country,
+        currency: result.business.currency,
+        status: result.business.status,
+        services: result.services.map((service) => ({
           id: service.id,
           name: service.name,
           description: service.description,
@@ -118,13 +117,12 @@ export async function PUT(
           depositType: service.depositType,
           depositValue: service.depositValue.toString(),
         })),
-        _count: { bookings: business._count.bookings },
+        _count: { bookings: result.business._count.bookings },
       },
       currencyChanged: countryChanged,
     });
   } catch (error) {
     console.error("PUT /api/business/[id] failed:", error);
-
     return NextResponse.json(
       { error: "ویرایش کسب‌وکار ناموفق بود." },
       { status: 500 }
@@ -173,7 +171,6 @@ export async function DELETE(
     return NextResponse.json({ deleted: true });
   } catch (error) {
     console.error("DELETE /api/business/[id] failed:", error);
-
     return NextResponse.json(
       { error: "حذف کسب‌وکار ناموفق بود." },
       { status: 500 }
