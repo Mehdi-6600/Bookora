@@ -12,6 +12,9 @@ export function computeAvailableSlots(params: {
   breakEnd: string | null;
   durationMinutes: number;
   busyRanges: BusyRange[];
+  // slotIntervalMinutes برای backward compatibility نگه داشته شده است،
+  // ولی استفاده نمی‌شود. فاصله‌ی نوبت‌ها همیشه برابر مدت سرویس است تا
+  // نوبت‌ها با ساعت کاری و مدت سرویس کاملاً هماهنگ بمانند.
   slotIntervalMinutes?: number;
 }): Date[] {
   const dateStr = params.dateStr;
@@ -23,8 +26,14 @@ export function computeAvailableSlots(params: {
   const durationMinutes = params.durationMinutes;
   const busyRanges = params.busyRanges;
 
+  if (
+    !Number.isFinite(durationMinutes) ||
+    durationMinutes <= 0
+  ) {
+    return [];
+  }
+
   // فاصله‌ی نوبت‌ها همیشه برابر مدت سرویس است.
-  // این تضمین می‌کند که نوبت‌ها با ساعت کاری و مدت سرویس کاملاً هماهنگ باشند.
   const step = durationMinutes;
 
   const open = fromZonedTime(dateStr + "T" + openTime + ":00", timezone);
