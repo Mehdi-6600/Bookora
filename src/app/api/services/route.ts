@@ -18,7 +18,7 @@ const depositSchema = z
 
 const createServiceSchema = z
   .object({
-    businessId: z.string().min(1),
+    businessId: z.string().min(1).max(100),
     name: z.string().trim().min(1).max(120),
     description: z.string().trim().max(1000).nullable().optional(),
     price: z.coerce.number().finite().min(0).max(99999999.99),
@@ -41,6 +41,13 @@ export async function GET(req: NextRequest) {
     }
 
     const businessId = req.nextUrl.searchParams.get("businessId");
+
+    if (businessId && businessId.length > 100) {
+      return NextResponse.json(
+        { error: "businessId نامعتبر است." },
+        { status: 400 }
+      );
+    }
 
     const services = await prisma.service.findMany({
       where: {
@@ -108,7 +115,6 @@ export async function POST(req: NextRequest) {
     const depositType = parsed.data.depositType;
     const depositValue = parsed.data.depositValue;
 
-    // اگر slotIntervalMinutes داده نشده بود، برابر durationMinutes شود.
     let slotIntervalMinutes = parsed.data.slotIntervalMinutes;
     if (
       typeof slotIntervalMinutes !== "number" ||
