@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
     const subscriptions = await prisma.subscription.findMany({
       where: status === "ALL" ? {} : { status },
       orderBy: { createdAt: "desc" },
+      take: 100,
       include: {
         user: {
           select: {
@@ -63,7 +64,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error("GET /api/admin/subscriptions failed:", error);
-
     return NextResponse.json(
       { error: "خطا در دریافت درخواست‌ها" },
       { status: 500 }
