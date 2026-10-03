@@ -58,7 +58,6 @@ export async function POST(
     }
 
     if (parsed.data.action === "reject") {
-      // Atomic: فقط اگر status هنوز PENDING است، reject کن.
       const updateResult = await prisma.payment.updateMany({
         where: { id: payment.id, status: "PENDING" },
         data: { status: "REJECTED", rejectedAt: new Date() },
@@ -71,7 +70,6 @@ export async function POST(
         );
       }
 
-      // booking را هم کنسل کن تا slot آزاد شود.
       await prisma.booking.update({
         where: { id: booking.id },
         data: {
@@ -84,7 +82,6 @@ export async function POST(
       return NextResponse.json({ status: "REJECTED" });
     }
 
-    // Atomic approve.
     const paymentUpdate = await prisma.payment.updateMany({
       where: { id: payment.id, status: "PENDING" },
       data: { status: "APPROVED", verifiedAt: new Date() },
