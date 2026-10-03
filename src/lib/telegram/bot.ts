@@ -1,9 +1,8 @@
 import { Bot } from "grammy";
+import { Prisma } from "@prisma/client";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { PLANS, parseInvoicePayload } from "@/lib/subscription/plans";
-import { lockUserSubscriptions } from "@/lib/booking/schedule";
-import { nextSubscriptionPeriod } from "@/lib/subscription/entitlement";
 
 let bot: Bot | null = null;
 
@@ -11,15 +10,9 @@ function registerPaymentHandlers(instance: Bot) {
   instance.on("pre_checkout_query", async (ctx) => {
     const query = ctx.preCheckoutQuery;
     const parsed = parseInvoicePayload(query.invoice_payload);
+
     if (!parsed) {
       await ctx.answerPreCheckoutQuery(false, "اطلاعات پرداخت نامعتبر است.");
-      return;
-    }
-
-    const plan = PLANS[parsed.plan];
-    if (query.currency !== "XTR" || query.total_amount !== plan.starsPrice) {
-      console.warn("Rejected Telegram pre-checkout: amount or currency mismatch.");
-      await ctx.answerPreCheckoutQuery(false, "مبلغ یا واحد پرداخت معتبر نیست.");
       return;
     }
 
@@ -33,9 +26,16 @@ function registerPaymentHandlers(instance: Bot) {
       where: { telegramId: String(fromId) },
       select: { id: true },
     });
+
     if (!payer || payer.id !== parsed.userId) {
-      console.warn("Rejected Telegram pre-checkout: payload user mismatch.");
-      await ctx.answerPreCheckoutQuery(false, "این پرداخت برای شما صادر نشده است.");
+      console.error("pre_checkout_query userId mismatch", {
+        fromId: fromId,
+        payloadUserId: parsed.userId,
+      });
+      await ctx.answerPreCheckoutQuery(
+        false,
+        "این پرداخت برای شما صادر نشده است."
+      );
       return;
     }
 
@@ -45,19 +45,12 @@ function registerPaymentHandlers(instance: Bot) {
   instance.on("message:successful_payment", async (ctx) => {
     const payment = ctx.message.successful_payment;
     const parsed = parseInvoicePayload(payment.invoice_payload);
-    if (!parsed) {
-      console.error("successful_payment with unparseable payload");
-      return;
-    }
 
-    const plan = PLANS[parsed.plan];
-    if (
-      !plan ||
-      payment.currency !== "XTR" ||
-      payment.total_amount !== plan.starsPrice ||
-      !payment.telegram_payment_charge_id
-    ) {
-      console.error("Telegram successful payment validation failed.");
+    if (!parsed) {
+      console.error(
+        "successful_payment with unparseable payload:",
+        payment.invoice_payload
+      );
       return;
     }
 
@@ -68,66 +61,69 @@ function registerPaymentHandlers(instance: Bot) {
       where: { telegramId: String(fromId) },
       select: { id: true },
     });
+
     if (!payer || payer.id !== parsed.userId) {
-      console.error("Telegram successful payment user mismatch.");
+      console.error("successful_payment userId mismatch", {
+        fromId: fromId,
+        payloadUserId: parsed.userId,
+      });
+      return;
+    }
+
+    const plan = PLANS[parsed.plan];
+    if (!plan) {
+      console.error("Unknown plan in payload:", parsed.plan);
       return;
     }
 
     const now = new Date();
-    const registration = await prisma.$transaction(async (tx) => {
-      await lockUserSubscriptions(tx, parsed.userId);
-      const existing = await tx.subscription.findUnique({
-        where: { providerPaymentId: payment.telegram_payment_charge_id },
-        select: { id: true, userId: true, plan: true },
-      });
+    const expiresAt = new Date(
+      now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
+    );
 
-      if (existing) {
-        return {
-          duplicate: true,
-          samePayment: existing.userId === parsed.userId && existing.plan === plan.code,
-        };
-      }
+    const existing = await prisma.subscription.findFirst({
+      where: { providerPaymentId: payment.telegram_payment_charge_id },
+      select: { id: true },
+    });
 
-      const period = await nextSubscriptionPeriod(
-        tx,
-        parsed.userId,
-        plan.durationDays,
-        now
-      );
-      await tx.subscription.create({
+    if (existing) {
+      await ctx.reply("این پرداخت قبلاً ثبت شده است.");
+      return;
+    }
+
+    try {
+      await prisma.subscription.create({
         data: {
           userId: parsed.userId,
           plan: plan.code,
           status: "ACTIVE",
           provider: "telegram_stars",
           providerPaymentId: payment.telegram_payment_charge_id,
-          startedAt: period.startedAt,
-          expiresAt: period.expiresAt,
+          startedAt: now,
+          expiresAt: expiresAt,
         },
       });
-      return {
-        duplicate: false,
-        samePayment: true,
-        expiresAt: period.expiresAt,
-      };
-    });
 
-    if (!registration.samePayment) {
-      console.error("Telegram charge is already linked to a different subscription.");
-      return;
+      await ctx.reply(
+        `پرداخت با موفقیت انجام شد. اشتراک "${plan.titleFa}" شما تا ${expiresAt.toLocaleDateString(
+          "fa-IR"
+        )} فعال است.`
+      );
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        console.warn(
+          "Duplicate subscription (idempotent) for providerPaymentId:",
+          payment.telegram_payment_charge_id
+        );
+        await ctx.reply("این پرداخت قبلاً ثبت شده است.");
+        return;
+      }
+
+      console.error("Failed to record subscription after payment:", error);
     }
-
-    if (registration.duplicate) {
-      await ctx.reply("این پرداخت قبلاً ثبت شده است.");
-      return;
-    }
-
-    const expiryLabel = registration.expiresAt
-      ? registration.expiresAt.toLocaleDateString("fa-IR")
-      : "نامحدود";
-    await ctx.reply(
-      `پرداخت با موفقیت انجام شد. اشتراک "${plan.titleFa}" شما تا ${expiryLabel} فعال است.`
-    );
   });
 }
 
