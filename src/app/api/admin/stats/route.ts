@@ -16,7 +16,6 @@ export async function GET() {
     }
 
     const since7d = daysAgo(7);
-    const since30d = daysAgo(30);
 
     const [
       usersTotal,
@@ -45,10 +44,7 @@ export async function GET() {
     ]);
 
     return NextResponse.json({
-      users: {
-        total: usersTotal,
-        last7d: usersNew7d,
-      },
+      users: { total: usersTotal, last7d: usersNew7d },
       businesses: {
         total: businessesTotal,
         active: businessesActive,
@@ -63,15 +59,11 @@ export async function GET() {
         active: subscriptionsActive,
         pending: subscriptionsPending,
       },
-      payments: {
-        pendingReview: paymentsPendingReview,
-      },
+      payments: { pendingReview: paymentsPendingReview },
       generatedAt: new Date().toISOString(),
-      last30dThreshold: since30d.toISOString(),
     });
   } catch (error) {
     console.error("GET /api/admin/stats failed:", error);
-
     return NextResponse.json(
       { error: "خطا در دریافت آمار" },
       { status: 500 }
