@@ -5,7 +5,7 @@ export type PlanDefinition = {
   titleFa: string;
   titleEn: string;
   starsPrice: number;
-  manualPriceToman:;
+  manualPriceToman: number;
   durationDays: number;
 };
 
