@@ -5,12 +5,10 @@ export type PlanDefinition = {
   titleFa: string;
   titleEn: string;
   starsPrice: number;
-  manualPriceToman: number;
+  manualPriceToman:;
   durationDays: number;
 };
 
-// قیمت دستی (تومان) با توجه به نرخ دلار و بازار SaaS ایران تعیین شده است.
-// Stars متناسب با هر Star ≈ 1.5–2 سنت و دلار ≈ 235,000 تومان محاسبه شده.
 export const PLANS: Record<PlanCode, PlanDefinition> = {
   PRO_MONTHLY: {
     code: "PRO_MONTHLY",
@@ -36,16 +34,27 @@ export function isPlanCode(value: string): value is PlanCode {
   return value === "PRO_MONTHLY" || value === "PRO_YEARLY";
 }
 
+const USER_ID_PATTERN = /^[a-z0-9]{20,40}$/;
+
 export function buildInvoicePayload(plan: PlanCode, userId: string): string {
-  return `sub:${plan}:${userId}`;
+  return "sub:" + plan + ":" + userId;
 }
 
 export function parseInvoicePayload(
   payload: string
 ): { plan: PlanCode; userId: string } | null {
+  if (typeof payload !== "string") return null;
+  if (payload.length > 200) return null;
+
   const parts = payload.split(":");
-  if (parts.length !== 3 || parts[0] !== "sub") return null;
-  const [, plan, userId] = parts;
-  if (!isPlanCode(plan) || !userId) return null;
+  if (parts.length !== 3) return null;
+  if (parts[0] !== "sub") return null;
+
+  const plan = parts[1];
+  const userId = parts[2];
+
+  if (!isPlanCode(plan)) return null;
+  if (!USER_ID_PATTERN.test(userId)) return null;
+
   return { plan, userId };
 }
