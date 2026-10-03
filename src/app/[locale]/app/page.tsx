@@ -66,12 +66,21 @@ type Business = {
   description: string | null;
   country: string | null;
   currency: string;
+  timezone: string;
   status: string;
   services: Service[];
   _count?: {
     bookings: number;
   };
 };
+
+function getBrowserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
 
 const DEPOSIT_LABELS_KEYS = {
   NONE: "depositNone",
@@ -110,12 +119,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [businessDescription, setBusinessDescription] = useState("");
   const [businessCountry, setBusinessCountry] =
     useState<CountryCode | null>(null);
+  const [businessTimezone, setBusinessTimezone] = useState("Asia/Tehran");
 
   const [editingBusiness, setEditingBusiness] = useState(false);
   const [editBusinessName, setEditBusinessName] = useState("");
   const [editBusinessDescription, setEditBusinessDescription] = useState("");
   const [editBusinessCountry, setEditBusinessCountry] =
     useState<CountryCode>("IR");
+  const [editBusinessTimezone, setEditBusinessTimezone] =
+    useState("Asia/Tehran");
   const [savingBusinessEdit, setSavingBusinessEdit] = useState(false);
   const [confirmDeleteBusiness, setConfirmDeleteBusiness] = useState(false);
   const [deletingBusiness, setDeletingBusiness] = useState(false);
@@ -172,6 +184,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         slug: string;
         country: string | null;
         currency: string;
+        timezone: string;
         status: string;
         counts: { services: number; bookings: number };
       };
@@ -185,6 +198,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         description: null,
         country: row.country,
         currency: row.currency,
+        timezone: row.timezone,
         status: row.status,
         services: [],
         _count: { bookings: row.counts.bookings },
@@ -300,6 +314,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
           name: businessName.trim(),
           description: businessDescription.trim() || null,
           country: businessCountry,
+          timezone: businessTimezone,
         }),
       });
 
@@ -333,6 +348,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         ? business.country
         : "IR"
     );
+    setEditBusinessTimezone(business.timezone || "UTC");
     setConfirmDeleteBusiness(false);
   }
 
@@ -353,6 +369,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
           name: editBusinessName.trim(),
           description: editBusinessDescription.trim() || null,
           country: editBusinessCountry,
+          timezone: editBusinessTimezone,
         }),
       });
 
@@ -862,6 +879,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     type="button"
                     onClick={() => {
                       setBusinessCountry(code);
+                      setBusinessTimezone(
+                        code === "IR" ? "Asia/Tehran" : getBrowserTimeZone()
+                      );
                       setCreateStep(2);
                     }}
                     className="ring-focus rounded-xl border border-border/60 bg-background p-4 text-start transition-colors hover:border-primary/40 hover:bg-muted/40"
@@ -904,6 +924,36 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     : "",
                 })}
               </p>
+
+              <label className="block text-sm font-medium">
+                {tWizard("timezoneLabel")}
+                <input
+                  value={businessTimezone}
+                  onChange={(event) => setBusinessTimezone(event.target.value)}
+                  list="business-timezones-create"
+                  placeholder={tWizard("timezonePlaceholder")}
+                  autoComplete="off"
+                  className="ring-focus mt-1 w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {tWizard("timezoneHelp")}
+              </p>
+              <datalist id="business-timezones-create">
+                {[
+                  "UTC",
+                  "Asia/Tehran",
+                  "Asia/Dubai",
+                  "Asia/Tokyo",
+                  "Europe/London",
+                  "Europe/Berlin",
+                  "America/New_York",
+                  "America/Los_Angeles",
+                  "Australia/Sydney",
+                ].map((timezone) => (
+                  <option key={timezone} value={timezone} />
+                ))}
+              </datalist>
 
               <input
                 value={businessName}
@@ -1074,12 +1124,51 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
                       />
 
+                      <label className="block text-sm font-medium">
+                        {tWizard("timezoneLabel")}
+                        <input
+                          value={editBusinessTimezone}
+                          onChange={(event) => setEditBusinessTimezone(event.target.value)}
+                          list="business-timezones-edit"
+                          placeholder={tWizard("timezonePlaceholder")}
+                          autoComplete="off"
+                          className="ring-focus mt-1 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                        />
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        {tWizard("timezoneHelp")}
+                      </p>
+                      <datalist id="business-timezones-edit">
+                        {[
+                          "UTC",
+                          "Asia/Tehran",
+                          "Asia/Dubai",
+                          "Asia/Tokyo",
+                          "Europe/London",
+                          "Europe/Berlin",
+                          "America/New_York",
+                          "America/Los_Angeles",
+                          "Australia/Sydney",
+                        ].map((timezone) => (
+                          <option key={timezone} value={timezone} />
+                        ))}
+                      </datalist>
+
                       <div className="grid grid-cols-2 gap-2">
                         {(["IR", "OTHER"] as CountryCode[]).map((code) => (
                           <button
                             key={code}
                             type="button"
-                            onClick={() => setEditBusinessCountry(code)}
+                            onClick={() => {
+                              if (editBusinessCountry !== code) {
+                                setEditBusinessCountry(code);
+                                setEditBusinessTimezone(
+                                  code === "IR"
+                                    ? "Asia/Tehran"
+                                    : getBrowserTimeZone()
+                                );
+                              }
+                            }}
                             className={
                               "ring-focus rounded-lg border px-3 py-2 text-sm font-medium transition-colors " +
                               (editBusinessCountry === code

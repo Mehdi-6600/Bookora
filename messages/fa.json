@@ -55,6 +55,9 @@
     "countryOther": "سایر کشورها",
     "hintIR": "واحد پول: تومان - تقویم: شمسی - پرداخت اشتراک: کارت‌به‌کارت",
     "hintOther": "واحد پول: دلار - تقویم: میلادی - پرداخت اشتراک: Telegram Stars",
+    "timezoneLabel": "منطقه زمانی کسب‌وکار",
+    "timezonePlaceholder": "مثال: Europe/Berlin",
+    "timezoneHelp": "منطقه زمانی IANA را وارد کنید؛ ساعت‌های کاری و رزروها بر اساس این منطقه محاسبه می‌شوند.",
     "infoTitle": "اطلاعات کسب‌وکار",
     "changeCountry": "تغییر کشور",
     "selectedCountry": "کشور انتخابی: {country}",
@@ -248,7 +251,8 @@
     "statusConfirmed": "تأییدشده",
     "statusCancelled": "کنسل‌شده",
     "depositLabelShort": "بیعانه",
-    "receiptLabelShort": "کد پیگیری"
+    "receiptLabelShort": "کد پیگیری",
+    "reviewError": "عملیات بازبینی پرداخت ناموفق بود."
   },
   "subscription": {
     "title": "اشتراک",

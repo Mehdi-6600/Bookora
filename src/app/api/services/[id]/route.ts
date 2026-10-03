@@ -3,12 +3,20 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { serviceOwnerFilter } from "@/lib/auth/ownership";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
+import { lockBusinessSchedule } from "@/lib/booking/schedule";
+
+const MAX_PRICE = 99_999_999.99;
+const isMoneyAmount = (value: number) =>
+  Math.abs(value * 100 - Math.round(value * 100)) < 0.000001;
 
 const updateServiceSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     description: z.string().trim().max(1000).nullable().optional(),
-    price: z.coerce.number().finite().min(0).max(99999999.99),
+    price: z
+      .coerce.number().finite().min(0).max(MAX_PRICE)
+      .refine(isMoneyAmount, "قیمت حداکثر دو رقم اعشار دارد."),
     durationMinutes: z.coerce.number().int().min(1).max(1440),
     slotIntervalMinutes: z.coerce
       .number()
@@ -18,7 +26,10 @@ const updateServiceSchema = z
       .optional(),
     active: z.boolean().optional(),
     depositType: z.enum(["NONE", "PERCENTAGE", "FIXED"]).optional(),
-    depositValue: z.coerce.number().finite().min(0).optional(),
+    depositValue: z
+      .coerce.number().finite().min(0).max(MAX_PRICE)
+      .refine(isMoneyAmount, "مبلغ بیعانه حداکثر دو رقم اعشار دارد.")
+      .optional(),
   })
   .refine(
     (d) =>
@@ -31,15 +42,43 @@ const updateServiceSchema = z
     }
   );
 
+class ServiceNotFoundError extends Error {}
+
+function serializeService(service: {
+  id: string;
+  businessId: string;
+  name: string;
+  description: string | null;
+  price: { toString(): string };
+  currency: string;
+  durationMinutes: number;
+  slotIntervalMinutes: number;
+  active: boolean;
+  depositType: string;
+  depositValue: { toString(): string };
+}) {
+  return {
+    id: service.id,
+    businessId: service.businessId,
+    name: service.name,
+    description: service.description,
+    price: service.price.toString(),
+    currency: service.currency,
+    durationMinutes: service.durationMinutes,
+    slotIntervalMinutes: service.slotIntervalMinutes,
+    active: service.active,
+    depositType: service.depositType,
+    depositValue: service.depositValue.toString(),
+  };
+}
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const resolved = await params;
-    const id = resolved.id;
+    const { id } = await params;
     const user = await getCurrentUser();
-
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -54,106 +93,83 @@ export async function PUT(
     const parsed = updateServiceSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          error: "اطلاعات سرویس معتبر نیست.",
-          details: parsed.error.flatten(),
-        },
+        { error: "اطلاعات سرویس معتبر نیست.", details: parsed.error.flatten() },
         { status: 400 }
       );
     }
 
     const existing = await prisma.service.findFirst({
-      where: { id: id, ...serviceOwnerFilter(user) },
+      where: { id, ...serviceOwnerFilter(user) },
       select: {
         id: true,
+        businessId: true,
         business: { select: { ownerId: true } },
       },
     });
-
     if (!existing) {
+      return NextResponse.json({ error: "سرویس پیدا نشد." }, { status: 404 });
+    }
+
+    if (await isRateLimited(`service-update:${user.id}:${id}`, 60, 10 * 60 * 1000)) {
       return NextResponse.json(
-        { error: "سرویس پیدا نشد." },
-        { status: 404 }
+        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { status: 429 }
       );
     }
+    triggerRateLimitCleanup();
 
-    // ادمین فقط وقتی مجاز به ویرایش کامل است که مالک این سرویس باشد.
-    // در غیر این صورت فقط اجازه‌ی تغییر price را دارد.
-    const priceOnly = user.isAdmin && existing.business.ownerId !== user.id;
-
-    if (priceOnly) {
-      const service = await prisma.service.update({
-        where: { id: id },
-        data: { price: parsed.data.price },
+    const service = await prisma.$transaction(async (tx) => {
+      await lockBusinessSchedule(tx, existing.businessId);
+      const current = await tx.service.findFirst({
+        where: { id, ...serviceOwnerFilter(user) },
+        select: { id: true, businessId: true, business: { select: { ownerId: true } } },
       });
+      if (!current) throw new ServiceNotFoundError();
 
-      return NextResponse.json({
-        service: {
-          id: service.id,
-          businessId: service.businessId,
-          name: service.name,
-          description: service.description,
-          price: service.price.toString(),
-          currency: service.currency,
-          durationMinutes: service.durationMinutes,
-          slotIntervalMinutes: service.slotIntervalMinutes,
-          active: service.active,
-          depositType: service.depositType,
-          depositValue: service.depositValue.toString(),
+      // ادمین در کسب‌وکار دیگران فقط اجازه‌ی تغییر قیمت را دارد.
+      const priceOnly = user.isAdmin && current.business.ownerId !== user.id;
+      if (priceOnly) {
+        return tx.service.update({
+          where: { id: current.id },
+          data: { price: parsed.data.price },
+        });
+      }
+
+      const durationMinutes = parsed.data.durationMinutes;
+      const slotIntervalMinutes =
+        parsed.data.slotIntervalMinutes === undefined ||
+        parsed.data.slotIntervalMinutes > durationMinutes
+          ? durationMinutes
+          : parsed.data.slotIntervalMinutes;
+
+      return tx.service.update({
+        where: { id: current.id },
+        data: {
+          name: parsed.data.name,
+          description: parsed.data.description || null,
+          price: parsed.data.price,
+          durationMinutes,
+          slotIntervalMinutes,
+          ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
+          ...(parsed.data.depositType !== undefined
+            ? { depositType: parsed.data.depositType }
+            : {}),
+          ...(parsed.data.depositValue !== undefined
+            ? { depositValue: parsed.data.depositValue }
+            : {}),
         },
       });
-    }
-
-    const name = parsed.data.name;
-    const description = parsed.data.description;
-    const price = parsed.data.price;
-    const durationMinutes = parsed.data.durationMinutes;
-    const active = parsed.data.active;
-    const depositType = parsed.data.depositType;
-    const depositValue = parsed.data.depositValue;
-
-    let slotIntervalMinutes = parsed.data.slotIntervalMinutes;
-    if (
-      typeof slotIntervalMinutes !== "number" ||
-      slotIntervalMinutes <= 0 ||
-      slotIntervalMinutes > durationMinutes
-    ) {
-      slotIntervalMinutes = durationMinutes;
-    }
-
-    const service = await prisma.service.update({
-      where: { id: id },
-      data: {
-        name: name,
-        description: description || null,
-        price: price,
-        durationMinutes: durationMinutes,
-        slotIntervalMinutes: slotIntervalMinutes,
-        ...(active !== undefined ? { active: active } : {}),
-        ...(depositType !== undefined ? { depositType: depositType } : {}),
-        ...(depositValue !== undefined
-          ? { depositValue: depositValue }
-          : {}),
-      },
     });
 
-    return NextResponse.json({
-      service: {
-        id: service.id,
-        businessId: service.businessId,
-        name: service.name,
-        description: service.description,
-        price: service.price.toString(),
-        currency: service.currency,
-        durationMinutes: service.durationMinutes,
-        slotIntervalMinutes: service.slotIntervalMinutes,
-        active: service.active,
-        depositType: service.depositType,
-        depositValue: service.depositValue.toString(),
-      },
-    });
+    return NextResponse.json({ service: serializeService(service) });
   } catch (error) {
-    console.error("PUT /api/services/[id] failed:", error);
+    if (error instanceof ServiceNotFoundError) {
+      return NextResponse.json({ error: "سرویس پیدا نشد." }, { status: 404 });
+    }
+    console.error(
+      "PUT /api/services/[id] failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "ویرایش سرویس ناموفق بود." },
       { status: 500 }
@@ -162,32 +178,26 @@ export async function PUT(
 }
 
 export async function DELETE(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const resolved = await params;
-    const id = resolved.id;
+    const { id } = await params;
     const user = await getCurrentUser();
-
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const existing = await prisma.service.findFirst({
-      where: { id: id, ...serviceOwnerFilter(user) },
+      where: { id, ...serviceOwnerFilter(user) },
       select: {
         id: true,
+        businessId: true,
         business: { select: { ownerId: true } },
-        _count: { select: { bookings: true } },
       },
     });
-
     if (!existing) {
-      return NextResponse.json(
-        { error: "سرویس پیدا نشد." },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "سرویس پیدا نشد." }, { status: 404 });
     }
 
     if (user.isAdmin && existing.business.ownerId !== user.id) {
@@ -197,18 +207,48 @@ export async function DELETE(
       );
     }
 
-    if (existing._count.bookings > 0) {
-      await prisma.service.update({
-        where: { id: id },
-        data: { active: false },
-      });
-      return NextResponse.json({ deactivated: true });
+    if (await isRateLimited(`service-delete:${user.id}:${id}`, 30, 10 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { status: 429 }
+      );
     }
+    triggerRateLimitCleanup();
 
-    await prisma.service.delete({ where: { id: id } });
-    return NextResponse.json({ deleted: true });
+    const result = await prisma.$transaction(async (tx) => {
+      await lockBusinessSchedule(tx, existing.businessId);
+      const current = await tx.service.findFirst({
+        where: { id, ...serviceOwnerFilter(user) },
+        select: {
+          id: true,
+          businessId: true,
+          business: { select: { ownerId: true } },
+          _count: { select: { bookings: true } },
+        },
+      });
+      if (!current) throw new ServiceNotFoundError();
+      if (user.isAdmin && current.business.ownerId !== user.id) {
+        throw new ServiceNotFoundError();
+      }
+
+      if (current._count.bookings > 0) {
+        await tx.service.update({ where: { id }, data: { active: false } });
+        return { deactivated: true };
+      }
+
+      await tx.service.delete({ where: { id } });
+      return { deleted: true };
+    });
+
+    return NextResponse.json(result);
   } catch (error) {
-    console.error("DELETE /api/services/[id] failed:", error);
+    if (error instanceof ServiceNotFoundError) {
+      return NextResponse.json({ error: "سرویس پیدا نشد." }, { status: 404 });
+    }
+    console.error(
+      "DELETE /api/services/[id] failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "حذف سرویس ناموفق بود." },
       { status: 500 }

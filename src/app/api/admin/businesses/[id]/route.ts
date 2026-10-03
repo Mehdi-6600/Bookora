@@ -44,6 +44,7 @@ export async function GET(
         description: business.description,
         country: business.country,
         currency: business.currency,
+        timezone: business.timezone,
         status: business.status,
         services: business.services.map((service) => ({
           id: service.id,
@@ -61,7 +62,10 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("GET /api/admin/businesses/[id] failed:", error);
+    console.error(
+      "GET /api/admin/businesses/[id] failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "خطا در دریافت کسب‌وکار" },
       { status: 500 }

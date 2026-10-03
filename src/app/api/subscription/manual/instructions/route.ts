@@ -39,7 +39,10 @@ export async function GET(req: NextRequest) {
       instructions: map.payment_instructions || null,
     });
   } catch (error) {
-    console.error("GET /api/subscription/manual/instructions failed:", error);
+    console.error(
+      "GET /api/subscription/manual/instructions failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "خطا در دریافت اطلاعات پرداخت" },
       { status: 500 }

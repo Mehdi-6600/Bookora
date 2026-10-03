@@ -1,7 +1,10 @@
 import { addMinutes } from "date-fns";
-import { fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { isValidDateOnly } from "@/lib/booking/time";
 
 export type BusyRange = { start: Date; end: Date };
+
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export function computeAvailableSlots(params: {
   dateStr: string;
@@ -12,67 +15,118 @@ export function computeAvailableSlots(params: {
   breakEnd: string | null;
   durationMinutes: number;
   busyRanges: BusyRange[];
-  // slotIntervalMinutes برای backward compatibility نگه داشته شده است،
-  // ولی استفاده نمی‌شود. فاصله‌ی نوبت‌ها همیشه برابر مدت سرویس است تا
-  // نوبت‌ها با ساعت کاری و مدت سرویس کاملاً هماهنگ بمانند.
   slotIntervalMinutes?: number;
 }): Date[] {
-  const dateStr = params.dateStr;
-  const timezone = params.timezone;
-  const openTime = params.openTime;
-  const closeTime = params.closeTime;
-  const breakStart = params.breakStart;
-  const breakEnd = params.breakEnd;
-  const durationMinutes = params.durationMinutes;
-  const busyRanges = params.busyRanges;
+  const {
+    dateStr,
+    timezone,
+    openTime,
+    closeTime,
+    breakStart,
+    breakEnd,
+    durationMinutes,
+    busyRanges,
+  } = params;
 
   if (
-    !Number.isFinite(durationMinutes) ||
-    durationMinutes <= 0
+    !isValidDateOnly(dateStr) ||
+    !TIME_PATTERN.test(openTime) ||
+    !TIME_PATTERN.test(closeTime) ||
+    !Number.isInteger(durationMinutes) ||
+    durationMinutes <= 0 ||
+    (breakStart !== null && !TIME_PATTERN.test(breakStart)) ||
+    (breakEnd !== null && !TIME_PATTERN.test(breakEnd)) ||
+    Boolean(breakStart) !== Boolean(breakEnd)
   ) {
     return [];
   }
 
-  // فاصله‌ی نوبت‌ها همیشه برابر مدت سرویس است.
-  const step = durationMinutes;
+  // Working-hour intervals that cross midnight are deliberately unsupported by
+  // the current single-day schedule model, so fail closed for malformed rows.
+  if (openTime >= closeTime) return [];
+  if (breakStart && breakEnd) {
+    if (
+      breakStart >= breakEnd ||
+      breakStart < openTime ||
+      breakEnd > closeTime
+    ) {
+      return [];
+    }
+  }
 
-  const open = fromZonedTime(dateStr + "T" + openTime + ":00", timezone);
-  const close = fromZonedTime(dateStr + "T" + closeTime + ":00", timezone);
+  const configuredStep = params.slotIntervalMinutes;
+  const step =
+    Number.isInteger(configuredStep) && Number(configuredStep) > 0
+      ? Number(configuredStep)
+      : durationMinutes;
 
-  const breakStartAt = breakStart
-    ? fromZonedTime(dateStr + "T" + breakStart + ":00", timezone)
-    : null;
-  const breakEndAt = breakEnd
-    ? fromZonedTime(dateStr + "T" + breakEnd + ":00", timezone)
-    : null;
+  let open: Date;
+  let close: Date;
+  let breakStartAt: Date | null = null;
+  let breakEndAt: Date | null = null;
 
-  if (open >= close) {
+  try {
+    open = fromZonedTime(`${dateStr}T${openTime}:00`, timezone);
+    close = fromZonedTime(`${dateStr}T${closeTime}:00`, timezone);
+
+    // Avoid silently shifting a schedule through a DST gap. Ambiguous fall-back
+    // wall times resolve consistently through date-fns-tz.
+    if (
+      formatInTimeZone(open, timezone, "yyyy-MM-dd HH:mm") !==
+        `${dateStr} ${openTime}` ||
+      formatInTimeZone(close, timezone, "yyyy-MM-dd HH:mm") !==
+        `${dateStr} ${closeTime}`
+    ) {
+      return [];
+    }
+
+    if (breakStart && breakEnd) {
+      breakStartAt = fromZonedTime(`${dateStr}T${breakStart}:00`, timezone);
+      breakEndAt = fromZonedTime(`${dateStr}T${breakEnd}:00`, timezone);
+
+      if (
+        formatInTimeZone(breakStartAt, timezone, "yyyy-MM-dd HH:mm") !==
+          `${dateStr} ${breakStart}` ||
+        formatInTimeZone(breakEndAt, timezone, "yyyy-MM-dd HH:mm") !==
+          `${dateStr} ${breakEnd}`
+      ) {
+        return [];
+      }
+    }
+  } catch {
     return [];
   }
 
+  if (open >= close || !Number.isFinite(step) || step <= 0) return [];
+
   const slots: Date[] = [];
+  const seenLocalStarts = new Set<string>();
   let cursor = open;
 
-  while (true) {
+  // At most one day of minute-aligned candidates; this protects against bad
+  // legacy data while still allowing services with a one-minute interval.
+  for (let count = 0; cursor < close && count < 1_441; count += 1) {
     const slotEnd = addMinutes(cursor, durationMinutes);
 
-    if (slotEnd > close) {
-      break;
-    }
+    if (slotEnd > close) break;
 
-    let overlapsBreak = false;
-    if (breakStartAt && breakEndAt) {
-      overlapsBreak = cursor < breakEndAt && slotEnd > breakStartAt;
-    }
-
+    const localStart = formatInTimeZone(cursor, timezone, "yyyy-MM-dd HH:mm");
+    const overlapsBreak = Boolean(
+      breakStartAt &&
+        breakEndAt &&
+        cursor < breakEndAt &&
+        slotEnd > breakStartAt
+    );
     const overlapsBusy = busyRanges.some(
       (busy) => cursor < busy.end && slotEnd > busy.start
     );
 
-    if (!overlapsBreak && !overlapsBusy) {
+    // During a fall-back transition the same wall-clock label occurs twice.
+    // Keep one candidate so the public UI never presents indistinguishable slots.
+    if (!seenLocalStarts.has(localStart) && !overlapsBreak && !overlapsBusy) {
       slots.push(cursor);
     }
-
+    seenLocalStarts.add(localStart);
     cursor = addMinutes(cursor, step);
   }
 

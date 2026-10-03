@@ -63,7 +63,10 @@ export async function GET() {
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("GET /api/admin/stats failed:", error);
+    console.error(
+      "GET /api/admin/stats failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "خطا در دریافت آمار" },
       { status: 500 }

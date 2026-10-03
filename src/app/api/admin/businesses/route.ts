@@ -76,6 +76,7 @@ export async function GET(req: NextRequest) {
         slug: biz.slug,
         country: biz.country,
         currency: biz.currency,
+        timezone: biz.timezone,
         status: biz.status,
         createdAt: biz.createdAt,
         owner: {
@@ -91,7 +92,10 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (error) {
-    console.error("GET /api/admin/businesses failed:", error);
+    console.error(
+      "GET /api/admin/businesses failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "خطا در دریافت کسب‌وکارها" },
       { status: 500 }

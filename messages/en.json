@@ -55,6 +55,9 @@
     "countryOther": "Other countries",
     "hintIR": "Currency: Toman - Calendar: Jalali - Subscription payment: Card to card",
     "hintOther": "Currency: USD - Calendar: Gregorian - Subscription payment: Telegram Stars",
+    "timezoneLabel": "Business time zone",
+    "timezonePlaceholder": "Example: Europe/Berlin",
+    "timezoneHelp": "Enter an IANA time zone. Working hours and bookings use this time zone.",
     "infoTitle": "Business information",
     "changeCountry": "Change country",
     "selectedCountry": "Selected country: {country}",
@@ -248,7 +251,8 @@
     "statusConfirmed": "Confirmed",
     "statusCancelled": "Cancelled",
     "depositLabelShort": "Deposit",
-    "receiptLabelShort": "Reference"
+    "receiptLabelShort": "Reference",
+    "reviewError": "Payment review failed."
   },
   "subscription": {
     "title": "Subscription",

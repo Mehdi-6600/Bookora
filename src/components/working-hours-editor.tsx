@@ -95,6 +95,7 @@ export function WorkingHoursEditor({
   const dayLabels = [0, 1, 2, 3, 4, 5, 6].map((i) => t(`days.${i}`));
 
   const [days, setDays] = useState<WorkingHour[]>(buildDefaultWeek());
+  const [timezone, setTimezone] = useState("UTC");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -132,6 +133,14 @@ export function WorkingHoursEditor({
           throw new Error(apiError);
         }
         if (cancelled) return;
+        if (
+          typeof data === "object" &&
+          data !== null &&
+          "timezone" in data &&
+          typeof data.timezone === "string"
+        ) {
+          setTimezone(data.timezone);
+        }
         const workingHours =
           typeof data === "object" &&
           data !== null &&
@@ -206,6 +215,14 @@ export function WorkingHoursEditor({
       if (
         typeof data === "object" &&
         data !== null &&
+        "timezone" in data &&
+        typeof data.timezone === "string"
+      ) {
+        setTimezone(data.timezone);
+      }
+      if (
+        typeof data === "object" &&
+        data !== null &&
         "workingHours" in data &&
         Array.isArray(data.workingHours)
       ) {
@@ -232,7 +249,7 @@ export function WorkingHoursEditor({
           <div className="min-w-0">
             <h2 className={SECTION_TITLE}>{t("title")}</h2>
             <p className="mt-0.5 text-xs font-medium text-[#1A1F36]/60">
-              {t("subtitle")}
+              {t("subtitle")} <span dir="ltr">({timezone})</span>
             </p>
           </div>
         </div>
