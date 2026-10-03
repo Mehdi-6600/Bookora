@@ -10,9 +10,12 @@ export async function notifyUser(
   } catch (error) {
     const err = error as { error_code?: number; description?: string };
     if (err && err.error_code === 403) {
-      console.warn(`notifyUser: user ${telegramId} blocked the bot`);
+      console.warn("notifyUser: Telegram user blocked the bot");
     } else {
-      console.error(`notifyUser failed for ${telegramId}:`, error);
+      console.error(
+        "notifyUser failed:",
+        error instanceof Error ? error.name : "UnknownError"
+      );
     }
   }
 }

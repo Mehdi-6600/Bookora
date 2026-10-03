@@ -65,7 +65,7 @@ export async function GET(
   } catch (error) {
     console.error(
       "GET /api/public/business/[slug] failed:",
-      error
+      error instanceof Error ? error.name : "UnknownError"
     );
     return NextResponse.json(
       { error: "خطا در دریافت کسب‌وکار" },

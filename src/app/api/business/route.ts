@@ -5,11 +5,21 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { COUNTRY_CURRENCY, isCountryCode } from "@/lib/currency";
 import { FREE_BUSINESS_LIMIT } from "@/lib/subscription/plans";
+import { activePaidSubscriptionWhere } from "@/lib/subscription/entitlement";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
+import { normalizeTimeZone } from "@/lib/booking/time";
 
 const createBusinessSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(1000).nullable().optional(),
   country: z.string().refine(isCountryCode, "کشور معتبر نیست."),
+  timezone: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .refine((value) => normalizeTimeZone(value) !== null, "منطقه زمانی معتبر نیست.")
+    .optional(),
 });
 
 function createBaseSlug(name: string): string {
@@ -53,6 +63,7 @@ export async function GET() {
         description: business.description,
         country: business.country,
         currency: business.currency,
+        timezone: business.timezone,
         status: business.status,
         services: business.services.map((service) => ({
           id: service.id,
@@ -70,7 +81,10 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    console.error("GET /api/business failed:", error);
+    console.error(
+      "GET /api/business failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "خطا در دریافت کسب‌وکارها" },
       { status: 500 }
@@ -84,6 +98,14 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    if (await isRateLimited(`business-create:${user.id}`, 5, 60 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد. کمی بعد دوباره تلاش کنید." },
+        { status: 429 }
+      );
+    }
+    triggerRateLimitCleanup();
 
     let body: unknown;
     try {
@@ -107,7 +129,9 @@ export async function POST(req: NextRequest) {
     const description = parsed.data.description || null;
     const country = parsed.data.country;
     const currency = COUNTRY_CURRENCY[country];
-    const timezone = resolveTimezone(country);
+    const timezone = parsed.data.timezone
+      ? normalizeTimeZone(parsed.data.timezone)!
+      : resolveTimezone(country);
 
     // استفاده از advisory lock برای جلوگیری از race در free business limit.
     // همچنین retry برای P2002 (unique constraint) در صورت collision slug.
@@ -117,7 +141,7 @@ export async function POST(req: NextRequest) {
       try {
         const business = await prisma.$transaction(async (tx) => {
           // قفل اتمیک روی free-limit این کاربر.
-          await tx.$executeRaw`
+          await tx.$queryRaw`
             SELECT pg_advisory_xact_lock(
               hashtext(${user.id}::text),
               hashtext('business-limit'::text)
@@ -130,7 +154,8 @@ export async function POST(req: NextRequest) {
 
           if (existingCount >= FREE_BUSINESS_LIMIT) {
             const activeSubscription = await tx.subscription.findFirst({
-              where: { userId: user.id, status: "ACTIVE" },
+              where: activePaidSubscriptionWhere(user.id, new Date()),
+              select: { id: true },
             });
 
             if (!activeSubscription) {
@@ -174,6 +199,7 @@ export async function POST(req: NextRequest) {
               description: business.description,
               country: business.country,
               currency: business.currency,
+              timezone: business.timezone,
               status: business.status,
               services: [],
               _count: { bookings: 0 },
@@ -205,13 +231,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.error("POST /api/business failed after retries:", lastError);
+    console.error(
+      "POST /api/business failed after retries:",
+      lastError instanceof Error ? lastError.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "ساخت کسب‌وکار ناموفق بود." },
       { status: 500 }
     );
   } catch (error) {
-    console.error("POST /api/business failed:", error);
+    console.error(
+      "POST /api/business failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "ساخت کسب‌وکار ناموفق بود." },
       { status: 500 }

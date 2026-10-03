@@ -1,64 +1,58 @@
+import { createHash, randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 
-// جلوگیری از سوءاستفاده روی Endpointهای عمومی (بدون Auth).
-// چون سرور Serverless است، شمارش در دیتابیس نگه داشته می‌شود.
-// عملیات به شکل اتمیک انجام می‌شود تا race condition رخ ندهد.
+// Fixed-window counters live in PostgreSQL so limits are shared across
+// serverless instances. The UPSERT increments atomically, including the first
+// concurrent requests in a window.
 export async function isRateLimited(
   key: string,
   limit: number,
   windowMs: number
 ): Promise<boolean> {
+  if (!Number.isInteger(limit) || limit < 1 || !Number.isFinite(windowMs) || windowMs < 1) {
+    return true;
+  }
+
   const now = new Date();
   const newExpiresAt = new Date(now.getTime() + windowMs);
+  const hashedKey = createHash("sha256").update(key).digest("hex");
 
   try {
-    // مرحله ۱: تلاش برای افزایش اتمیک شمارنده اگر رکورد معتبر و زیر limit است.
-    const updated = await prisma.rateLimit.updateMany({
-      where: {
-        key,
-        expiresAt: { gt: now },
-        count: { lt: limit },
-      },
-      data: { count: { increment: 1 } },
-    });
+    const rows = await prisma.$queryRaw<Array<{ count: number }>>`
+      INSERT INTO "rate_limits" ("id", "key", "count", "expiresAt")
+      VALUES (${randomUUID()}, ${hashedKey}, 1, ${newExpiresAt})
+      ON CONFLICT ("key") DO UPDATE
+      SET
+        "count" = CASE
+          WHEN "rate_limits"."expiresAt" <= ${now} THEN 1
+          ELSE "rate_limits"."count" + 1
+        END,
+        "expiresAt" = CASE
+          WHEN "rate_limits"."expiresAt" <= ${now} THEN ${newExpiresAt}
+          ELSE "rate_limits"."expiresAt"
+        END
+      RETURNING "count"
+    `;
 
-    if (updated.count > 0) {
-      // شمارنده با موفقیت افزایش یافت — درخواست مجاز است.
-      return false;
-    }
-
-    // مرحله ۲: رکورد وجود ندارد یا منقضی شده یا به limit رسیده.
-    const existing = await prisma.rateLimit.findUnique({ where: { key } });
-
-    if (!existing || existing.expiresAt <= now) {
-      // ساخت رکورد جدید یا reset.
-      // چون key unique است، upsert اتمیک است.
-      await prisma.rateLimit.upsert({
-        where: { key },
-        create: { key, count: 1, expiresAt: newExpiresAt },
-        update: { count: 1, expiresAt: newExpiresAt },
-      });
-      return false;
-    }
-
-    // رکورد وجود دارد، معتبر است، ولی count به limit رسیده.
-    return true;
+    return !rows[0] || rows[0].count > limit;
   } catch (error) {
-    // در صورت خطای DB (مثلاً P2002 در concurrent upsert)، به‌عنوان fail-open
-    // اجازه می‌دهیم — چون از دست دادن rate limit بهتر از از دست دادن درخواست معتبر کاربر است.
-    // (نکته: اگر سیاست سختگیرانه‌تر می‌خواهی، این‌جا `return true` بگذار.)
-    console.error("isRateLimited failed:", error);
-    return false;
+    // For abuse-sensitive routes fail closed: database failures must not turn
+    // rate limiting into an unauthenticated unlimited path.
+    console.error(
+      "Rate-limit counter unavailable:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+    return true;
   }
 }
 
-// پاکسازی رکوردهای منقضی — سبک، احتمال کم، بدون await.
+// Clean expired counters opportunistically without adding a memory-only lock.
 export function triggerRateLimitCleanup(): void {
-  if (Math.random() > 0.01) return; // ۱٪ احتمال
+  if (Math.random() > 0.01) return;
 
   void prisma.rateLimit
     .deleteMany({ where: { expiresAt: { lt: new Date() } } })
     .catch(() => {
-      // silent — cleanup نباید خطای اصلی را تحت تأثیر قرار دهد
+      // Cleanup is opportunistic and must not affect the protected request.
     });
 }

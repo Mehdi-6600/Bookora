@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     } catch (botError) {
       console.error(
         "POST /api/subscription/checkout: getBot failed",
-        botError
+        botError instanceof Error ? botError.name : "UnknownError"
       );
       return NextResponse.json(
         { error: "ربات تلگرام در دسترس نیست." },
@@ -118,9 +118,10 @@ export async function POST(req: NextRequest) {
         "POST /api/subscription/checkout: createInvoiceLink failed",
         {
           plan: plan.code,
-          starsPrice: plan.starsPrice,
-          userId: user.id,
-          error: invoiceError,
+          error:
+            invoiceError instanceof Error
+              ? invoiceError.name
+              : "UnknownError",
         }
       );
       return NextResponse.json(
@@ -132,7 +133,7 @@ export async function POST(req: NextRequest) {
     if (!invoiceLink || typeof invoiceLink !== "string") {
       console.error(
         "POST /api/subscription/checkout: invoiceLink is empty or invalid",
-        { plan: plan.code, userId: user.id }
+        { plan: plan.code }
       );
       return NextResponse.json(
         { error: "ساخت لینک پرداخت ناموفق بود." },
@@ -142,7 +143,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ invoiceLink });
   } catch (error) {
-    console.error("POST /api/subscription/checkout failed:", error);
+    console.error(
+      "POST /api/subscription/checkout failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "ساخت لینک پرداخت ناموفق بود." },
       { status: 500 }

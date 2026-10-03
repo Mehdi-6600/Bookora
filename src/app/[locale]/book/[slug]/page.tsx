@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { format } from "date-fns";
-import { toZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { addCalendarDays, getBusinessDate } from "@/lib/booking/time";
 import {
   Calendar,
   CheckCircle2,
@@ -82,25 +82,55 @@ const SECTION_TITLE = "text-sm font-bold text-[#1A1F36]";
 const LABEL_SMALL =
   "text-[11px] font-bold uppercase tracking-wide text-[#1A1F36]/50";
 
-function toISODate(d: Date): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return year + "-" + month + "-" + day;
+function buildNextDays(count: number, timezone: string): string[] {
+  const today = getBusinessDate(new Date(), timezone);
+  return Array.from({ length: count }, (_, index) =>
+    addCalendarDays(today, index)
+  );
 }
 
-function buildNextDays(count: number): Date[] {
-  const days: Date[] = [];
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
+async function getIdempotencyKey(
+  storageKey: string,
+  requestFingerprint: string
+): Promise<string> {
+  try {
+    const digest = await window.crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(requestFingerprint)
+    );
+    const fingerprint = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    const cached = JSON.parse(sessionStorage.getItem(storageKey) || "null") as
+      | { fingerprint?: string; key?: string }
+      | null;
 
-  for (let i = 0; i < count; i += 1) {
-    const d = new Date(now);
-    d.setDate(d.getDate() + i);
-    days.push(d);
+    if (
+      cached?.fingerprint === fingerprint &&
+      typeof cached.key === "string" &&
+      /^[0-9a-f-]{36}$/i.test(cached.key)
+    ) {
+      return cached.key;
+    }
+
+    const key = window.crypto.randomUUID();
+    sessionStorage.setItem(storageKey, JSON.stringify({ fingerprint, key }));
+    return key;
+  } catch {
+    // The server still protects the slot if browser storage/crypto is blocked.
+    return window.crypto.randomUUID();
   }
+}
 
-  return days;
+function clearStoredIdempotencyKey(storageKey: string, key: string): void {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(storageKey) || "null") as
+      | { key?: string }
+      | null;
+    if (cached?.key === key) sessionStorage.removeItem(storageKey);
+  } catch {
+    // Storage may be disabled in privacy-restricted webviews.
+  }
 }
 
 export default function PublicBookingPage() {
@@ -117,8 +147,13 @@ export default function PublicBookingPage() {
     null
   );
 
-  const nextDays = useMemo(() => buildNextDays(14), []);
-  const [date, setDate] = useState<string>(() => toISODate(nextDays[0]));
+  const locale = business?.country === "IR" ? "fa-IR" : "en-US";
+  const tz = business?.timezone || "UTC";
+
+  const [date, setDate] = useState<string>(() =>
+    buildNextDays(14, "UTC")[0]
+  );
+  const nextDays = useMemo(() => buildNextDays(14, tz), [tz]);
   const [slots, setSlots] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -138,9 +173,9 @@ export default function PublicBookingPage() {
   const [receiptRef, setReceiptRef] = useState("");
   const [submittingReceipt, setSubmittingReceipt] = useState(false);
   const [receiptSubmitted, setReceiptSubmitted] = useState(false);
-
-  const locale = business?.country === "IR" ? "fa-IR" : "en-US";
-  const tz = business?.timezone || "UTC";
+  const [bookingConfirmed, setBookingConfirmed] = useState(false);
+  const bookingSubmitLock = useRef(false);
+  const receiptSubmitLock = useRef(false);
 
   useEffect(() => {
     async function load() {
@@ -174,84 +209,118 @@ export default function PublicBookingPage() {
   }, [slug]);
 
   useEffect(() => {
-    if (!selectedServiceId) return;
+    if (!business) return;
+    setDate(buildNextDays(14, business.timezone || "UTC")[0]);
+    setSelectedSlot(null);
+  }, [business?.timezone]);
+
+  useEffect(() => {
+    if (!selectedServiceId) {
+      setSlots([]);
+      return;
+    }
+    const serviceId = selectedServiceId;
+
+    const controller = new AbortController();
+    setLoadingSlots(true);
+    setSelectedSlot(null);
+    setSlots([]);
+    setError(null);
 
     async function loadSlots() {
       try {
-        setLoadingSlots(true);
-        setSelectedSlot(null);
-        setError(null);
-
         const response = await fetch(
-          `/api/public/business/${slug}/availability?serviceId=${selectedServiceId}&date=${date}`,
-          { cache: "no-store" }
+          `/api/public/business/${slug}/availability?serviceId=${encodeURIComponent(serviceId)}&date=${encodeURIComponent(date)}`,
+          { cache: "no-store", signal: controller.signal }
         );
-
         const data = await response.json();
-
         if (!response.ok) {
           throw new Error(data?.error || t("slotsError"));
         }
-
-        setSlots(data.slots || []);
+        if (!controller.signal.aborted) {
+          setSlots(Array.isArray(data.slots) ? data.slots : []);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : t("slotsError"));
+        if (!controller.signal.aborted) {
+          setError(err instanceof Error ? err.message : t("slotsError"));
+        }
       } finally {
-        setLoadingSlots(false);
+        if (!controller.signal.aborted) setLoadingSlots(false);
       }
     }
 
     loadSlots();
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedServiceId, date, slug]);
 
   async function submitBooking() {
-    if (!selectedServiceId || !selectedSlot) return;
+    if (bookingSubmitLock.current || !selectedServiceId || !selectedSlot) return;
 
     if (!customerName.trim() || !customerPhone.trim()) {
       setError(t("nameRequired"));
       return;
     }
 
+    bookingSubmitLock.current = true;
+    const storageKey = `bookora:booking:${slug}`;
+
     try {
       setSubmitting(true);
       setError(null);
 
+      const requestBody = {
+        serviceId: selectedServiceId,
+        startAt: selectedSlot,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        customerEmail: customerEmail.trim() || null,
+      };
+      const idempotencyKey = await getIdempotencyKey(
+        storageKey,
+        JSON.stringify({ slug, ...requestBody })
+      );
+
       const response = await fetch(`/api/public/business/${slug}/bookings`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          serviceId: selectedServiceId,
-          startAt: selectedSlot,
-          customerName: customerName.trim(),
-          customerPhone: customerPhone.trim(),
-          customerEmail: customerEmail.trim() || null,
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
-
       if (!response.ok) {
+        if (response.status === 409) {
+          clearStoredIdempotencyKey(storageKey, idempotencyKey);
+        }
         throw new Error(data?.error || t("bookingError"));
       }
+      if (!data?.booking?.id) throw new Error(t("bookingError"));
 
+      clearStoredIdempotencyKey(storageKey, idempotencyKey);
       setConfirmedBookingId(data.booking.id);
+      setBookingConfirmed(data.booking.confirmed === true);
       setDepositDue(Number(data.booking.depositDue) || 0);
-      setPaymentMethod(data.paymentMethod);
+      setPaymentMethod(data.paymentMethod || null);
       setReceiptToken(data.booking.receiptToken || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("bookingError"));
     } finally {
+      bookingSubmitLock.current = false;
       setSubmitting(false);
     }
   }
 
   async function submitReceipt() {
+    if (receiptSubmitLock.current) return;
     if (!confirmedBookingId || !receiptToken || !receiptRef.trim()) {
       setError(t("receiptRequired"));
       return;
     }
 
+    receiptSubmitLock.current = true;
     try {
       setSubmittingReceipt(true);
       setError(null);
@@ -262,22 +331,21 @@ export default function PublicBookingPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            receiptToken: receiptToken,
+            receiptToken,
             transactionReference: receiptRef.trim(),
           }),
         }
       );
 
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data?.error || t("receiptError"));
       }
-
-      setReceiptSubmitted(true);
+      setReceiptSubmitted(data?.submitted === true);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("receiptError"));
     } finally {
+      receiptSubmitLock.current = false;
       setSubmittingReceipt(false);
     }
   }
@@ -307,7 +375,10 @@ export default function PublicBookingPage() {
     (s) => s.id === selectedServiceId
   );
 
-  if (confirmedBookingId && (!depositDue || depositDue <= 0)) {
+  if (
+    confirmedBookingId &&
+    (bookingConfirmed || !depositDue || depositDue <= 0)
+  ) {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center p-6">
         <div className="w-full space-y-5 rounded-3xl bg-[#B8D4F5] p-6 text-center shadow-elevated">
@@ -533,9 +604,10 @@ export default function PublicBookingPage() {
         </div>
 
         <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-          {nextDays.map((d) => {
-            const iso = toISODate(d);
-            const label = d.toLocaleDateString(locale, {
+          {nextDays.map((iso) => {
+            const localNoon = fromZonedTime(`${iso}T12:00:00`, tz);
+            const label = localNoon.toLocaleDateString(locale, {
+              timeZone: tz,
               weekday: "short",
               day: "numeric",
               month: "short",
@@ -575,8 +647,7 @@ export default function PublicBookingPage() {
         ) : (
           <div className="grid grid-cols-3 gap-2">
             {slots.map((slot) => {
-              const zoned = toZonedTime(new Date(slot), tz);
-              const label = format(zoned, "HH:mm");
+              const label = formatInTimeZone(new Date(slot), tz, "HH:mm");
               const isSelected = selectedSlot === slot;
               return (
                 <button

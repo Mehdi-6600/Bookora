@@ -1,61 +1,113 @@
+import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { pendingBookingCutoff } from "@/lib/booking/schedule";
 
-const PENDING_TTL_MINUTES = 15;
+const BATCH_SIZE = 200;
+const MAX_BATCHES_PER_RUN = 20;
+
+function hasValidCronAuthorization(request: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || secret.length < 32) return false;
+
+  const supplied = request.headers.get("authorization") ?? "";
+  const expectedBuffer = Buffer.from(`Bearer ${secret}`);
+  const suppliedBuffer = Buffer.from(supplied);
+  return (
+    expectedBuffer.length === suppliedBuffer.length &&
+    timingSafeEqual(expectedBuffer, suppliedBuffer)
+  );
+}
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
+  if (!process.env.CRON_SECRET || process.env.CRON_SECRET.length < 32) {
+    return NextResponse.json(
+      { error: "Cron authentication is not configured." },
+      { status: 503 }
+    );
+  }
 
-  if (cronSecret) {
-    if (authHeader !== "Bearer " + cronSecret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!hasValidCronAuthorization(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    const cutoff = new Date(Date.now() - PENDING_TTL_MINUTES * 60 * 1000);
+    const now = new Date();
+    const cutoff = pendingBookingCutoff(now);
+    let expired = 0;
+    let batches = 0;
 
-    const staleBookings = await prisma.booking.findMany({
-      where: {
-        status: "PENDING_PAYMENT",
-        paymentStatus: "PENDING",
-        createdAt: { lt: cutoff },
-      },
-      select: { id: true },
-      take: 200,
-    });
+    while (batches < MAX_BATCHES_PER_RUN) {
+      const staleBookings = await prisma.booking.findMany({
+        where: {
+          status: "PENDING_PAYMENT",
+          paymentStatus: "PENDING",
+          createdAt: { lt: cutoff },
+        },
+        orderBy: { createdAt: "asc" },
+        take: BATCH_SIZE,
+        select: { id: true },
+      });
 
-    if (staleBookings.length === 0) {
-      return NextResponse.json({ expired: 0 });
+      if (staleBookings.length === 0) break;
+
+      const ids = staleBookings.map((booking) => booking.id);
+      const cancelledCount = await prisma.$transaction(async (tx) => {
+        // Update the booking first and conditionally. Payment-review and other
+        // cron runs use the same compare-and-set state transition, so only one
+        // of approve/reject/expire can win for a booking.
+        const bookingsUpdated = await tx.booking.updateMany({
+          where: {
+            id: { in: ids },
+            status: "PENDING_PAYMENT",
+            paymentStatus: "PENDING",
+            createdAt: { lt: cutoff },
+          },
+          data: {
+            status: "CANCELLED",
+            cancelledAt: now,
+            paymentStatus: "REJECTED",
+          },
+        });
+
+        if (bookingsUpdated.count === 0) return 0;
+
+        const cancelledBookings = await tx.booking.findMany({
+          where: {
+            id: { in: ids },
+            status: "CANCELLED",
+            paymentStatus: "REJECTED",
+            cancelledAt: now,
+          },
+          select: { id: true },
+        });
+
+        if (cancelledBookings.length > 0) {
+          await tx.payment.updateMany({
+            where: {
+              bookingId: { in: cancelledBookings.map((booking) => booking.id) },
+              status: "PENDING",
+            },
+            data: { status: "REJECTED", rejectedAt: now },
+          });
+        }
+
+        return bookingsUpdated.count;
+      });
+
+      expired += cancelledCount;
+      batches += 1;
+      if (staleBookings.length < BATCH_SIZE) break;
     }
 
-    const ids = staleBookings.map((b) => b.id);
-    const now = new Date();
-
-    await prisma.$transaction([
-      prisma.payment.updateMany({
-        where: {
-          bookingId: { in: ids },
-          status: "PENDING",
-        },
-        data: { status: "REJECTED", rejectedAt: now },
-      }),
-      prisma.booking.updateMany({
-        where: { id: { in: ids } },
-        data: {
-          status: "CANCELLED",
-          cancelledAt: now,
-          paymentStatus: "REJECTED",
-        },
-      }),
-    ]);
-
-    return NextResponse.json({ expired: ids.length });
+    return NextResponse.json({ expired, batches });
   } catch (error) {
-    console.error("cron/expire-pending failed:", error);
+    console.error(
+      "cron/expire-pending failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
-      { error: "خطا در اجرای cleanup" },
+      { error: "Pending-booking cleanup failed." },
       { status: 500 }
     );
   }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import {
   MANUAL_PAYMENT_SETTING_KEYS,
   isManualPaymentSettingKey,
@@ -15,7 +16,12 @@ const updateSchema = z.object({
         value: z.string().trim().max(500),
       })
     )
-    .min(1),
+    .min(1)
+    .max(MANUAL_PAYMENT_SETTING_KEYS.length)
+    .refine(
+      (settings) => new Set(settings.map((setting) => setting.key)).size === settings.length,
+      "کلید تنظیمات تکراری است."
+    ),
 });
 
 export async function GET() {
@@ -41,7 +47,10 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    console.error("GET /api/admin/settings failed:", error);
+    console.error(
+      "GET /api/admin/settings failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "خطا در دریافت تنظیمات" },
       { status: 500 }
@@ -56,6 +65,11 @@ export async function PUT(req: NextRequest) {
     if (!user || !user.isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+
+    if (await isRateLimited(`admin-settings:${user.id}`, 30, 10 * 60 * 1000)) {
+      return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+    }
+    triggerRateLimitCleanup();
 
     let body: unknown;
     try {
@@ -84,7 +98,10 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ saved: true });
   } catch (error) {
-    console.error("PUT /api/admin/settings failed:", error);
+    console.error(
+      "PUT /api/admin/settings failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "ذخیره تنظیمات ناموفق بود." },
       { status: 500 }

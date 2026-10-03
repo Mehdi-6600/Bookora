@@ -16,6 +16,7 @@ export async function GET() {
       where: {
         userId: user.id,
         status: "ACTIVE",
+        startedAt: { lte: now },
         OR: [
           { expiresAt: null },
           { expiresAt: { gt: now } },
@@ -49,7 +50,10 @@ export async function GET() {
         : null,
     });
   } catch (error) {
-    console.error("GET /api/subscription/status failed:", error);
+    console.error(
+      "GET /api/subscription/status failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "خطا در دریافت وضعیت اشتراک" },
       { status: 500 }

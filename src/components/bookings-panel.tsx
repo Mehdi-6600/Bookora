@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { format } from "date-fns";
-import { toZonedTime } from "date-fns-tz";
+import { formatInTimeZone } from "date-fns-tz";
 import {
   Calendar,
   Check,
@@ -26,6 +25,7 @@ type Booking = {
   customerName: string;
   customerPhone: string;
   startAt: string;
+  timezone: string;
   status: string;
   paymentStatus: string;
   depositDue: string;
@@ -86,6 +86,7 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const [filter, setFilter] = useState<FilterKey>("ALL");
   const [query, setQuery] = useState("");
@@ -94,11 +95,16 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
     try {
       setLoading(true);
       const response = await fetch(
-        `/api/bookings?businessId=${businessId}`,
+        `/api/bookings?businessId=${encodeURIComponent(businessId)}`,
         { cache: "no-store" }
       );
       const data = await response.json();
-      if (response.ok) setBookings(data.bookings);
+      if (!response.ok) throw new Error(data?.error || t("loading"));
+      setBookings(Array.isArray(data.bookings) ? data.bookings : []);
+    } catch (err) {
+      setReviewError(
+        err instanceof Error ? err.message : t("reviewError")
+      );
     } finally {
       setLoading(false);
     }
@@ -116,7 +122,8 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
   ) {
     try {
       setReviewingId(paymentId);
-      await fetch(
+      setReviewError(null);
+      const response = await fetch(
         `/api/bookings/${bookingId}/payments/${paymentId}/review`,
         {
           method: "POST",
@@ -124,7 +131,13 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
           body: JSON.stringify({ action }),
         }
       );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || t("reviewError"));
       await load();
+    } catch (err) {
+      setReviewError(
+        err instanceof Error ? err.message : t("reviewError")
+      );
     } finally {
       setReviewingId(null);
     }
@@ -161,8 +174,6 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
   const confirmedCount = bookings.filter(
     (b) => b.status === "CONFIRMED"
   ).length;
-
-  const tz = "UTC";
 
   const filterLabels: Record<FilterKey, string> = {
     PENDING: t("filterPending"),
@@ -213,6 +224,12 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
         </button>
       </div>
 
+      {reviewError && (
+        <div className="mt-3 rounded-2xl bg-[#FF4D5E] px-4 py-3 text-sm font-medium text-white shadow-soft">
+          {reviewError}
+        </div>
+      )}
+
       {/* Search */}
       <div className="relative mt-4">
         <Search className="pointer-events-none absolute inset-y-0 start-4 my-auto h-4 w-4 text-[#1A1F36]/40" />
@@ -253,9 +270,16 @@ export function BookingsPanel({ businessId }: { businessId: string }) {
       ) : (
         <div className="mt-4 space-y-3">
           {filtered.map((b) => {
-            const zoned = toZonedTime(new Date(b.startAt), tz);
-            const dateLabel = format(zoned, "yyyy-MM-dd");
-            const timeLabel = format(zoned, "HH:mm");
+            const dateLabel = formatInTimeZone(
+              new Date(b.startAt),
+              b.timezone,
+              "yyyy-MM-dd"
+            );
+            const timeLabel = formatInTimeZone(
+              new Date(b.startAt),
+              b.timezone,
+              "HH:mm"
+            );
 
             const isPending = b.status === "PENDING_PAYMENT";
             const isConfirmed = b.status === "CONFIRMED";

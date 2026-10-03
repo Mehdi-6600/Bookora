@@ -63,7 +63,10 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (error) {
-    console.error("GET /api/admin/subscriptions failed:", error);
+    console.error(
+      "GET /api/admin/subscriptions failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
     return NextResponse.json(
       { error: "خطا در دریافت درخواست‌ها" },
       { status: 500 }

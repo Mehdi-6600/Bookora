@@ -55,6 +55,9 @@
     "countryOther": "دول أخرى",
     "hintIR": "العملة: تومان - التقويم: هجري شمسي - دفع الاشتراك: بطاقة إلى بطاقة",
     "hintOther": "العملة: دولار - التقويم: ميلادي - دفع الاشتراك: Telegram Stars",
+    "timezoneLabel": "المنطقة الزمنية للنشاط",
+    "timezonePlaceholder": "مثال: Europe/Berlin",
+    "timezoneHelp": "أدخل منطقة زمنية بصيغة IANA؛ تُحسب ساعات العمل والحجوزات وفقاً لها.",
     "infoTitle": "معلومات النشاط التجاري",
     "changeCountry": "تغيير الدولة",
     "selectedCountry": "الدولة المختارة: {country}",
@@ -248,7 +251,8 @@
     "statusConfirmed": "مؤكد",
     "statusCancelled": "ملغى",
     "depositLabelShort": "العربون",
-    "receiptLabelShort": "المرجع"
+    "receiptLabelShort": "المرجع",
+    "reviewError": "فشلت مراجعة الدفع."
   },
   "subscription": {
     "title": "الاشتراك",

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { parseBusinessLocalDateTime } from "@/lib/booking/time";
 import {
   CalendarOff,
   Loader2,
@@ -45,6 +46,7 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
   const locale = useLocale();
 
   const [items, setItems] = useState<TimeOff[]>([]);
+  const [timezone, setTimezone] = useState("UTC");
   const [loading, setLoading] = useState(true);
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
@@ -60,7 +62,11 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
         { cache: "no-store" }
       );
       const data = await response.json();
-      if (response.ok) setItems(data.timeOffs);
+      if (!response.ok) throw new Error(data?.error || t("addError"));
+      setItems(Array.isArray(data.timeOffs) ? data.timeOffs : []);
+      setTimezone(typeof data.timezone === "string" ? data.timezone : "UTC");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("addError"));
     } finally {
       setLoading(false);
     }
@@ -76,6 +82,13 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
       setError(t("requiredError"));
       return;
     }
+    const start = parseBusinessLocalDateTime(startAt, timezone);
+    const end = parseBusinessLocalDateTime(endAt, timezone);
+    if (!start || !end || start >= end) {
+      setError(t("addError"));
+      return;
+    }
+
     try {
       setSaving(true);
       setError(null);
@@ -84,8 +97,8 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           businessId,
-          startAt: new Date(startAt).toISOString(),
-          endAt: new Date(endAt).toISOString(),
+          startAt: start.toISOString(),
+          endAt: end.toISOString(),
           reason: reason.trim() || null,
         }),
       });
@@ -103,8 +116,15 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
   }
 
   async function remove(id: string) {
-    await fetch(`/api/time-off/${id}`, { method: "DELETE" });
-    await load();
+    try {
+      setError(null);
+      const response = await fetch(`/api/time-off/${id}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || t("addError"));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("addError"));
+    }
   }
 
   return (
@@ -117,7 +137,7 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
         <div className="min-w-0">
           <h2 className={SECTION_TITLE}>{t("title")}</h2>
           <p className="mt-0.5 text-xs font-medium text-[#1A1F36]/60">
-            {t("subtitle")}
+            {t("subtitle")} <span dir="ltr">({timezone})</span>
           </p>
         </div>
       </div>
@@ -203,6 +223,7 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
         <div className="mt-4 space-y-3">
           {items.map((item) => {
             const startLabel = new Date(item.startAt).toLocaleString(locale, {
+              timeZone: timezone,
               year: "numeric",
               month: "short",
               day: "numeric",
@@ -210,6 +231,7 @@ export function TimeOffPanel({ businessId }: { businessId: string }) {
               minute: "2-digit",
             });
             const endLabel = new Date(item.endAt).toLocaleString(locale, {
+              timeZone: timezone,
               year: "numeric",
               month: "short",
               day: "numeric",

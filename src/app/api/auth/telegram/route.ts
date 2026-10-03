@@ -7,9 +7,10 @@ import { SESSION_COOKIE } from "@/lib/auth/session";
 import { cookies } from "next/headers";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
+import { adminTelegramIds, adminTelegramIdsConfigured } from "@/lib/env";
 
 const bodySchema = z.object({
-  initData: z.string().min(1),
+  initData: z.string().min(1).max(10_000),
 });
 
 const THIRTY_DAYS_SECONDS = 60 * 60 * 24 * 30;
@@ -46,14 +47,15 @@ export async function POST(req: NextRequest) {
   try {
     validated = validateInitData(parsed.data.initData);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json(
-      { error: "Unauthorized", reason: message },
-      { status: 401 }
+    console.warn(
+      "Rejected Telegram initData:",
+      err instanceof Error ? err.name : "UnknownError"
     );
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const tg = validated.user;
+  const isConfiguredAdmin = adminTelegramIds.includes(BigInt(tg.id));
 
   const user = await prisma.user.upsert({
     where: { telegramId: String(tg.id) },
@@ -62,6 +64,7 @@ export async function POST(req: NextRequest) {
       firstName: tg.first_name,
       lastName: tg.last_name ?? null,
       languageCode: tg.language_code ?? null,
+      ...(adminTelegramIdsConfigured ? { isAdmin: isConfiguredAdmin } : {}),
     },
     create: {
       telegramId: String(tg.id),
@@ -69,6 +72,7 @@ export async function POST(req: NextRequest) {
       firstName: tg.first_name,
       lastName: tg.last_name ?? null,
       languageCode: tg.language_code ?? null,
+      isAdmin: isConfiguredAdmin,
     },
     include: {
       businesses: {
@@ -87,9 +91,9 @@ export async function POST(req: NextRequest) {
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,
-    // sameSite: "lax" — نه "none" — برای جلوگیری از CSRF.
-    // Telegram Mini App در همان دامنه اجرا می‌شود، پس "lax" کافی است.
-    sameSite: "lax",
+    // Telegram Web Mini Apps may run in a cross-site iframe, where Lax cookies
+    // are omitted. State-changing APIs enforce an exact trusted Origin check.
+    sameSite: "none",
     maxAge: THIRTY_DAYS_SECONDS,
     path: "/",
   });

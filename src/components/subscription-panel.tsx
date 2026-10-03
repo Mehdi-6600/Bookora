@@ -192,7 +192,6 @@ export function SubscriptionPanel({
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : t("loadError");
-      console.error("[subscription] loadStatus failed:", text);
       setError(text);
     } finally {
       setLoading(false);
@@ -230,7 +229,6 @@ export function SubscriptionPanel({
       setPreferenceMessage(true);
     } catch (err) {
       const text = err instanceof Error ? err.message : t("loadError");
-      console.error("[subscription] updatePreference failed:", text);
       setPreference(previous);
       setError(text);
     } finally {
@@ -533,7 +531,7 @@ export function SubscriptionPanel({
 
                 <div className="mt-3 flex items-center gap-1.5 text-sm font-medium text-[#1A1F36]/70">
                   {effectiveMethod === "MANUAL" ? (
-                    <>
+                          <>
                       <CreditCard className="h-4 w-4" />
                       <span className="tabular font-bold text-[#1A1F36]">
                         {t("priceManual", {

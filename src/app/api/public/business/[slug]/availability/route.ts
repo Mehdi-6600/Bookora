@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fromZonedTime } from "date-fns-tz";
 import { prisma } from "@/lib/prisma";
 import { computeAvailableSlots } from "@/lib/availability";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
+import {
+  getBusinessDayBounds,
+  getBusinessDayOfWeek,
+  isValidDateOnly,
+  isWithinBookingWindow,
+} from "@/lib/booking/time";
+import { activeBookingOverlapWhere } from "@/lib/booking/schedule";
 
 export async function GET(
   req: NextRequest,
@@ -11,23 +17,24 @@ export async function GET(
 ) {
   try {
     const ip = getClientIp(req);
-
-    // نرخ سبک برای endpoint پرترافیک.
-    if (await isRateLimited("avail:" + ip, 60, 10 * 60 * 1000)) {
+    if (await isRateLimited(`avail:${ip}`, 60, 10 * 60 * 1000)) {
       return NextResponse.json(
         { error: "درخواست‌های زیاد. کمی صبر کنید." },
         { status: 429 }
       );
     }
-
     triggerRateLimitCleanup();
 
-    const resolved = await params;
-    const slug = resolved.slug;
+    const { slug } = await params;
     const serviceId = req.nextUrl.searchParams.get("serviceId");
     const date = req.nextUrl.searchParams.get("date");
 
-    if (!serviceId || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    if (
+      !serviceId ||
+      serviceId.length > 100 ||
+      !date ||
+      !isValidDateOnly(date)
+    ) {
       return NextResponse.json(
         { error: "پارامترها نامعتبرند." },
         { status: 400 }
@@ -35,7 +42,7 @@ export async function GET(
     }
 
     const business = await prisma.business.findFirst({
-      where: { slug: slug, status: "ACTIVE" },
+      where: { slug, status: "ACTIVE" },
       select: { id: true, timezone: true },
     });
 
@@ -46,12 +53,16 @@ export async function GET(
       );
     }
 
+    if (!isWithinBookingWindow(date, business.timezone)) {
+      return NextResponse.json(
+        { error: "این تاریخ خارج از بازه مجاز رزرو است." },
+        { status: 400 }
+      );
+    }
+
     const service = await prisma.service.findFirst({
       where: { id: serviceId, businessId: business.id, active: true },
-      select: {
-        durationMinutes: true,
-        slotIntervalMinutes: true,
-      },
+      select: { durationMinutes: true, slotIntervalMinutes: true },
     });
 
     if (!service) {
@@ -61,14 +72,10 @@ export async function GET(
       );
     }
 
-    const dayOfWeek = new Date(date + "T00:00:00Z").getUTCDay();
-
+    const dayOfWeek = getBusinessDayOfWeek(date);
     const workingHour = await prisma.workingHour.findUnique({
       where: {
-        businessId_dayOfWeek: {
-          businessId: business.id,
-          dayOfWeek: dayOfWeek,
-        },
+        businessId_dayOfWeek: { businessId: business.id, dayOfWeek },
       },
     });
 
@@ -76,29 +83,41 @@ export async function GET(
       return NextResponse.json({ slots: [] });
     }
 
-    const dayStart = fromZonedTime(date + "T00:00:00", business.timezone);
-    const dayEnd = fromZonedTime(date + "T23:59:59", business.timezone);
+    const { start: dayStart, endExclusive: dayEnd } = getBusinessDayBounds(
+      date,
+      business.timezone
+    );
+    const now = new Date();
 
-    const timeOffs = await prisma.timeOff.findMany({
-      where: {
-        businessId: business.id,
-        startAt: { lte: dayEnd },
-        endAt: { gte: dayStart },
-      },
-    });
-
-    const bookings = await prisma.booking.findMany({
-      where: {
-        businessId: business.id,
-        status: { not: "CANCELLED" },
-        startAt: { lte: dayEnd },
-        endAt: { gte: dayStart },
-      },
-    });
+    const [timeOffs, bookings] = await Promise.all([
+      prisma.timeOff.findMany({
+        where: {
+          businessId: business.id,
+          startAt: { lt: dayEnd },
+          endAt: { gt: dayStart },
+        },
+        select: { startAt: true, endAt: true },
+      }),
+      prisma.booking.findMany({
+        where: {
+          businessId: business.id,
+          startAt: { lt: dayEnd },
+          endAt: { gt: dayStart },
+          ...activeBookingOverlapWhere(now),
+        },
+        select: { startAt: true, endAt: true },
+      }),
+    ]);
 
     const busyRanges = [
-      ...timeOffs.map((t) => ({ start: t.startAt, end: t.endAt })),
-      ...bookings.map((b) => ({ start: b.startAt, end: b.endAt })),
+      ...timeOffs.map((timeOff) => ({
+        start: timeOff.startAt,
+        end: timeOff.endAt,
+      })),
+      ...bookings.map((booking) => ({
+        start: booking.startAt,
+        end: booking.endAt,
+      })),
     ];
 
     const slots = computeAvailableSlots({
@@ -110,19 +129,18 @@ export async function GET(
       breakEnd: workingHour.breakEnd,
       durationMinutes: service.durationMinutes,
       slotIntervalMinutes: service.slotIntervalMinutes,
-      busyRanges: busyRanges,
+      busyRanges,
     });
 
-    const now = Date.now();
-    const futureSlots = slots.filter((slot) => slot.getTime() > now);
-
     return NextResponse.json({
-      slots: futureSlots.map((slot) => slot.toISOString()),
+      slots: slots
+        .filter((slot) => slot.getTime() > now.getTime())
+        .map((slot) => slot.toISOString()),
     });
   } catch (error) {
     console.error(
       "GET /api/public/business/[slug]/availability failed:",
-      error
+      error instanceof Error ? error.name : "UnknownError"
     );
     return NextResponse.json(
       { error: "خطا در دریافت زمان‌های آزاد" },

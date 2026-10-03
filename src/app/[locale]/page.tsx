@@ -124,6 +124,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         body: JSON.stringify({
           name: businessName.trim(),
           description: businessDescription.trim() || null,
+          country: "IR",
         }),
       });
 
