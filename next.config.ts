@@ -3,6 +3,31 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
+const FRAME_ANCESTORS =
+  "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org;";
+
+const BASE_SECURITY_HEADERS = [
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=()",
+  },
+];
+
+const BASE_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://telegram.org",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' https://api.telegram.org",
+  FRAME_ANCESTORS,
+  "base-uri 'self'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join("; ");
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -18,52 +43,59 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        // این‌ها روی همه‌ی مسیرها امن هستند و هیچ تداخلی با Embed شدن در تلگرام ندارند.
         source: "/:path*",
+        headers: BASE_SECURITY_HEADERS,
+      },
+      {
+        source: "/((?!api|_next|_vercel|.*\\..*).*)",
         headers: [
-          { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-          ...(process.env.NODE_ENV === "production"
-            ? [
-                {
-                  key: "Strict-Transport-Security",
-                  value: "max-age=31536000",
-                },
-              ]
-            : []),
+          { key: "Content-Security-Policy", value: BASE_CSP },
         ],
       },
       {
-        // عمداً X-Frame-Options ست نشده چون Mini App باید داخل iframe تلگرام (Desktop/Web) باز شود.
-        // به‌جاش با CSP فقط به دامنه‌های خود تلگرام اجازه‌ی Embed داده می‌شود؛ بقیه‌ی سایت‌ها مسدودند.
         source: "/:locale/app",
         headers: [
-          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, max-age=0" },
           {
-            key: "Content-Security-Policy",
-            value: "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org;",
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, max-age=0",
           },
+          { key: "Content-Security-Policy", value: BASE_CSP },
         ],
       },
       {
         source: "/:locale/app/:path*",
         headers: [
-          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, max-age=0" },
           {
-            key: "Content-Security-Policy",
-            value: "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org;",
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, max-age=0",
           },
+          { key: "Content-Security-Policy", value: BASE_CSP },
         ],
       },
       {
         source: "/:locale/admin",
         headers: [
-          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, max-age=0" },
           {
-            key: "Content-Security-Policy",
-            value: "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org;",
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, max-age=0",
           },
+          { key: "Content-Security-Policy", value: BASE_CSP },
+        ],
+      },
+      {
+        source: "/:locale/admin/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, max-age=0",
+          },
+          { key: "Content-Security-Policy", value: BASE_CSP },
+        ],
+      },
+      {
+        source: "/:locale/book/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: BASE_CSP },
         ],
       },
     ];
