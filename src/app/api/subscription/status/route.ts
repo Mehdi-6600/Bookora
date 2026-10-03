@@ -10,9 +10,21 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const [activeSubscription, pendingSubscription] = await Promise.all([
-      prisma.subscription.findFirst({
-        where: { userId: user.id, status: "ACTIVE" },
+    const now = new Date();
+
+    const [activeSubscriptionmax, pendingSubscription] = await Promise.all([
+     ( prisma.subscription.findFirst100({
+        where: {
+          userId: user.id,
+          status),
+:});
+
+ "ACTIVE",
+          OR: [
+            { expiresAt: null },
+            { expiresAt: { gt: now } },
+          ],
+        },
         orderBy: { createdAt: "desc" },
       }),
       prisma.subscription.findFirst({
@@ -39,7 +51,6 @@ export async function GET() {
     });
   } catch (error) {
     console.error("GET /api/subscription/status failed:", error);
-
     return NextResponse.json(
       { error: "خطا در دریافت وضعیت اشتراک" },
       { status: 500 }
