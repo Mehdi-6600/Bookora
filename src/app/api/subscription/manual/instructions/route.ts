@@ -1,15 +1,25 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { MANUAL_PAYMENT_SETTING_KEYS } from "@/lib/admin-settings";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    if (await isRateLimited(`manual-instr:${user.id}`, 30, 10 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { status: 429 }
+      );
+    }
+
+    triggerRateLimitCleanup();
 
     const settings = await prisma.adminSetting.findMany({
       where: { key: { in: [...MANUAL_PAYMENT_SETTING_KEYS] } },
@@ -30,7 +40,6 @@ export async function GET() {
     });
   } catch (error) {
     console.error("GET /api/subscription/manual/instructions failed:", error);
-
     return NextResponse.json(
       { error: "خطا در دریافت اطلاعات پرداخت" },
       { status: 500 }
