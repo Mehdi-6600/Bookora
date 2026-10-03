@@ -9,7 +9,7 @@ import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
 
 const receiptSchema = z.object({
-  customerPhone: z.string().trim().min(3).max(30),
+  receiptToken: z.string().trim().min(10).max(100),
   transactionReference: z.string().trim().min(3).max(200),
 });
 
@@ -21,7 +21,6 @@ export async function POST(
     const { id } = await params;
     const ip = getClientIp(req);
 
-    // rate limit دو لایه: بر اساس IP و بر اساس bookingId.
     if (await isRateLimited(`receipt:ip:${ip}`, 20, 10 * 60 * 1000)) {
       return NextResponse.json(
         { error: "درخواست‌های زیاد. کمی صبر کنید." },
@@ -56,7 +55,7 @@ export async function POST(
     const booking = await prisma.booking.findFirst({
       where: {
         id,
-        customerPhone: parsed.data.customerPhone,
+        receiptToken: parsed.data.receiptToken,
       },
       include: {
         business: {
@@ -70,7 +69,7 @@ export async function POST(
 
     if (!booking) {
       return NextResponse.json(
-        { error: "رزرو پیدا نشد یا شماره تلفن اشتباه است." },
+        { error: "رزرو پیدا نشد یا اطلاعات نامعتبر است." },
         { status: 404 }
       );
     }
@@ -96,7 +95,6 @@ export async function POST(
       );
     }
 
-    // جلوگیری از overwrite شدن reference قبلی.
     if (payment.transactionReference) {
       return NextResponse.json(
         { error: "شماره تراکنش قبلاً ثبت شده است." },
