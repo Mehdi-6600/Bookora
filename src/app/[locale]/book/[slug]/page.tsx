@@ -131,6 +131,7 @@ export default function PublicBookingPage() {
   const [confirmedBookingId, setConfirmedBookingId] = useState<string | null>(
     null
   );
+  const [receiptToken, setReceiptToken] = useState<string | null>(null);
   const [depositDue, setDepositDue] = useState(0);
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethodInfo | null>(null);
@@ -237,6 +238,7 @@ export default function PublicBookingPage() {
       setConfirmedBookingId(data.booking.id);
       setDepositDue(Number(data.booking.depositDue) || 0);
       setPaymentMethod(data.paymentMethod);
+      setReceiptToken(data.booking.receiptToken || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("bookingError"));
     } finally {
@@ -245,7 +247,7 @@ export default function PublicBookingPage() {
   }
 
   async function submitReceipt() {
-    if (!confirmedBookingId || !receiptRef.trim()) {
+    if (!confirmedBookingId || !receiptToken || !receiptRef.trim()) {
       setError(t("receiptRequired"));
       return;
     }
@@ -260,7 +262,7 @@ export default function PublicBookingPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            customerPhone: customerPhone.trim(),
+            receiptToken: receiptToken,
             transactionReference: receiptRef.trim(),
           }),
         }
