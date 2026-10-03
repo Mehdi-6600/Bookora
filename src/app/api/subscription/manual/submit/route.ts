@@ -3,10 +3,14 @@ import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { isPlanCode } from "@/lib/subscription/plans";
-import { isPaymentPreference, resolvePaymentMethod } from "@/lib/subscription/payment-method";
+import {
+  isPaymentPreference,
+  resolvePaymentMethod,
+} from "@/lib/subscription/payment-method";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 
 const submitSchema = z.object({
-  businessId: z.string().min(1),
+  businessId: z.string().min(1).max(100),
   plan: z.string().refine(isPlanCode, "پلن نامعتبر است."),
   receiptReference: z.string().trim().min(3).max(200),
   note: z.string().trim().max(1000).nullable().optional(),
@@ -15,7 +19,18 @@ const submitSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (await isRateLimited(`manual-submit:${user.id}`, 3, 10 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { status: 429 }
+      );
+    }
+
+    triggerRateLimitCleanup();
 
     let body: unknown;
     try {
@@ -27,7 +42,10 @@ export async function POST(req: NextRequest) {
     const parsed = submitSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "اطلاعات ارسالی معتبر نیست.", details: parsed.error.flatten() },
+        {
+          error: "اطلاعات ارسالی معتبر نیست.",
+          details: parsed.error.flatten(),
+        },
         { status: 400 }
       );
     }
@@ -37,7 +55,10 @@ export async function POST(req: NextRequest) {
       select: { id: true, country: true },
     });
     if (!business) {
-      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
+      return NextResponse.json(
+        { error: "کسب‌وکار پیدا نشد." },
+        { status: 404 }
+      );
     }
 
     const userRecord = await prisma.user.findUnique({
@@ -45,7 +66,8 @@ export async function POST(req: NextRequest) {
       select: { paymentPreference: true },
     });
     const preference =
-      userRecord?.paymentPreference && isPaymentPreference(userRecord.paymentPreference)
+      userRecord?.paymentPreference &&
+      isPaymentPreference(userRecord.paymentPreference)
         ? userRecord.paymentPreference
         : "AUTO";
     const method = resolvePaymentMethod(preference, business.country);
@@ -54,6 +76,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "روش پرداخت شما روی Telegram Stars تنظیم شده است." },
         { status: 400 }
+      );
+    }
+
+    const existingPending = await prisma.subscription.findFirst({
+      where: { userId: user.id, status: "PENDING" },
+      select: { id: true },
+    });
+
+    if (existingPending) {
+      return NextResponse.json(
+        {
+          error:
+            "شما یک درخواست در انتظار تأیید دارید. لطفاً منتظر بمانید تا بررسی شود.",
+          code: "PENDING_EXISTS",
+        },
+        { status: 409 }
+      );
+    }
+
+    const existingRef = await prisma.subscription.findFirst({
+      where: {
+        receiptReference: parsed.data.receiptReference,
+        status: "PENDING",
+      },
+      select: { id: true },
+    });
+
+    if (existingRef) {
+      return NextResponse.json(
+        { error: "این کد پیگیری قبلاً ثبت شده است." },
+        { status: 409 }
       );
     }
 
@@ -70,11 +123,20 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(
-      { subscription: { id: subscription.id, plan: subscription.plan, status: subscription.status } },
+      {
+        subscription: {
+          id: subscription.id,
+          plan: subscription.plan,
+          status: subscription.status,
+        },
+      },
       { status: 201 }
     );
   } catch (error) {
     console.error("POST /api/subscription/manual/submit failed:", error);
-    return NextResponse.json({ error: "ثبت درخواست پرداخت ناموفق بود." }, { status: 500 });
+    return NextResponse.json(
+      { error: "ثبت درخواست number پرداخت ناموفق بود." },
+      { status: 500 }
+    );
   }
 }
