@@ -145,6 +145,7 @@ model Booking {
   currency        String    @default("EUR")
   paymentStatus   String    @default("PENDING")
   specialOfferId  String?
+  receiptToken    String?   @unique
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   cancelledAt     DateTime?
@@ -239,7 +240,7 @@ model Subscription {
   plan              String    @default("FREE")
   status            String    @default("ACTIVE")
   provider          String
-  providerPaymentId String?
+  providerPaymentId String?   @unique
   receiptReference  String?
   receiptNote       String?
   adminNote         String?
