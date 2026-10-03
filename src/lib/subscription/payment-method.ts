@@ -1,6 +1,8 @@
 export type PaymentPreference = "AUTO" | "MANUAL" | "STARS";
 
-export function isPaymentPreference(value: string): value is PaymentPreference {
+export function isPaymentPreference(
+  value: string
+): value is PaymentPreference {
   return value === "AUTO" || value === "MANUAL" || value === "STARS";
 }
 
