@@ -42,7 +42,6 @@ export async function GET() {
     });
   } catch (error) {
     console.error("GET /api/admin/settings failed:", error);
-
     return NextResponse.json(
       { error: "خطا در دریافت تنظیمات" },
       { status: 500 }
@@ -59,7 +58,6 @@ export async function PUT(req: NextRequest) {
     }
 
     let body: unknown;
-
     try {
       body = await req.json();
     } catch {
@@ -67,7 +65,6 @@ export async function PUT(req: NextRequest) {
     }
 
     const parsed = updateSchema.safeParse(body);
-
     if (!parsed.success) {
       return NextResponse.json(
         { error: "اطلاعات معتبر نیست." },
@@ -88,7 +85,6 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ saved: true });
   } catch (error) {
     console.error("PUT /api/admin/settings failed:", error);
-
     return NextResponse.json(
       { error: "ذخیره تنظیمات ناموفق بود." },
       { status: 500 }
