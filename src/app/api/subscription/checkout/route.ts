@@ -12,18 +12,26 @@ import {
   isPaymentPreference,
   resolvePaymentMethod,
 } from "@/lib/subscription/payment-method";
+import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 
 const checkoutSchema = z.object({
   plan: z.string().refine(isPlanCode, "پلن نامعتبر است."),
-  businessId: z.string().min(1),
-});
-
-export async function POST(req: NextRequest) {
+  businessId: z.string().min(1).export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Rate limit: 5 درخواست در دقیقه برای هر کاربر.
+    if (await isRateLimited(`checkout:${user.id}`, 5, 60 * 1000)) {
+      return NextResponse.json(
+        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { status: 429 }
+      );
+    }
+
+    triggerRateLimitCleanup();
 
     let body: unknown;
     try {
