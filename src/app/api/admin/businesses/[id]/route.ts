@@ -52,6 +52,7 @@ export async function GET(
           price: service.price.toString(),
           currency: service.currency,
           durationMinutes: service.durationMinutes,
+          slotIntervalMinutes: service.slotIntervalMinutes,
           active: service.active,
           depositType: service.depositType,
           depositValue: service.depositValue.toString(),
