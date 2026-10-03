@@ -10,7 +10,9 @@ const updateSchema = z.object({
 
 export async function GET() {
   const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const record = await prisma.user.findUnique({
     where: { id: user.id },
@@ -22,7 +24,9 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   let body: unknown;
   try {
@@ -33,7 +37,10 @@ export async function PUT(req: NextRequest) {
 
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "روش پرداخت نامعتبر است." }, { status: 400 });
+    return NextResponse.json(
+      { error: "روش پرداخت نامعتبر است." },
+      { status: 400 }
+    );
   }
 
   await prisma.user.update({
