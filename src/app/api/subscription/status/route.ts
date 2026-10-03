@@ -12,26 +12,25 @@ export async function GET() {
 
     const now = new Date();
 
-    const [activeSubscriptionmax, pendingSubscription] = await Promise.all([
-     ( prisma.subscription.findFirst100({
-        where: {
-          userId: user.id,
-          status),
-:});
+    const activeSubscription = await prisma.subscription.findFirst({
+      where: {
+        userId: user.id,
+        status: "ACTIVE",
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: now } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    });
 
- "ACTIVE",
-          OR: [
-            { expiresAt: null },
-            { expiresAt: { gt: now } },
-          ],
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.subscription.findFirst({
-        where: { userId: user.id, status: "PENDING" },
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
+    const pendingSubscription = await prisma.subscription.findFirst({
+      where: {
+        userId: user.id,
+        status: "PENDING",
+      },
+      orderBy: { createdAt: "desc" },
+    });
 
     return NextResponse.json({
       subscription: activeSubscription
