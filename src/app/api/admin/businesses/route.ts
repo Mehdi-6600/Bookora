@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 
@@ -25,9 +26,10 @@ export async function GET(req: NextRequest) {
 
     const status = parseStatus(req.nextUrl.searchParams.get("status"));
     const rawQ = req.nextUrl.searchParams.get("q");
-    const q = rawQ ? rawQ.trim() : "";
+    const q = rawQ ? rawQ.trim().slice(0, 100) : "";
 
-    const where: Record<string, unknown> = {};
+    const where: Prisma.BusinessWhereInput = {};
+
     if (status !== "ALL") {
       where.status = status;
     }
@@ -90,7 +92,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error("GET /api/admin/businesses failed:", error);
-
     return NextResponse.json(
       { error: "خطا در دریافت کسب‌وکارها" },
       { status: 500 }
