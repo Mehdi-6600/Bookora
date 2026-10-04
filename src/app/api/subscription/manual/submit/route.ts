@@ -16,6 +16,7 @@ import {
 import { normalizePaymentReference } from "@/lib/payment-reference";
 
 const referencePattern = /^[\p{L}\p{N}][\p{L}\p{N} .#/_-]*[\p{L}\p{N}]$/u;
+
 const submitSchema = z.object({
   businessId: z.string().min(1).max(100),
   plan: z.string().refine(isPlanCode, "پلن نامعتبر است."),
