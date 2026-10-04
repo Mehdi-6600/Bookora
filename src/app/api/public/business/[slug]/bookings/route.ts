@@ -94,6 +94,13 @@ function sameIdempotentRequest(
   );
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function responseForBooking(
   booking: {
     id: string;
@@ -460,30 +467,42 @@ export async function POST(
       transactionResult.business &&
       transactionResult.service
     ) {
-      const localTime = formatInTimeZone(
+      const businessTimezone = transactionResult.business.timezone;
+      const dateLabel = formatInTimeZone(
         startAt,
-        transactionResult.business.timezone,
-        "yyyy-MM-dd HH:mm"
+        businessTimezone,
+        "yyyy-MM-dd"
+      );
+      const timeLabel = formatInTimeZone(
+        startAt,
+        businessTimezone,
+        "HH:mm"
       );
       const priceLabel = formatPrice(
         transactionResult.booking.servicePrice.toString(),
         transactionResult.business.currency
       );
+
       const lines = [
-        "New booking at " + transactionResult.business.name,
-        "Service: " + transactionResult.service.name,
-        "Customer: " +
-          parsed.data.customerName +
-          " (" +
-          parsed.data.customerPhone +
-          ")",
-        "Time: " + localTime,
-        "Price: " + priceLabel,
+        "🎉 <b>رزرو جدید</b>",
+        "",
+        `🏪 <b>${escapeHtml(transactionResult.business.name)}</b>`,
+        "",
+        `✂️ سرویس: <b>${escapeHtml(transactionResult.service.name)}</b>`,
+        `👤 مشتری: <b>${escapeHtml(parsed.data.customerName)}</b>`,
+        `📞 تلفن: <code>${escapeHtml(parsed.data.customerPhone)}</code>`,
+        "",
+        `📅 تاریخ: <b>${escapeHtml(dateLabel)}</b>`,
+        `🕐 ساعت: <b>${escapeHtml(timeLabel)}</b>`,
+        `💰 مبلغ: <b>${escapeHtml(priceLabel)}</b>`,
+        "",
+        "✨ برای مشاهده‌ی جزئیات به بخش «رزروها» در Bookora مراجعه کنید.",
       ];
 
       void notifyUser(
         transactionResult.business.owner.telegramId,
-        lines.join("\n")
+        lines.join("\n"),
+        { parseMode: "HTML" }
       ).catch((err) => {
         console.error(
           "notifyUser failed (new booking):",
