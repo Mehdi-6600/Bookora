@@ -18,7 +18,6 @@ const THIRTY_DAYS_SECONDS = 60 * 60 * 24 * 30;
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
 
-  // حداکثر ۲۰ تلاش ورود در ۱۰ دقیقه از هر IP.
   if (await isRateLimited(`auth:${ip}`, 20, 10 * 60 * 1000)) {
     return NextResponse.json(
       { error: "درخواست‌های زیاد. کمی صبر کنید." },
@@ -91,9 +90,7 @@ export async function POST(req: NextRequest) {
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,
-    // Telegram Web Mini Apps may run in a cross-site iframe, where Lax cookies
-    // are omitted. State-changing APIs enforce an exact trusted Origin check.
-    sameSite: "none",
+    sameSite: "lax",
     maxAge: THIRTY_DAYS_SECONDS,
     path: "/",
   });
