@@ -133,14 +133,11 @@ export async function POST(req: NextRequest) {
       ? normalizeTimeZone(parsed.data.timezone)!
       : resolveTimezone(country);
 
-    // استفاده از advisory lock برای جلوگیری از race در free business limit.
-    // همچنین retry برای P2002 (unique constraint) در صورت collision slug.
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
         const business = await prisma.$transaction(async (tx) => {
-          // قفل اتمیک روی free-limit این کاربر.
           await tx.$queryRaw`
             SELECT pg_advisory_xact_lock(
               hashtext(${user.id}::text),
@@ -163,7 +160,6 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ساخت slug یکتا داخل transaction.
           const base = createBaseSlug(name);
           let slug = base;
           let counter = 2;
