@@ -1,490 +1,162 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { TelegramAuthGate } from "@/components/telegram/auth-gate";
+import { useTranslations } from "next-intl";
+import {
+  ArrowRight,
+  CalendarCheck,
+  CheckCircle2,
+  CreditCard,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Zap,
+} from "lucide-react";
+import { Link } from "@/i18n/navigation";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 
-type TelegramUser = {
-  id: string;
-  telegramId: string;
-  username: string | null;
-  firstName: string | null;
-  lastName: string | null;
-  languageCode: string | null;
-  isAdmin: boolean;
-};
+const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-6 shadow-soft";
 
-type Service = {
-  id: string;
-  name: string;
-  description: string | null;
-  price: string;
-  currency: string;
-  durationMinutes: number;
-  active: boolean;
-};
+const BTN_TELEGRAM =
+  "btn-elevated flex w-full items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-5 py-4 text-base font-bold text-white transition-transform active:scale-[0.98]";
 
-type Business = {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  services: Service[];
-  _count?: {
-    bookings: number;
-  };
-};
+const BTN_PANEL =
+  "flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 text-base font-bold text-[#1A1F36] shadow-soft transition-transform active:scale-[0.98]";
 
-function Dashboard({ user }: { user: TelegramUser }) {
-  const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [selectedBusiness, setSelectedBusiness] =
-    useState<Business | null>(null);
+const FEATURE_TILE =
+  "flex items-start gap-3 rounded-2xl bg-white p-4 shadow-soft";
 
-  const [loading, setLoading] = useState(true);
-  const [savingBusiness, setSavingBusiness] = useState(false);
-  const [savingService, setSavingService] = useState(false);
+const FEATURE_ICON =
+  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#4F5FE8]/10";
 
-  const [businessName, setBusinessName] = useState("");
-  const [businessDescription, setBusinessDescription] = useState("");
+const FEATURE_TITLE = "text-sm font-bold text-[#1A1F36]";
 
-  const [serviceName, setServiceName] = useState("");
-  const [serviceDescription, setServiceDescription] = useState("");
-  const [servicePrice, setServicePrice] = useState("");
-  const [serviceDuration, setServiceDuration] = useState("60");
+const FEATURE_DESC = "mt-0.5 text-xs font-medium text-[#1A1F36]/60";
 
-  const [message, setMessage] = useState<string | null>(null);
+export default function LandingPage() {
+  const t = useTranslations("home");
 
-  async function loadBusinesses() {
-    try {
-      setLoading(true);
-      setMessage(null);
+  const txtTitle = t("title");
+  const txtSubtitle = t("subtitle");
+  const txtGetStarted = t("getStarted");
+  const txtLearnMore = t("learnMore");
+  const txtFeature1Title = t("feature1Title");
+  const txtFeature1Desc = t("feature1Desc");
+  const txtFeature2Title = t("feature2Title");
+  const txtFeature2Desc = t("feature2Desc");
+  const txtFeature3Title = t("feature3Title");
+  const txtFeature3Desc = t("feature3Desc");
+  const txtOpenTelegram = t("openInTelegram");
+  const txtOpenPanel = t("openPanel");
+  const txtForBusiness = t("forBusiness");
 
-      const response = await fetch("/api/business", {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.error || "خطا در دریافت کسب‌وکارها"
-        );
-      }
-
-      const list: Business[] = data.businesses || [];
-
-      setBusinesses(list);
-
-      if (list.length > 0) {
-        setSelectedBusiness((current) => {
-          if (!current) {
-            return list[0];
-          }
-
-          return (
-            list.find((item) => item.id === current.id) ||
-            list[0]
-          );
-        });
-      } else {
-        setSelectedBusiness(null);
-      }
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "خطا در دریافت اطلاعات"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadBusinesses();
-  }, []);
-
-  async function createBusiness(event: React.FormEvent) {
-    event.preventDefault();
-
-    if (!businessName.trim()) {
-      setMessage("نام کسب‌وکار را وارد کنید.");
-      return;
-    }
-
-    try {
-      setSavingBusiness(true);
-      setMessage(null);
-
-      const response = await fetch("/api/business", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: businessName.trim(),
-          description: businessDescription.trim() || null,
-          country: "IR",
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.error || "ساخت کسب‌وکار ناموفق بود."
-        );
-      }
-
-      setBusinessName("");
-      setBusinessDescription("");
-
-      await loadBusinesses();
-
-      setMessage("کسب‌وکار با موفقیت ساخته شد.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "خطا در ساخت کسب‌وکار"
-      );
-    } finally {
-      setSavingBusiness(false);
-    }
-  }
-
-  async function createService(event: React.FormEvent) {
-    event.preventDefault();
-
-    if (!selectedBusiness) {
-      setMessage("ابتدا یک کسب‌وکار بسازید.");
-      return;
-    }
-
-    if (!serviceName.trim()) {
-      setMessage("نام سرویس را وارد کنید.");
-      return;
-    }
-
-    const price = Number(servicePrice);
-    const durationMinutes = Number(serviceDuration);
-
-    if (!Number.isFinite(price) || price < 0) {
-      setMessage("قیمت سرویس معتبر نیست.");
-      return;
-    }
-
-    if (
-      !Number.isInteger(durationMinutes) ||
-      durationMinutes <= 0
-    ) {
-      setMessage("مدت سرویس معتبر نیست.");
-      return;
-    }
-
-    try {
-      setSavingService(true);
-      setMessage(null);
-
-      const response = await fetch("/api/services", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          businessId: selectedBusiness.id,
-          name: serviceName.trim(),
-          description: serviceDescription.trim() || null,
-          price,
-          durationMinutes,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.error || "ساخت سرویس ناموفق بود."
-        );
-      }
-
-      setServiceName("");
-      setServiceDescription("");
-      setServicePrice("");
-      setServiceDuration("60");
-
-      await loadBusinesses();
-
-      setMessage("سرویس با موفقیت اضافه شد.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "خطا در ساخت سرویس"
-      );
-    } finally {
-      setSavingService(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-sm text-muted-foreground">
-          در حال بارگذاری...
-        </div>
-      </div>
-    );
-  }
+  const telegramUrl = "https://t.me/Bookora_App_bot";
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 py-6">
-      <div className="rounded-2xl border bg-card p-5 shadow-sm">
-        <h1 className="text-2xl font-bold">
-          سلام {user.firstName || "دوست"} 👋
-        </h1>
-
-        <p className="mt-2 text-sm text-muted-foreground">
-          مدیریت کسب‌وکار و رزروهای Bookora
-        </p>
+    <main className="mx-auto w-full max-w-md space-y-5 px-4 py-6">
+      {/* Top bar with locale switcher */}
+      <div className="flex justify-end">
+        <LocaleSwitcher />
       </div>
 
-      {message && (
-        <div className="rounded-xl border bg-card p-4 text-sm">
-          {message}
-        </div>
-      )}
+      {/* Hero */}
+      <section className={CARD_MAIN}>
+        <div className="flex flex-col items-center text-center">
+          <span className="flex h-20 w-20 items-center justify-center rounded-3xl bg-white shadow-soft">
+            <Sparkles className="h-10 w-10 text-[#4F5FE8]" />
+          </span>
 
-      {businesses.length === 0 ? (
-        <form
-          onSubmit={createBusiness}
-          className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm"
-        >
-          <div>
-            <h2 className="text-xl font-bold">
-              اولین کسب‌وکارت را بساز
-            </h2>
+          <h1 className="mt-5 text-3xl font-bold tracking-tight text-[#1A1F36]">
+            {txtTitle}
+          </h1>
 
-            <p className="mt-1 text-sm text-muted-foreground">
-              برای شروع فقط نام کسب‌وکار کافی است.
-            </p>
-          </div>
+          <p className="mt-2 max-w-xs text-sm font-medium leading-7 text-[#1A1F36]/70">
+            {txtSubtitle}
+          </p>
 
-          <input
-            value={businessName}
-            onChange={(event) =>
-              setBusinessName(event.target.value)
-            }
-            placeholder="مثلاً Mehdi Barber"
-            className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-          />
-
-          <textarea
-            value={businessDescription}
-            onChange={(event) =>
-              setBusinessDescription(event.target.value)
-            }
-            placeholder="توضیح کوتاه"
-            className="min-h-24 w-full rounded-xl border bg-background px-4 py-3 outline-none"
-          />
-
-          <button
-            type="submit"
-            disabled={savingBusiness}
-            className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
+          <a
+            href={telegramUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={BTN_TELEGRAM + " mt-6"}
           >
-            {savingBusiness
-              ? "در حال ساخت..."
-              : "ساخت کسب‌وکار"}
-          </button>
-        </form>
-      ) : (
-        <>
-          <div className="rounded-2xl border bg-card p-5 shadow-sm">
-            <label className="mb-2 block text-sm font-medium">
-              کسب‌وکار
-            </label>
+            <Send className="h-5 w-5" />
+            {txtOpenTelegram}
+            <ArrowRight className="h-4 w-4" />
+          </a>
 
-            <select
-              value={selectedBusiness?.id || ""}
-              onChange={(event) => {
-                const business = businesses.find(
-                  (item) => item.id === event.target.value
-                );
+          <Link href="/app" className={BTN_PANEL + " mt-3"}>
+            {txtOpenPanel}
+          </Link>
+        </div>
+      </section>
 
-                setSelectedBusiness(business || null);
-              }}
-              className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-            >
-              {businesses.map((business) => (
-                <option
-                  key={business.id}
-                  value={business.id}
-                >
-                  {business.name}
-                </option>
-              ))}
-            </select>
+      {/* Features */}
+      <section className="space-y-3">
+        <div className={FEATURE_TILE}>
+          <span className={FEATURE_ICON}>
+            <CalendarCheck className="h-5 w-5 text-[#4F5FE8]" />
+          </span>
+          <div className="min-w-0">
+            <h2 className={FEATURE_TITLE}>{txtFeature1Title}</h2>
+            <p className={FEATURE_DESC}>{txtFeature1Desc}</p>
           </div>
+        </div>
 
-          {selectedBusiness && (
-            <>
-              <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                <h2 className="text-xl font-bold">
-                  {selectedBusiness.name}
-                </h2>
+        <div className={FEATURE_TILE}>
+          <span className={FEATURE_ICON}>
+            <Zap className="h-5 w-5 text-[#4F5FE8]" />
+          </span>
+          <div className="min-w-0">
+            <h2 className={FEATURE_TITLE}>{txtFeature2Title}</h2>
+            <p className={FEATURE_DESC}>{txtFeature2Desc}</p>
+          </div>
+        </div>
 
-                {selectedBusiness.description && (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {selectedBusiness.description}
-                  </p>
-                )}
+        <div className={FEATURE_TILE}>
+          <span className={FEATURE_ICON}>
+            <ShieldCheck className="h-5 w-5 text-[#4F5FE8]" />
+          </span>
+          <div className="min-w-0">
+            <h2 className={FEATURE_TITLE}>{txtFeature3Title}</h2>
+            <p className={FEATURE_DESC}>{txtFeature3Desc}</p>
+          </div>
+        </div>
+      </section>
 
-                <div className="mt-4 rounded-xl bg-muted p-4">
-                  <p className="text-xs text-muted-foreground">
-                    لینک رزرو عمومی
-                  </p>
-
-                  <a
-                    href={`/book/${selectedBusiness.slug}`}
-                    className="mt-1 block break-all text-sm font-medium underline"
-                  >
-                    {typeof window !== "undefined"
-                      ? `${window.location.origin}/book/${selectedBusiness.slug}`
-                      : `/book/${selectedBusiness.slug}`}
-                  </a>
-                </div>
-              </div>
-
-              <form
-                onSubmit={createService}
-                className="space-y-4 rounded-2xl border bg-card p-5 shadow-sm"
-              >
-                <div>
-                  <h2 className="text-xl font-bold">
-                    افزودن سرویس
-                  </h2>
-
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    سرویس‌هایی که مشتری می‌تواند رزرو کند.
-                  </p>
-                </div>
-
-                <input
-                  value={serviceName}
-                  onChange={(event) =>
-                    setServiceName(event.target.value)
-                  }
-                  placeholder="مثلاً Haircut"
-                  className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                />
-
-                <textarea
-                  value={serviceDescription}
-                  onChange={(event) =>
-                    setServiceDescription(event.target.value)
-                  }
-                  placeholder="توضیح سرویس"
-                  className="min-h-20 w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                />
-
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    value={servicePrice}
-                    onChange={(event) =>
-                      setServicePrice(event.target.value)
-                    }
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="قیمت"
-                    className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                  />
-
-                  <input
-                    value={serviceDuration}
-                    onChange={(event) =>
-                      setServiceDuration(event.target.value)
-                    }
-                    type="number"
-                    min="1"
-                    placeholder="مدت دقیقه"
-                    className="w-full rounded-xl border bg-background px-4 py-3 outline-none"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={savingService}
-                  className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50"
-                >
-                  {savingService
-                    ? "در حال افزودن..."
-                    : "افزودن سرویس"}
-                </button>
-              </form>
-
-              <div className="rounded-2xl border bg-card p-5 shadow-sm">
-                <h2 className="text-xl font-bold">
-                  سرویس‌ها
-                </h2>
-
-                {selectedBusiness.services.length === 0 ? (
-                  <p className="mt-4 text-sm text-muted-foreground">
-                    هنوز سرویسی اضافه نشده است.
-                  </p>
-                ) : (
-                  <div className="mt-4 space-y-3">
-                    {selectedBusiness.services.map(
-                      (service) => (
-                        <div
-                          key={service.id}
-                          className="rounded-xl border p-4"
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <div>
-                              <h3 className="font-semibold">
-                                {service.name}
-                              </h3>
-
-                              {service.description && (
-                                <p className="mt-1 text-sm text-muted-foreground">
-                                  {service.description}
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="text-left text-sm">
-                              <div className="font-semibold">
-                                {service.price}{" "}
-                                {service.currency}
-                              </div>
-
-                              <div className="text-muted-foreground">
-                                {service.durationMinutes} دقیقه
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    )}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-export default function MiniAppPage() {
-  return (
-    <main className="min-h-screen px-4">
-      <TelegramAuthGate>
-        {(user) => <Dashboard user={user} />}
-      </TelegramAuthGate>
+      {/* For businesses */}
+      <section className={CARD_MAIN}>
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft">
+            <CreditCard className="h-5 w-5 text-[#4F5FE8]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-bold text-[#1A1F36]">
+              {txtForBusiness}
+            </h2>
+            <ul className="mt-3 space-y-2 text-sm font-medium text-[#1A1F36]/80">
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#34C759]" />
+                {txtFeature1Title}
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#34C759]" />
+                {txtFeature2Title}
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#34C759]" />
+                {txtFeature3Title}
+              </li>
+            </ul>
+            <Link
+              href="/app"
+              className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-[#4F5FE8]"
+            >
+              {txtGetStarted}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
