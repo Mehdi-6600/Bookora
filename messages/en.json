@@ -17,9 +17,23 @@
   },
   "home": {
     "title": "Bookora",
-    "subtitle": "Online booking for small service businesses",
+    "subtitle": "Online booking for small service businesses. Simple, fast, and intelligent.",
     "getStarted": "Get started",
-    "learnMore": "Learn more"
+    "learnMore": "Learn more",
+    "openInTelegram": "Open in Telegram",
+    "openPanel": "Business panel",
+    "forBusiness": "For businesses",
+    "feature1Title": "Bookings 24/7",
+    "feature1Desc": "Your customers can book any time, from any device.",
+    "feature2Title": "Easy management",
+    "feature2Desc": "Manage services, working hours, and bookings in one place.",
+    "feature3Title": "Secure payments",
+    "feature3Desc": "Deposits and payments are handled safely and verifiably."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "subtitle": "The page you are looking for does not exist or has been moved.",
+    "backHome": "Back to home"
   },
   "nav": {
     "dashboard": "Dashboard",
