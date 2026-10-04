@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import {
@@ -123,6 +123,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
     FIXED: tSvc(DEPOSIT_LABELS_KEYS.FIXED),
   };
 
+  const servicesSectionRef = useRef<HTMLElement | null>(null);
+
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selectedBusiness, setSelectedBusiness] =
     useState<Business | null>(null);
@@ -180,6 +182,13 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [linkCopied, setLinkCopied] = useState(false);
 
   const [message, setMessage] = useState<string | null>(null);
+
+  function restoreScrollPosition(scrollY: number) {
+    if (typeof window === "undefined") return;
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY, behavior: "auto" });
+    });
+  }
 
   async function loadAdminBusinesses() {
     try {
@@ -570,7 +579,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
       resetServiceForm();
       setShowServiceForm(false);
+
+      const scrollY = window.scrollY;
       await loadBusinesses();
+      restoreScrollPosition(scrollY);
+
       setMessage(tMsg("serviceCreated"));
     } catch (error) {
       setMessage(
@@ -672,7 +685,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
       }
 
       setEditingServiceId(null);
+
+      const scrollY = window.scrollY;
       await loadBusinesses();
+      restoreScrollPosition(scrollY);
+
       setMessage(tMsg("serviceEdited"));
     } catch (error) {
       setMessage(
@@ -708,7 +725,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
         throw new Error(data?.error || tMsg("serviceToggleError"));
       }
 
+      const scrollY = window.scrollY;
       await loadBusinesses();
+      restoreScrollPosition(scrollY);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : tMsg("serviceToggleError")
@@ -732,7 +751,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
       }
 
       setConfirmDeleteId(null);
+
+      const scrollY = window.scrollY;
       await loadBusinesses();
+      restoreScrollPosition(scrollY);
 
       setMessage(
         data.deactivated ? tMsg("serviceDeactivated") : tMsg("serviceDeleted")
@@ -1344,7 +1366,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
               {!isArchived && (
                 <>
-                  <section className={CARD_MAIN}>
+                  <section ref={servicesSectionRef} className={CARD_MAIN}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
                         <span className={SECTION_ICON}>
