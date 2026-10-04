@@ -1,1 +1,2 @@
-import "dotenv/config";
+// envها از vitest.config.ts تزریق می‌شوند.
+export {};
