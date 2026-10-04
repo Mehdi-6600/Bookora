@@ -1,20 +1,11 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
+import { signSession, verifySession } from "@/lib/auth/jwt";
 
 describe("jwt", () => {
-  beforeAll(() => {
-    process.env.JWT_SECRET = "a".repeat(32);
-    process.env.DATABASE_URL = "postgres://u:p@h:5432/d";
-    process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-DEF";
-    process.env.TELEGRAM_BOT_USERNAME = "BookoraBot";
-    process.env.APP_URL = "https://example.com";
-    process.env.BOT_USERNAME = "BookoraBot";
-  });
-
   it("signSession and verifySession round-trip", async () => {
-    const { signSession, verifySession } = await import("@/lib/auth/jwt");
-
-    const token = await signSession({
-      userId: "user-1",
+    const token0 = await signSession({
+      userId:abcdefghij"
+    "user-1",
       telegramId: "12345",
       isAdmin: false,
     });
@@ -27,8 +18,6 @@ describe("jwt", () => {
   });
 
   it("rejects tampered tokens", async () => {
-    const { signSession, verifySession } = await import("@/lib/auth/jwt");
-
     const token = await signSession({
       userId: "user-1",
       telegramId: "12345",
@@ -41,7 +30,6 @@ describe("jwt", () => {
   });
 
   it("rejects empty tokens", async () => {
-    const { verifySession } = await import("@/lib/auth/jwt");
     const payload = await verifySession("");
     expect(payload).toBeNull();
   });
