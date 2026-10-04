@@ -23,7 +23,7 @@ import {
 } from "@/lib/booking/time";
 
 const phonePattern = /^[0-9+\- ()]{6,20}$/;
-const receiptIdempotencySchema = z.string().uuid();
+const idempotencySchema = z.string().uuid();
 
 const createBookingSchema = z.object({
   serviceId: z.string().min(1).max(100),
@@ -33,7 +33,9 @@ const createBookingSchema = z.object({
     .trim()
     .min(1)
     .max(120)
-    .refine((value) => !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value)),
+    .refine(
+      (value) => !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value)
+    ),
   customerPhone: z
     .string()
     .trim()
@@ -156,7 +158,7 @@ export async function POST(
     const suppliedKey = req.headers.get("idempotency-key");
     let idempotencyKey: string = crypto.randomUUID();
     if (suppliedKey !== null) {
-      const keyResult = receiptIdempotencySchema.safeParse(suppliedKey);
+      const keyResult = idempotencySchema.safeParse(suppliedKey);
       if (!keyResult.success) {
         return NextResponse.json(
           { error: "شناسه درخواست معتبر نیست." },
@@ -200,7 +202,7 @@ export async function POST(
       await expireStalePendingBookings(tx, businessRef.id, now);
 
       const existingByKey = await tx.booking.findUnique({
-        where: { receiptToken: idempotencyKey },
+        where: { idempotencyKey: idempotencyKey },
         include: {
           payments: {
             where: { type: "DEPOSIT" },
@@ -386,8 +388,8 @@ export async function POST(
         configuredDepositCents > 0
           ? configuredDepositCents
           : paymentMethod
-            ? priceCents
-            : 0;
+          ? priceCents
+          : 0;
       const hasDepositPayment = paymentDueCents > 0;
       const price = new Prisma.Decimal(priceCents).div(100);
       const paymentDue = new Prisma.Decimal(paymentDueCents).div(100);
@@ -399,6 +401,10 @@ export async function POST(
           ? service.depositType
           : "FIXED"
         : "NONE";
+
+      const receiptToken = hasDepositPayment
+        ? crypto.randomUUID().replace(/-/g, "")
+        : null;
 
       const booking = await tx.booking.create({
         data: {
@@ -419,9 +425,8 @@ export async function POST(
           remainingAmount,
           currency: business.currency,
           paymentStatus: hasDepositPayment ? "PENDING" : "NOT_REQUIRED",
-          // This opaque UUID is the idempotency key; when payment is required it
-          // is also the bearer token accepted by the manual receipt endpoint.
-          receiptToken: idempotencyKey,
+          receiptToken: receiptToken,
+          idempotencyKey: idempotencyKey,
         },
       });
 
@@ -511,7 +516,10 @@ export async function POST(
     }
     if (error instanceof BookingExpiredError) {
       return NextResponse.json(
-        { error: "مهلت این رزرو به پایان رسیده است. لطفاً زمان دیگری انتخاب کنید." },
+        {
+          error:
+            "مهلت این رزرو به پایان رسیده است. لطفاً زمان دیگری انتخاب کنید.",
+        },
         { status: 409 }
       );
     }
@@ -538,7 +546,10 @@ export async function POST(
       error.code === "P2002"
     ) {
       return NextResponse.json(
-        { error: "این درخواست قبلاً پردازش شده است. زمان‌های آزاد را تازه‌سازی کنید." },
+        {
+          error:
+            "این درخواست قبلاً پردازش شده است. زمان‌های آزاد را تازه‌سازی کنید.",
+        },
         { status: 409 }
       );
     }
