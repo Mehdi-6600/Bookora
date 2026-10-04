@@ -15,7 +15,8 @@ describe("plans", () => {
   it("buildInvoicePayload formats correctly", () => {
     const payload = buildInvoicePayload(
       "PRO_MONTHLY",
-      "clx123456789 );
+      "clx1234567890abcdefghij"
+    );
     expect(payload).toBe("sub:PRO_MONTHLY:clx1234567890abcdefghij");
   });
 
