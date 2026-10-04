@@ -37,10 +37,10 @@ const createBookingSchema = z.object({
       (value) => !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value)
     ),
   customerPhone: z
-    یک .string()
+    .string()
     .trim()
-    .regex(phonePattern, کام "شماره تلفن معتبر نیست.")
-   پی .refine((value) => (value.match(/[0-9]/g) || []).length >= 6),
+    .regex(phonePattern, "phone")
+    .refine((value) => (value.match(/[0-9]/g) || []).length >= 6),
   customerEmail: z.string().trim().email().max(254).nullable().optional(),
 });
 
@@ -132,9 +132,9 @@ export async function POST(
     const { slug } = await params;
     const ip = getClientIp(req);
 
-    if (await isRateLimited(`booking:ip:${ip}`, 10, 10 * 60 * 1000)) {
+    if (await isRateLimited("booking:ip:" + ip, 10, 10 * 60 * 1000)) {
       return NextResponse.json(
-        { error: "درخواست‌های زیاد. کمی صبر کنید." },
+        { error: "too many requests" },
         { status: 429 }
       );
     }
@@ -150,7 +150,7 @@ export async function POST(
     const parsed = createBookingSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "اطلاعات رزرو معتبر نیست." },
+        { error: "invalid booking" },
         { status: 400 }
       );
     }
@@ -161,7 +161,7 @@ export async function POST(
       const keyResult = idempotencySchema.safeParse(suppliedKey);
       if (!keyResult.success) {
         return NextResponse.json(
-          { error: "شناسه درخواست معتبر نیست." },
+          { error: "invalid idempotency key" },
           { status: 400 }
         );
       }
@@ -175,7 +175,7 @@ export async function POST(
 
     if (!businessRef) {
       return NextResponse.json(
-        { error: "کسب‌وکار پیدا نشد." },
+        { error: "business not found" },
         { status: 404 }
       );
     }
@@ -183,13 +183,13 @@ export async function POST(
     const phoneDigits = parsed.data.customerPhone.replace(/\D/g, "");
     if (
       await isRateLimited(
-        `booking:phone:${businessRef.id}:${phoneDigits}`,
+        "booking:phone:" + businessRef.id + ":" + phoneDigits,
         5,
         10 * 60 * 1000
       )
     ) {
       return NextResponse.json(
-        { error: "برای این شماره درخواست‌های زیادی ثبت شده است." },
+        { error: "too many requests for this phone" },
         { status: 429 }
       );
     }
@@ -306,10 +306,9 @@ export async function POST(
         throw new InvalidBookingTimeError();
       }
 
-      const { start: dayStart, endExclusive: dayEnd } = getBusinessDayBounds(
-        localDate,
-        business.timezone
-      );
+      const bounds = getBusinessDayBounds(localDate, business.timezone);
+      const dayStart = bounds.start;
+      const dayEnd = bounds.endExclusive;
 
       const timeOffs = await tx.timeOff.findMany({
         where: {
@@ -414,7 +413,9 @@ export async function POST(
           customerPhone: parsed.data.customerPhone,
           customerEmail: parsed.data.customerEmail || null,
           startAt,
-          endAt: new Date(startAt.getTime() + service.durationMinutes * 60_000),
+          endAt: new Date(
+            startAt.getTime() + service.durationMinutes * 60_000
+          ),
           timezone: business.timezone,
           status: hasDepositPayment ? "PENDING_PAYMENT" : "CONFIRMED",
           servicePrice: price,
@@ -469,15 +470,15 @@ export async function POST(
         transactionResult.business.currency
       );
       const lines = [
-        "📅 رزرو جدید در " + transactionResult.business.name,
-        "سرویس: " + transactionResult.service.name,
-        "مشتری: " +
+        "New booking at " + transactionResult.business.name,
+        "Service: " + transactionResult.service.name,
+        "Customer: " +
           parsed.data.customerName +
           " (" +
           parsed.data.customerPhone +
           ")",
-        "زمان: " + localTime,
-        "مبلغ: " + priceLabel,
+        "Time: " + localTime,
+        "Price: " + priceLabel,
       ];
 
       void notifyUser(
@@ -504,40 +505,37 @@ export async function POST(
   } catch (error) {
     if (error instanceof SlotTakenError) {
       return NextResponse.json(
-        { error: "این زمان دیگر آزاد نیست، لطفاً زمان دیگری انتخاب کنید." },
+        { error: "slot taken" },
         { status: 409 }
       );
     }
     if (error instanceof InvalidBookingTimeError) {
       return NextResponse.json(
-        { error: "این زمان خارج از بازه مجاز یا ساعات کاری است." },
+        { error: "invalid booking time" },
         { status: 400 }
       );
     }
     if (error instanceof BookingExpiredError) {
       return NextResponse.json(
-        {
-          error:
-            "مهلت این رزرو به پایان رسیده است. لطفاً زمان دیگری انتخاب کنید.",
-        },
+        { error: "booking expired" },
         { status: 409 }
       );
     }
     if (error instanceof IdempotencyConflictError) {
       return NextResponse.json(
-        { error: "شناسه درخواست قبلاً برای رزرو دیگری استفاده شده است." },
+        { error: "idempotency key conflict" },
         { status: 409 }
       );
     }
     if (error instanceof BusinessUnavailableError) {
       return NextResponse.json(
-        { error: "کسب‌وکار یا روش پرداخت در دسترس نیست." },
+        { error: "business or payment method unavailable" },
         { status: 409 }
       );
     }
     if (error instanceof ServiceUnavailableError) {
       return NextResponse.json(
-        { error: "سرویس پیدا نشد یا دیگر فعال نیست." },
+        { error: "service unavailable" },
         { status: 404 }
       );
     }
@@ -546,10 +544,7 @@ export async function POST(
       error.code === "P2002"
     ) {
       return NextResponse.json(
-        {
-          error:
-            "این درخواست قبلاً پردازش شده است. زمان‌های آزاد را تازه‌سازی کنید.",
-        },
+        { error: "duplicate request" },
         { status: 409 }
       );
     }
@@ -559,7 +554,7 @@ export async function POST(
       error instanceof Error ? error.name : "UnknownError"
     );
     return NextResponse.json(
-      { error: "ثبت رزرو ناموفق بود." },
+      { error: "booking failed" },
       { status: 500 }
     );
   }
