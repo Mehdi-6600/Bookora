@@ -37,10 +37,10 @@ const createBookingSchema = z.object({
       (value) => !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value)
     ),
   customerPhone: z
-    .string()
+    یک .string()
     .trim()
-    .regex(phonePattern, "شماره تلفن معتبر نیست.")
-    .refine((value) => (value.match(/[0-9]/g) || []).length >= 6),
+    .regex(phonePattern, کام "شماره تلفن معتبر نیست.")
+   پی .refine((value) => (value.match(/[0-9]/g) || []).length >= 6),
   customerEmail: z.string().trim().email().max(254).nullable().optional(),
 });
 
