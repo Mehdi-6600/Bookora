@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import {
@@ -183,11 +189,17 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   const [message, setMessage] = useState<string | null>(null);
 
-  function restoreScrollPosition(scrollY: number) {
-    if (typeof window === "undefined") return;
-    window.requestAnimationFrame(() => {
-      window.scrollTo({ top: scrollY, behavior: "auto" });
-    });
+  const [pendingScroll, setPendingScroll] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (pendingScroll !== null) {
+      window.scrollTo({ top: pendingScroll, behavior: "auto" });
+      setPendingScroll(null);
+    }
+  }, [pendingScroll]);
+
+  function captureScroll() {
+    setPendingScroll(window.scrollY);
   }
 
   async function loadAdminBusinesses() {
@@ -580,9 +592,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
       resetServiceForm();
       setShowServiceForm(false);
 
-      const scrollY = window.scrollY;
+      captureScroll();
       await loadBusinesses();
-      restoreScrollPosition(scrollY);
 
       setMessage(tMsg("serviceCreated"));
     } catch (error) {
@@ -686,9 +697,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
       setEditingServiceId(null);
 
-      const scrollY = window.scrollY;
+      captureScroll();
       await loadBusinesses();
-      restoreScrollPosition(scrollY);
 
       setMessage(tMsg("serviceEdited"));
     } catch (error) {
@@ -725,9 +735,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
         throw new Error(data?.error || tMsg("serviceToggleError"));
       }
 
-      const scrollY = window.scrollY;
+      captureScroll();
       await loadBusinesses();
-      restoreScrollPosition(scrollY);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : tMsg("serviceToggleError")
@@ -752,9 +761,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
       setConfirmDeleteId(null);
 
-      const scrollY = window.scrollY;
+      captureScroll();
       await loadBusinesses();
-      restoreScrollPosition(scrollY);
 
       setMessage(
         data.deactivated ? tMsg("serviceDeactivated") : tMsg("serviceDeleted")
@@ -1404,10 +1412,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     ) : (
                       <div className="mt-4 space-y-3">
                         {selectedBusiness.services.map((service) => (
-                          <div
-                            key={service.id}
-                            className={CARD_INNER}
-                          >
+                          <div key={service.id} className={CARD_INNER}>
                             {editingServiceId === service.id ? (
                               <div className="space-y-3">
                                 <input
@@ -1416,7 +1421,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     setEditName(event.target.value)
                                   }
                                   disabled={adminView}
-                                  className={INPUT_BASE + " disabled:opacity-60"}
+                                  className={
+                                    INPUT_BASE + " disabled:opacity-60"
+                                  }
                                 />
 
                                 <textarea
@@ -1425,7 +1432,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     setEditDescription(event.target.value)
                                   }
                                   disabled={adminView}
-                                  className={INPUT_BASE + " min-h-16 disabled:opacity-60"}
+                                  className={
+                                    INPUT_BASE +
+                                    " min-h-16 disabled:opacity-60"
+                                  }
                                 />
 
                                 <div className="grid grid-cols-2 gap-2">
@@ -1448,7 +1458,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     type="number"
                                     min="1"
                                     disabled={adminView}
-                                    className={INPUT_BASE + " tabular disabled:opacity-60"}
+                                    className={
+                                      INPUT_BASE +
+                                      " tabular disabled:opacity-60"
+                                    }
                                   />
                                 </div>
 
@@ -1507,7 +1520,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                         type="number"
                                         min="0"
                                         step="0.01"
-                                        className={INPUT_BASE + " tabular mt-2"}
+                                        className={
+                                          INPUT_BASE + " tabular mt-2"
+                                        }
                                       />
                                     )}
                                   </div>
