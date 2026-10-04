@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import Image from "next/image";
 import {
   ArrowRight,
   CalendarCheck,
@@ -8,7 +9,6 @@ import {
   CreditCard,
   Send,
   ShieldCheck,
-  Sparkles,
   Zap,
 } from "lucide-react";
 import { Link } from "@/i18n/navigation";
@@ -32,13 +32,15 @@ const FEATURE_TITLE = "text-sm font-bold text-[#1A1F36]";
 
 const FEATURE_DESC = "mt-0.5 text-xs font-medium text-[#1A1F36]/60";
 
+const LOGO_SRC =
+  "/29A89A41-FBA4-4470-A19D-51E3677E2E0A.png";
+
 export default function LandingPage() {
   const t = useTranslations("home");
 
   const txtTitle = t("title");
   const txtSubtitle = t("subtitle");
   const txtGetStarted = t("getStarted");
-  const txtLearnMore = t("learnMore");
   const txtFeature1Title = t("feature1Title");
   const txtFeature1Desc = t("feature1Desc");
   const txtFeature2Title = t("feature2Title");
@@ -53,16 +55,21 @@ export default function LandingPage() {
 
   return (
     <main className="mx-auto w-full max-w-md space-y-5 px-4 py-6">
-      {/* Top bar with locale switcher */}
       <div className="flex justify-end">
         <LocaleSwitcher />
       </div>
 
-      {/* Hero */}
       <section className={CARD_MAIN}>
         <div className="flex flex-col items-center text-center">
-          <span className="flex h-20 w-20 items-center justify-center rounded-3xl bg-white shadow-soft">
-            <Sparkles className="h-10 w-10 text-[#4F5FE8]" />
+          <span className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-3xl bg-white shadow-soft">
+            <Image
+              src={LOGO_SRC}
+              alt={txtTitle}
+              width={112}
+              height={112}
+              priority
+              className="h-full w-full object-contain"
+            />
           </span>
 
           <h1 className="mt-5 text-3xl font-bold tracking-tight text-[#1A1F36]">
@@ -90,7 +97,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Features */}
       <section className="space-y-3">
         <div className={FEATURE_TILE}>
           <span className={FEATURE_ICON}>
@@ -123,7 +129,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* For businesses */}
       <section className={CARD_MAIN}>
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft">
