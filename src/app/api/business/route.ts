@@ -12,13 +12,13 @@ import { normalizeTimeZone } from "@/lib/booking/time";
 const createBusinessSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(1000).nullable().optional(),
-  country: z.string().refine(isCountryCode, "کشور معتبر نیست."),
+  country: z.string().refine(isCountryCode, "invalid country"),
   timezone: z
     .string()
     .trim()
     .min(1)
     .max(100)
-    .refine((value) => normalizeTimeZone(value) !== null, "منطقه زمانی معتبر نیست.")
+    .refine((value) => normalizeTimeZone(value) !== null, "invalid timezone")
     .optional(),
 });
 
@@ -86,7 +86,7 @@ export async function GET() {
       error instanceof Error ? error.name : "UnknownError"
     );
     return NextResponse.json(
-      { error: "خطا در دریافت کسب‌وکارها" },
+      { error: "failed to load businesses" },
       { status: 500 }
     );
   }
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
 
     if (await isRateLimited(`business-create:${user.id}`, 5, 60 * 60 * 1000)) {
       return NextResponse.json(
-        { error: "درخواست‌های زیاد. کمی بعد دوباره تلاش کنید." },
+        { error: "too many requests" },
         { status: 429 }
       );
     }
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         {
-          error: "اطلاعات کسب‌وکار معتبر نیست.",
+          error: "invalid business",
           details: parsed.error.flatten(),
         },
         { status: 400 }
@@ -138,11 +138,11 @@ export async function POST(req: NextRequest) {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
         const business = await prisma.$transaction(async (tx) => {
-          await tx.$queryRaw`
+          await tx.$queryRaw<Array<{ locked: string }>>`
             SELECT pg_advisory_xact_lock(
               hashtext(${user.id}::text),
               hashtext('business-limit'::text)
-            )
+            )::text AS locked
           `;
 
           const existingCount = await tx.business.count({
@@ -232,7 +232,7 @@ export async function POST(req: NextRequest) {
       lastError instanceof Error ? lastError.name : "UnknownError"
     );
     return NextResponse.json(
-      { error: "ساخت کسب‌وکار ناموفق بود." },
+      { error: "failed to create business" },
       { status: 500 }
     );
   } catch (error) {
@@ -241,7 +241,7 @@ export async function POST(req: NextRequest) {
       error instanceof Error ? error.name : "UnknownError"
     );
     return NextResponse.json(
-      { error: "ساخت کسب‌وکار ناموفق بود." },
+      { error: "failed to create business" },
       { status: 500 }
     );
   }
