@@ -16,7 +16,6 @@ export async function GET() {
       where: {
         userId: user.id,
         status: "ACTIVE",
-        startedAt: { lte: now },
         OR: [
           { expiresAt: null },
           { expiresAt: { gt: now } },
@@ -33,22 +32,25 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json({
-      subscription: activeSubscription
-        ? {
-            plan: activeSubscription.plan,
-            status: activeSubscription.status,
-            expiresAt: activeSubscription.expiresAt,
-          }
-        : null,
-      pendingSubscription: pendingSubscription
-        ? {
-            plan: pendingSubscription.plan,
-            status: pendingSubscription.status,
-            createdAt: pendingSubscription.createdAt,
-          }
-        : null,
-    });
+    return NextResponse.json(
+      {
+        subscription: activeSubscription
+          ? {
+              plan: activeSubscription.plan,
+              status: activeSubscription.status,
+              expiresAt: activeSubscription.expiresAt,
+            }
+          : null,
+        pendingSubscription: pendingSubscription
+          ? {
+              plan: pendingSubscription.plan,
+              status: pendingSubscription.status,
+              createdAt: pendingSubscription.createdAt,
+            }
+          : null,
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (error) {
     console.error(
       "GET /api/subscription/status failed:",
