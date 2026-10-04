@@ -146,6 +146,7 @@ model Booking {
   paymentStatus   String    @default("PENDING")
   specialOfferId  String?
   receiptToken    String?   @unique
+  idempotencyKey  String?   @unique
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   cancelledAt     DateTime?
