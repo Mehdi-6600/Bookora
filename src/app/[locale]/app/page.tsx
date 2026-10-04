@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
@@ -74,6 +75,22 @@ type Business = {
   };
 };
 
+const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-5 shadow-soft";
+const CARD_INNER = "rounded-2xl bg-white p-4 shadow-soft";
+const BTN_PRIMARY =
+  "btn-elevated flex w-full items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-4 py-3.5 text-sm font-bold text-white transition-transform active:scale-[0.98] disabled:opacity-50";
+const BTN_GHOST =
+  "flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-[#1A1F36] shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50";
+const BTN_ADD_SERVICE =
+  "btn-elevated flex w-full items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-4 py-3.5 text-sm font-bold text-white transition-transform active:scale-[0.98]";
+const INPUT_BASE =
+  "w-full rounded-2xl bg-white px-4 py-3 text-sm font-medium text-[#1A1F36] outline-none placeholder:text-[#1A1F36]/40 shadow-soft";
+const SECTION_ICON =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft";
+const SECTION_TITLE = "text-base font-bold text-[#1A1F36]";
+const LABEL_SMALL =
+  "mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-[#1A1F36]/60";
+
 function getBrowserTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -113,6 +130,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [loading, setLoading] = useState(true);
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [savingService, setSavingService] = useState(false);
+  const [showServiceForm, setShowServiceForm] = useState(false);
 
   const [createStep, setCreateStep] = useState<1 | 2>(1);
   const [businessName, setBusinessName] = useState("");
@@ -551,6 +569,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       }
 
       resetServiceForm();
+      setShowServiceForm(false);
       await loadBusinesses();
       setMessage(tMsg("serviceCreated"));
     } catch (error) {
@@ -787,6 +806,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
     ? selectedBusiness.services.filter((s) => s.active).length
     : 0;
 
+  const hasServices =
+    selectedBusiness && selectedBusiness.services.length > 0;
+
   const adminBannerText = tAdmin("adminViewBanner");
   const adminBackText = tAdmin("backToAdmin");
 
@@ -815,13 +837,13 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </div>
       )}
 
-      <header className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
+      <header className={CARD_MAIN}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">
+            <h1 className="truncate text-xl font-bold tracking-tight text-[#1A1F36] sm:text-2xl">
               {t("greeting", { name: user.firstName || t("friend") })}
             </h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
+            <p className="mt-1.5 text-sm font-medium text-[#1A1F36]/60">
               {t("subtitle")}
             </p>
           </div>
@@ -849,24 +871,24 @@ function Dashboard({ user }: { user: TelegramUser }) {
       )}
 
       {message && (
-        <div className="rounded-xl border border-border/60 bg-card p-3.5 text-sm shadow-soft">
+        <div className="rounded-2xl bg-white p-3.5 text-sm font-medium text-[#1A1F36] shadow-soft">
           {message}
         </div>
       )}
 
       {businesses.length === 0 && !adminView ? (
-        <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
+        <section className={CARD_MAIN}>
           {createStep === 1 ? (
             <>
               <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                  <Building2 className="h-4 w-4" />
+                <span className={SECTION_ICON}>
+                  <Building2 className="h-5 w-5 text-[#4F5FE8]" />
                 </span>
                 <div>
-                  <h2 className="text-lg font-semibold tracking-tight">
+                  <h2 className={SECTION_TITLE}>
                     {tWizard("countryQuestion")}
                   </h2>
-                  <p className="mt-0.5 text-sm text-muted-foreground">
+                  <p className="mt-0.5 text-xs font-medium text-[#1A1F36]/60">
                     {tWizard("countryHelp")}
                   </p>
                 </div>
@@ -884,14 +906,14 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       );
                       setCreateStep(2);
                     }}
-                    className="ring-focus rounded-xl border border-border/60 bg-background p-4 text-start transition-colors hover:border-primary/40 hover:bg-muted/40"
+                    className="ring-focus rounded-2xl bg-white p-4 text-start shadow-soft transition-colors hover:bg-white/90"
                   >
-                    <div className="font-semibold">
+                    <div className="font-bold text-[#1A1F36]">
                       {code === "IR"
                         ? tWizard("countryIR")
                         : tWizard("countryOther")}
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
+                    <div className="mt-1 text-xs font-medium text-[#1A1F36]/60">
                       {code === "IR"
                         ? tWizard("hintIR")
                         : tWizard("hintOther")}
@@ -903,19 +925,17 @@ function Dashboard({ user }: { user: TelegramUser }) {
           ) : (
             <form onSubmit={createBusiness} className="space-y-4">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold tracking-tight">
-                  {tWizard("infoTitle")}
-                </h2>
+                <h2 className={SECTION_TITLE}>{tWizard("infoTitle")}</h2>
                 <button
                   type="button"
                   onClick={() => setCreateStep(1)}
-                  className="ring-focus rounded-md px-2 py-1 text-xs text-muted-foreground underline-offset-4 hover:underline"
+                  className="ring-focus rounded-md px-2 py-1 text-xs font-medium text-[#1A1F36]/60 underline-offset-4 hover:underline"
                 >
                   {tWizard("changeCountry")}
                 </button>
               </div>
 
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm font-medium text-[#1A1F36]/70">
                 {tWizard("selectedCountry", {
                   country: businessCountry
                     ? businessCountry === "IR"
@@ -925,41 +945,43 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 })}
               </p>
 
-              <label className="block text-sm font-medium">
-                {tWizard("timezoneLabel")}
+              <div>
+                <label className={LABEL_SMALL}>
+                  {tWizard("timezoneLabel")}
+                </label>
                 <input
                   value={businessTimezone}
                   onChange={(event) => setBusinessTimezone(event.target.value)}
                   list="business-timezones-create"
                   placeholder={tWizard("timezonePlaceholder")}
                   autoComplete="off"
-                  className="ring-focus mt-1 w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                  className={INPUT_BASE}
                 />
-              </label>
-              <p className="text-xs text-muted-foreground">
-                {tWizard("timezoneHelp")}
-              </p>
-              <datalist id="business-timezones-create">
-                {[
-                  "UTC",
-                  "Asia/Tehran",
-                  "Asia/Dubai",
-                  "Asia/Tokyo",
-                  "Europe/London",
-                  "Europe/Berlin",
-                  "America/New_York",
-                  "America/Los_Angeles",
-                  "Australia/Sydney",
-                ].map((timezone) => (
-                  <option key={timezone} value={timezone} />
-                ))}
-              </datalist>
+                <p className="mt-1.5 text-xs font-medium text-[#1A1F36]/60">
+                  {tWizard("timezoneHelp")}
+                </p>
+                <datalist id="business-timezones-create">
+                  {[
+                    "UTC",
+                    "Asia/Tehran",
+                    "Asia/Dubai",
+                    "Asia/Tokyo",
+                    "Europe/London",
+                    "Europe/Berlin",
+                    "America/New_York",
+                    "America/Los_Angeles",
+                    "Australia/Sydney",
+                  ].map((timezone) => (
+                    <option key={timezone} value={timezone} />
+                  ))}
+                </datalist>
+              </div>
 
               <input
                 value={businessName}
                 onChange={(event) => setBusinessName(event.target.value)}
                 placeholder={tWizard("namePlaceholder")}
-                className="ring-focus w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                className={INPUT_BASE}
               />
 
               <textarea
@@ -968,13 +990,13 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   setBusinessDescription(event.target.value)
                 }
                 placeholder={tWizard("descPlaceholder")}
-                className="ring-focus min-h-24 w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                className={INPUT_BASE + " min-h-24"}
               />
 
               <button
                 type="submit"
                 disabled={savingBusiness}
-                className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                className={BTN_PRIMARY}
               >
                 {savingBusiness && (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -988,10 +1010,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </section>
       ) : (
         <>
-          <div className="rounded-2xl border border-border/60 bg-card p-4 shadow-soft">
-            <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {tBiz("selectLabel")}
-            </label>
+          <div className={CARD_INNER}>
+            <label className={LABEL_SMALL}>{tBiz("selectLabel")}</label>
 
             <div className="relative">
               <select
@@ -1005,8 +1025,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   setConfirmDeleteId(null);
                   setEditingBusiness(false);
                   setConfirmDeleteBusiness(false);
+                  setShowServiceForm(false);
                 }}
-                className="ring-focus w-full appearance-none rounded-xl border border-border/60 bg-background px-4 py-3 pe-10 text-sm font-medium outline-none"
+                className="ring-focus w-full appearance-none rounded-2xl bg-white px-4 py-3 pe-10 text-sm font-bold text-[#1A1F36] outline-none shadow-soft"
               >
                 {businesses.map((business) => (
                   <option key={business.id} value={business.id}>
@@ -1017,25 +1038,25 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   </option>
                 ))}
               </select>
-              <ChevronDown className="pointer-events-none absolute inset-y-0 end-3 my-auto h-4 w-4 text-muted-foreground" />
+              <ChevronDown className="pointer-events-none absolute inset-y-0 end-3 my-auto h-4 w-4 text-[#1A1F36]/40" />
             </div>
           </div>
 
           {selectedBusiness && (
             <>
-              <section className="overflow-hidden rounded-2xl border border-border/60 bg-card shadow-soft">
-                <div className="border-b border-border/60 bg-muted/30 p-5">
+              <section className="overflow-hidden rounded-3xl bg-[#B8D4F5] shadow-soft">
+                <div className="bg-white/40 p-5">
                   <div className="flex items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-background text-foreground shadow-sm">
-                      <Building2 className="h-5 w-5" />
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft">
+                      <Building2 className="h-5 w-5 text-[#4F5FE8]" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <h2 className="truncate text-lg font-semibold tracking-tight">
+                        <h2 className="truncate text-lg font-bold tracking-tight text-[#1A1F36]">
                           {selectedBusiness.name}
                         </h2>
                         {isArchived && (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#FCA311] px-2.5 py-1 text-[10px] font-bold text-white shadow-soft">
                             <ShieldAlert className="h-3 w-3" />
                             {tBiz("archivedTag")}
                           </span>
@@ -1043,16 +1064,16 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       </div>
 
                       {selectedBusiness.description && (
-                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                        <p className="mt-1 line-clamp-2 text-xs font-medium text-[#1A1F36]/70">
                           {selectedBusiness.description}
                         </p>
                       )}
 
-                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-[#1A1F36]/70">
                         <span>
                           {tBiz("countryLabel")}
                           {": "}
-                          <span className="font-medium text-foreground">
+                          <span className="font-bold text-[#1A1F36]">
                             {selectedBusinessCountry
                               ? selectedBusinessCountry === "IR"
                                 ? tWizard("countryIR")
@@ -1064,7 +1085,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         <span>
                           {tBiz("currencyLabel")}
                           {": "}
-                          <span className="font-medium text-foreground">
+                          <span className="font-bold text-[#1A1F36]">
                             {selectedBusiness.currency}
                           </span>
                         </span>
@@ -1073,34 +1094,34 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3">
-                      <Scissors className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0">
-                        <div className="tabular text-sm font-semibold leading-tight">
-                          {selectedBusiness.services.length}
-                        </div>
-                        <div className="truncate text-[11px] text-muted-foreground">
+                    <div className={CARD_INNER}>
+                      <div className="flex items-center gap-2 text-[#1A1F36]/60">
+                        <Scissors className="h-3.5 w-3.5" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide">
                           {tSvc("listTitle")}
-                        </div>
+                        </span>
+                      </div>
+                      <div className="tabular mt-1.5 text-xl font-bold text-[#1A1F36]">
+                        {selectedBusiness.services.length}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background p-3">
-                      <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0">
-                        <div className="tabular text-sm font-semibold leading-tight">
-                          {selectedBusiness._count?.bookings ?? 0}
-                        </div>
-                        <div className="truncate text-[11px] text-muted-foreground">
+                    <div className={CARD_INNER}>
+                      <div className="flex items-center gap-2 text-[#1A1F36]/60">
+                        <Users className="h-3.5 w-3.5" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide">
                           {tSvc("listTitle")}
-                        </div>
+                        </span>
+                      </div>
+                      <div className="tabular mt-1.5 text-xl font-bold text-[#1A1F36]">
+                        {selectedBusiness._count?.bookings ?? 0}
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {isArchived && (
-                  <div className="flex items-start gap-2 border-b border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-400">
-                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="flex items-start gap-2 bg-[#FCA311]/15 p-4 text-sm font-medium text-[#1A1F36]/80">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#FCA311]" />
                     <span>{tBiz("archivedBanner")}</span>
                   </div>
                 )}
@@ -1113,7 +1134,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         onChange={(event) =>
                           setEditBusinessName(event.target.value)
                         }
-                        className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                        className={INPUT_BASE}
                       />
 
                       <textarea
@@ -1121,38 +1142,39 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         onChange={(event) =>
                           setEditBusinessDescription(event.target.value)
                         }
-                        className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                        className={INPUT_BASE + " min-h-16"}
                       />
 
-                      <label className="block text-sm font-medium">
-                        {tWizard("timezoneLabel")}
+                      <div>
+                        <label className={LABEL_SMALL}>
+                          {tWizard("timezoneLabel")}
+                        </label>
                         <input
                           value={editBusinessTimezone}
-                          onChange={(event) => setEditBusinessTimezone(event.target.value)}
+                          onChange={(event) =>
+                            setEditBusinessTimezone(event.target.value)
+                          }
                           list="business-timezones-edit"
                           placeholder={tWizard("timezonePlaceholder")}
                           autoComplete="off"
-                          className="ring-focus mt-1 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                          className={INPUT_BASE}
                         />
-                      </label>
-                      <p className="text-xs text-muted-foreground">
-                        {tWizard("timezoneHelp")}
-                      </p>
-                      <datalist id="business-timezones-edit">
-                        {[
-                          "UTC",
-                          "Asia/Tehran",
-                          "Asia/Dubai",
-                          "Asia/Tokyo",
-                          "Europe/London",
-                          "Europe/Berlin",
-                          "America/New_York",
-                          "America/Los_Angeles",
-                          "Australia/Sydney",
-                        ].map((timezone) => (
-                          <option key={timezone} value={timezone} />
-                        ))}
-                      </datalist>
+                        <datalist id="business-timezones-edit">
+                          {[
+                            "UTC",
+                            "Asia/Tehran",
+                            "Asia/Dubai",
+                            "Asia/Tokyo",
+                            "Europe/London",
+                            "Europe/Berlin",
+                            "America/New_York",
+                            "America/Los_Angeles",
+                            "Australia/Sydney",
+                          ].map((timezone) => (
+                            <option key={timezone} value={timezone} />
+                          ))}
+                        </datalist>
+                      </div>
 
                       <div className="grid grid-cols-2 gap-2">
                         {(["IR", "OTHER"] as CountryCode[]).map((code) => (
@@ -1170,10 +1192,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                               }
                             }}
                             className={
-                              "ring-focus rounded-lg border px-3 py-2 text-sm font-medium transition-colors " +
+                              "ring-focus rounded-2xl px-4 py-3 text-sm font-bold transition-transform active:scale-[0.98] " +
                               (editBusinessCountry === code
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border/60 bg-background")
+                                ? "btn-selected"
+                                : "bg-white text-[#1A1F36] shadow-soft")
                             }
                           >
                             {code === "IR"
@@ -1190,10 +1212,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                             saveBusinessEdit(selectedBusiness.id)
                           }
                           disabled={savingBusinessEdit}
-                          className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                          className={BTN_PRIMARY}
                         >
                           {savingBusinessEdit && (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <Loader2 className="h-4 w-4 animate-spin" />
                           )}
                           {savingBusinessEdit
                             ? tSvc("saving")
@@ -1203,7 +1225,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         <button
                           type="button"
                           onClick={() => setEditingBusiness(false)}
-                          className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                          className={BTN_GHOST}
                         >
                           {tSvc("cancelButton")}
                         </button>
@@ -1211,13 +1233,13 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     </div>
                   ) : (
                     <>
-                      <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
-                        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <div className={CARD_INNER}>
+                        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-[#1A1F36]/60">
                           <LinkIcon className="h-3.5 w-3.5" />
                           {tBiz("bookingLinkLabel")}
                         </div>
 
-                        <p className="mt-2 break-all text-sm font-medium">
+                        <p className="mt-2 break-all text-sm font-bold text-[#1A1F36]">
                           {bookingUrl}
                         </p>
 
@@ -1225,16 +1247,16 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           <button
                             type="button"
                             onClick={() => copyBookingLink(bookingUrl)}
-                            className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                            className={BTN_GHOST}
                           >
                             {linkCopied ? (
                               <>
-                                <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <Check className="h-4 w-4 text-[#34C759]" />
                                 {tBiz("copied")}
                               </>
                             ) : (
                               <>
-                                <Copy className="h-3.5 w-3.5" />
+                                <Copy className="h-4 w-4" />
                                 {tBiz("copyLink")}
                               </>
                             )}
@@ -1244,9 +1266,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                             href={"/book/" + selectedBusiness.slug}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                            className={BTN_GHOST}
                           >
-                            <ExternalLink className="h-3.5 w-3.5" />
+                            <ExternalLink className="h-4 w-4" />
                             {tBiz("openPage")}
                           </a>
                         </div>
@@ -1261,10 +1283,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 reactivateBusiness(selectedBusiness)
                               }
                               disabled={reactivating}
-                              className="ring-focus col-span-2 flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                              className={BTN_PRIMARY + " col-span-2"}
                             >
                               {reactivating && (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <Loader2 className="h-4 w-4 animate-spin" />
                               )}
                               {reactivating
                                 ? tBiz("reactivating")
@@ -1277,9 +1299,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 onClick={() =>
                                   startEditBusiness(selectedBusiness)
                                 }
-                                className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                                className={BTN_GHOST}
                               >
-                                <Pencil className="h-3.5 w-3.5" />
+                                <Pencil className="h-4 w-4" />
                                 {tBiz("editButton")}
                               </button>
 
@@ -1290,10 +1312,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                     deleteBusiness(selectedBusiness.id)
                                   }
                                   disabled={deletingBusiness}
-                                  className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF4D5E] px-4 py-3 text-sm font-bold text-white shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50"
                                 >
                                   {deletingBusiness && (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                   )}
                                   {deletingBusiness
                                     ? tBiz("deleting")
@@ -1305,9 +1327,9 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   onClick={() =>
                                     setConfirmDeleteBusiness(true)
                                   }
-                                  className="ring-focus flex items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
+                                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-[#FF4D5E] shadow-soft transition-transform active:scale-[0.98]"
                                 >
-                                  <Trash2 className="h-3.5 w-3.5" />
+                                  <Trash2 className="h-4 w-4" />
                                   {tBiz("deleteButton")}
                                 </button>
                               )}
@@ -1322,33 +1344,354 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
               {!isArchived && (
                 <>
-                  {!adminView && (
-                    <form
-                      onSubmit={createService}
-                      className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft"
-                    >
+                  <section className={CARD_MAIN}>
+                    <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
-                        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                          <Plus className="h-4 w-4" />
+                        <span className={SECTION_ICON}>
+                          <Scissors className="h-5 w-5 text-[#4F5FE8]" />
                         </span>
                         <div>
-                          <h2 className="text-lg font-semibold tracking-tight">
-                            {tSvc("addTitle")}
+                          <h2 className={SECTION_TITLE}>
+                            {tSvc("listTitle")}
                           </h2>
-                          <p className="mt-0.5 text-sm text-muted-foreground">
-                            {tSvc("addDesc")}
-                          </p>
+                          {hasServices && (
+                            <p className="mt-0.5 text-xs font-medium text-[#1A1F36]/60">
+                              {activeServices} /{" "}
+                              {selectedBusiness.services.length}
+                            </p>
+                          )}
                         </div>
                       </div>
 
+                      {!adminView && !showServiceForm && hasServices && (
+                        <button
+                          type="button"
+                          onClick={() => setShowServiceForm(true)}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white shadow-soft transition-transform active:scale-95"
+                          aria-label={tSvc("addButton")}
+                        >
+                          <Plus className="h-5 w-5 text-[#4F5FE8]" />
+                        </button>
+                      )}
+                    </div>
+
+                    {selectedBusiness.services.length === 0 ? (
+                      <p className="mt-4 text-sm font-medium text-[#1A1F36]/60">
+                        {tSvc("empty")}
+                      </p>
+                    ) : (
                       <div className="mt-4 space-y-3">
+                        {selectedBusiness.services.map((service) => (
+                          <div
+                            key={service.id}
+                            className={CARD_INNER}
+                          >
+                            {editingServiceId === service.id ? (
+                              <div className="space-y-3">
+                                <input
+                                  value={editName}
+                                  onChange={(event) =>
+                                    setEditName(event.target.value)
+                                  }
+                                  disabled={adminView}
+                                  className={INPUT_BASE + " disabled:opacity-60"}
+                                />
+
+                                <textarea
+                                  value={editDescription}
+                                  onChange={(event) =>
+                                    setEditDescription(event.target.value)
+                                  }
+                                  disabled={adminView}
+                                  className={INPUT_BASE + " min-h-16 disabled:opacity-60"}
+                                />
+
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input
+                                    value={editPrice}
+                                    onChange={(event) =>
+                                      setEditPrice(event.target.value)
+                                    }
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    className={INPUT_BASE + " tabular"}
+                                  />
+
+                                  <input
+                                    value={editDuration}
+                                    onChange={(event) =>
+                                      setEditDuration(event.target.value)
+                                    }
+                                    type="number"
+                                    min="1"
+                                    disabled={adminView}
+                                    className={INPUT_BASE + " tabular disabled:opacity-60"}
+                                  />
+                                </div>
+
+                                {!adminView && (
+                                  <input
+                                    value={editSlotInterval}
+                                    onChange={(event) =>
+                                      setEditSlotInterval(event.target.value)
+                                    }
+                                    type="number"
+                                    min="5"
+                                    step="5"
+                                    placeholder={tSvc(
+                                      "slotIntervalPlaceholder"
+                                    )}
+                                    className={INPUT_BASE + " tabular"}
+                                  />
+                                )}
+
+                                {!adminView && (
+                                  <div>
+                                    <div className="grid grid-cols-3 gap-2">
+                                      {(
+                                        [
+                                          "NONE",
+                                          "PERCENTAGE",
+                                          "FIXED",
+                                        ] as const
+                                      ).map((type) => (
+                                        <button
+                                          key={type}
+                                          type="button"
+                                          onClick={() =>
+                                            setEditDepositType(type)
+                                          }
+                                          className={
+                                            "ring-focus rounded-2xl px-2 py-2.5 text-xs font-bold transition-transform active:scale-[0.98] " +
+                                            (editDepositType === type
+                                              ? "btn-selected"
+                                              : "bg-white text-[#1A1F36] shadow-soft")
+                                          }
+                                        >
+                                          {depositLabels[type]}
+                                        </button>
+                                      ))}
+                                    </div>
+
+                                    {editDepositType !== "NONE" && (
+                                      <input
+                                        value={editDepositValue}
+                                        onChange={(event) =>
+                                          setEditDepositValue(
+                                            event.target.value
+                                          )
+                                        }
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        className={INPUT_BASE + " tabular mt-2"}
+                                      />
+                                    )}
+                                  </div>
+                                )}
+
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveEdit(service.id)}
+                                    disabled={savingEdit}
+                                    className={BTN_PRIMARY}
+                                  >
+                                    {savingEdit && (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    )}
+                                    {savingEdit
+                                      ? tSvc("saving")
+                                      : tSvc("saveButton")}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={cancelEdit}
+                                    className={BTN_GHOST}
+                                  >
+                                    {tSvc("cancelButton")}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <h3 className="font-bold text-[#1A1F36]">
+                                        {service.name}
+                                      </h3>
+                                      <span
+                                        className={
+                                          "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold shadow-soft " +
+                                          (service.active
+                                            ? "bg-[#34C759] text-white"
+                                            : "bg-[#1A1F36]/15 text-[#1A1F36]/70")
+                                        }
+                                      >
+                                        <span
+                                          className={
+                                            "h-1.5 w-1.5 rounded-full " +
+                                            (service.active
+                                              ? "bg-white"
+                                              : "bg-[#1A1F36]/60")
+                                          }
+                                        />
+                                        {service.active
+                                          ? tSvc("activate")
+                                          : tSvc("inactiveTag")}
+                                      </span>
+                                    </div>
+
+                                    {service.description && (
+                                      <p className="mt-1 line-clamp-2 text-xs font-medium text-[#1A1F36]/60">
+                                        {service.description}
+                                      </p>
+                                    )}
+
+                                    {service.depositType !== "NONE" && (
+                                      <p className="mt-1 text-xs font-bold text-[#4F5FE8]">
+                                        {tSvc("depositInfo", {
+                                          type: depositLabels[
+                                            service.depositType
+                                          ],
+                                          value:
+                                            service.depositType ===
+                                            "PERCENTAGE"
+                                              ? service.depositValue + "%"
+                                              : formatPrice(
+                                                  service.depositValue,
+                                                  service.currency
+                                                ),
+                                        })}
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  <div className="shrink-0 text-end text-sm">
+                                    <div className="tabular font-bold text-[#1A1F36]">
+                                      {formatPrice(
+                                        service.price,
+                                        service.currency
+                                      )}
+                                    </div>
+                                    <div className="mt-0.5 flex items-center justify-end gap-1 text-xs font-medium text-[#1A1F36]/60">
+                                      <Clock className="h-3 w-3" />
+                                      {tSvc("minutes", {
+                                        count: service.durationMinutes,
+                                      })}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {adminView ? (
+                                  <div className="mt-3 grid grid-cols-1 gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => startEdit(service)}
+                                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#4F5FE8]/30 bg-[#4F5FE8]/5 px-4 py-3 text-sm font-bold text-[#4F5FE8] transition-transform active:scale-[0.98]"
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                      {tSvc("editButton")}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 grid grid-cols-3 gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => startEdit(service)}
+                                      className={BTN_GHOST}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                      {tSvc("editButton")}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleActive(service)}
+                                      className={BTN_GHOST}
+                                    >
+                                      <Power className="h-4 w-4" />
+                                      {service.active
+                                        ? tSvc("deactivate")
+                                        : tSvc("activate")}
+                                    </button>
+
+                                    {confirmDeleteId === service.id ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          deleteService(service.id)
+                                        }
+                                        disabled={
+                                          deletingId === service.id
+                                        }
+                                        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF4D5E] px-4 py-3 text-sm font-bold text-white shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50"
+                                      >
+                                        {deletingId === service.id ? (
+                                          <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <Check className="h-4 w-4" />
+                                        )}
+                                        {tSvc("confirmDelete")}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setConfirmDeleteId(service.id)
+                                        }
+                                        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-[#FF4D5E] shadow-soft transition-transform active:scale-[0.98]"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                        {tSvc("deleteButton")}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {!adminView && showServiceForm && (
+                      <form
+                        onSubmit={createService}
+                        className="mt-4 space-y-3 rounded-2xl bg-white p-4 shadow-soft"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#4F5FE8]/10">
+                              <Plus className="h-4 w-4 text-[#4F5FE8]" />
+                            </span>
+                            <h3 className="text-sm font-bold text-[#1A1F36]">
+                              {tSvc("addTitle")}
+                            </h3>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              resetServiceForm();
+                              setShowServiceForm(false);
+                            }}
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1F36]/10 text-[#1A1F36] transition-colors hover:bg-[#1A1F36]/20"
+                            aria-label={tSvc("cancelButton")}
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+
                         <input
                           value={serviceName}
                           onChange={(event) =>
                             setServiceName(event.target.value)
                           }
                           placeholder={tSvc("namePlaceholder")}
-                          className="ring-focus w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                          className={INPUT_BASE}
                         />
 
                         <textarea
@@ -1357,7 +1700,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                             setServiceDescription(event.target.value)
                           }
                           placeholder={tSvc("descPlaceholder")}
-                          className="ring-focus min-h-20 w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                          className={INPUT_BASE + " min-h-20"}
                         />
 
                         <div className="grid grid-cols-2 gap-3">
@@ -1372,7 +1715,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                             placeholder={tSvc("pricePlaceholder", {
                               currency: selectedBusiness.currency,
                             })}
-                            className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                            className={INPUT_BASE + " tabular"}
                           />
 
                           <input
@@ -1383,7 +1726,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                             type="number"
                             min="1"
                             placeholder={tSvc("durationPlaceholder")}
-                            className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                            className={INPUT_BASE + " tabular"}
                           />
                         </div>
 
@@ -1396,11 +1739,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           min="5"
                           step="5"
                           placeholder={tSvc("slotIntervalPlaceholder")}
-                          className="ring-focus tabular w-full rounded-xl border border-border/60 bg-background px-4 py-3 outline-none"
+                          className={INPUT_BASE + " tabular"}
                         />
 
                         <div>
-                          <p className="mb-2 text-sm font-medium">
+                          <p className={LABEL_SMALL}>
                             {tSvc("depositLabel")}
                           </p>
                           <div className="grid grid-cols-3 gap-2">
@@ -1412,10 +1755,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 type="button"
                                 onClick={() => setServiceDepositType(type)}
                                 className={
-                                  "ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors " +
+                                  "ring-focus rounded-2xl px-2 py-2.5 text-xs font-bold transition-transform active:scale-[0.98] " +
                                   (serviceDepositType === type
-                                    ? "border-primary bg-primary/10 text-primary"
-                                    : "border-border/60 bg-background hover:bg-muted")
+                                    ? "btn-selected"
+                                    : "bg-white text-[#1A1F36] shadow-soft")
                                 }
                               >
                                 {depositLabels[type]}
@@ -1439,7 +1782,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                       currency: selectedBusiness.currency,
                                     })
                               }
-                              className="ring-focus tabular mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
+                              className={INPUT_BASE + " tabular mt-2"}
                             />
                           )}
                         </div>
@@ -1447,318 +1790,25 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         <button
                           type="submit"
                           disabled={savingService}
-                          className="ring-focus flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                          className={BTN_PRIMARY}
                         >
                           {savingService && (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           )}
                           {savingService ? tSvc("adding") : tSvc("addButton")}
                         </button>
-                      </div>
-                    </form>
-                  )}
+                      </form>
+                    )}
 
-                  <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-soft">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                          <Scissors className="h-4 w-4" />
-                        </span>
-                        <div>
-                          <h2 className="text-lg font-semibold tracking-tight">
-                            {tSvc("listTitle")}
-                          </h2>
-                          {selectedBusiness.services.length > 0 && (
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              {activeServices} /{" "}
-                              {selectedBusiness.services.length}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {selectedBusiness.services.length === 0 ? (
-                      <p className="mt-4 text-sm text-muted-foreground">
-                        {tSvc("empty")}
-                      </p>
-                    ) : (
-                      <div className="mt-4 space-y-3">
-                        {selectedBusiness.services.map((service) => (
-                          <div
-                            key={service.id}
-                            className="rounded-xl border border-border/60 bg-background p-4"
-                          >
-                            {editingServiceId === service.id ? (
-                              <div className="space-y-3">
-                                <input
-                                  value={editName}
-                                  onChange={(event) =>
-                                    setEditName(event.target.value)
-                                  }
-                                  disabled={adminView}
-                                  className="ring-focus w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none disabled:opacity-60"
-                                />
-
-                                <textarea
-                                  value={editDescription}
-                                  onChange={(event) =>
-                                    setEditDescription(event.target.value)
-                                  }
-                                  disabled={adminView}
-                                  className="ring-focus min-h-16 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none disabled:opacity-60"
-                                />
-
-                                <div className="grid grid-cols-2 gap-2">
-                                  <input
-                                    value={editPrice}
-                                    onChange={(event) =>
-                                      setEditPrice(event.target.value)
-                                    }
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    className="ring-focus tabular w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
-                                  />
-
-                                  <input
-                                    value={editDuration}
-                                    onChange={(event) =>
-                                      setEditDuration(event.target.value)
-                                    }
-                                    type="number"
-                                    min="1"
-                                    disabled={adminView}
-                                    className="ring-focus tabular w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none disabled:opacity-60"
-                                  />
-                                </div>
-
-                                {!adminView && (
-                                  <input
-                                    value={editSlotInterval}
-                                    onChange={(event) =>
-                                      setEditSlotInterval(event.target.value)
-                                    }
-                                    type="number"
-                                    min="5"
-                                    step="5"
-                                    placeholder={tSvc(
-                                      "slotIntervalPlaceholder"
-                                    )}
-                                    className="ring-focus tabular w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
-                                  />
-                                )}
-
-                                {!adminView && (
-                                  <div>
-                                    <div className="grid grid-cols-3 gap-2">
-                                      {(
-                                        [
-                                          "NONE",
-                                          "PERCENTAGE",
-                                          "FIXED",
-                                        ] as const
-                                      ).map((type) => (
-                                        <button
-                                          key={type}
-                                          type="button"
-                                          onClick={() =>
-                                            setEditDepositType(type)
-                                          }
-                                          className={
-                                            "ring-focus rounded-lg border px-2 py-2 text-xs font-medium transition-colors " +
-                                            (editDepositType === type
-                                              ? "border-primary bg-primary/10 text-primary"
-                                              : "border-border/60 bg-background hover:bg-muted")
-                                          }
-                                        >
-                                          {depositLabels[type]}
-                                        </button>
-                                      ))}
-                                    </div>
-
-                                    {editDepositType !== "NONE" && (
-                                      <input
-                                        value={editDepositValue}
-                                        onChange={(event) =>
-                                          setEditDepositValue(
-                                            event.target.value
-                                          )
-                                        }
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        className="ring-focus tabular mt-2 w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none"
-                                      />
-                                    )}
-                                  </div>
-                                )}
-
-                                <div className="grid grid-cols-2 gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => saveEdit(service.id)}
-                                    disabled={savingEdit}
-                                    className="ring-focus flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                                  >
-                                    {savingEdit && (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    )}
-                                    {savingEdit
-                                      ? tSvc("saving")
-                                      : tSvc("saveButton")}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={cancelEdit}
-                                    className="ring-focus rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
-                                  >
-                                    {tSvc("cancelButton")}
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <h3 className="font-semibold">
-                                        {service.name}
-                                      </h3>
-                                      <span
-                                        className={
-                                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium " +
-                                          (service.active
-                                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                            : "bg-muted text-muted-foreground")
-                                        }
-                                      >
-                                        <span
-                                          className={
-                                            "h-1.5 w-1.5 rounded-full " +
-                                            (service.active
-                                              ? "bg-emerald-500"
-                                              : "bg-muted-foreground/60")
-                                          }
-                                        />
-                                        {service.active
-                                          ? tSvc("activate")
-                                          : tSvc("inactiveTag")}
-                                      </span>
-                                    </div>
-
-                                    {service.description && (
-                                      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                                        {service.description}
-                                      </p>
-                                    )}
-
-                                    {service.depositType !== "NONE" && (
-                                      <p className="mt-1 text-xs text-primary">
-                                        {tSvc("depositInfo", {
-                                          type: depositLabels[
-                                            service.depositType
-                                          ],
-                                          value:
-                                            service.depositType ===
-                                            "PERCENTAGE"
-                                              ? service.depositValue + "%"
-                                              : formatPrice(
-                                                  service.depositValue,
-                                                  service.currency
-                                                ),
-                                        })}
-                                      </p>
-                                    )}
-                                  </div>
-
-                                  <div className="shrink-0 text-end text-sm">
-                                    <div className="tabular font-semibold">
-                                      {formatPrice(
-                                        service.price,
-                                        service.currency
-                                      )}
-                                    </div>
-                                    <div className="mt-0.5 flex items-center justify-end gap-1 text-xs text-muted-foreground">
-                                      <Clock className="h-3 w-3" />
-                                      {tSvc("minutes", {
-                                        count: service.durationMinutes,
-                                      })}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {adminView ? (
-                                  <div className="mt-3 grid grid-cols-1 gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => startEdit(service)}
-                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                      {tSvc("editButton")}
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="mt-3 grid grid-cols-3 gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => startEdit(service)}
-                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                      {tSvc("editButton")}
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleActive(service)}
-                                      className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
-                                    >
-                                      <Power className="h-3 w-3" />
-                                      {service.active
-                                        ? tSvc("deactivate")
-                                        : tSvc("activate")}
-                                    </button>
-
-                                    {confirmDeleteId === service.id ? (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          deleteService(service.id)
-                                        }
-                                        disabled={
-                                          deletingId === service.id
-                                        }
-                                        className="ring-focus flex items-center justify-center gap-1.5 rounded-lg bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                                      >
-                                        {deletingId === service.id ? (
-                                          <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : (
-                                          <Check className="h-3 w-3" />
-                                        )}
-                                        {tSvc("confirmDelete")}
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setConfirmDeleteId(service.id)
-                                        }
-                                        className="ring-focus flex items-center justify-center gap-1.5 rounded-lg border border-destructive/30 bg-background px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                        {tSvc("deleteButton")}
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        ))}
-                      </div>
+                    {!adminView && !showServiceForm && !hasServices && (
+                      <button
+                        type="button"
+                        onClick={() => setShowServiceForm(true)}
+                        className={BTN_ADD_SERVICE + " mt-4"}
+                      >
+                        <Plus className="h-5 w-5" />
+                        {tSvc("addButton")}
+                      </button>
                     )}
                   </section>
 
