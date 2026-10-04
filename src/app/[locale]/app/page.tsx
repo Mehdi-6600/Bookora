@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import {
@@ -129,8 +123,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
     FIXED: tSvc(DEPOSIT_LABELS_KEYS.FIXED),
   };
 
-  const servicesSectionRef = useRef<HTMLElement | null>(null);
-
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selectedBusiness, setSelectedBusiness] =
     useState<Business | null>(null);
@@ -188,19 +180,6 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [linkCopied, setLinkCopied] = useState(false);
 
   const [message, setMessage] = useState<string | null>(null);
-
-  const [pendingScroll, setPendingScroll] = useState<number | null>(null);
-
-  useLayoutEffect(() => {
-    if (pendingScroll !== null) {
-      window.scrollTo({ top: pendingScroll, behavior: "auto" });
-      setPendingScroll(null);
-    }
-  }, [pendingScroll]);
-
-  function captureScroll() {
-    setPendingScroll(window.scrollY);
-  }
 
   async function loadAdminBusinesses() {
     try {
@@ -280,15 +259,17 @@ function Dashboard({ user }: { user: TelegramUser }) {
     }
   }
 
-  async function loadBusinesses() {
+  async function loadBusinesses(options?: { silent?: boolean }) {
+    const silent = options?.silent === true;
+
     if (adminView) {
       await loadAdminBusinesses();
       return;
     }
 
     try {
-      setLoading(true);
-      setMessage(null);
+      if (!silent) setLoading(true);
+      if (!silent) setMessage(null);
 
       const response = await fetch("/api/business", {
         method: "GET",
@@ -320,7 +301,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         error instanceof Error ? error.message : tMsg("loadDataError")
       );
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -367,7 +348,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setBusinessDescription("");
       setBusinessCountry(null);
       setCreateStep(1);
-      await loadBusinesses();
+      await loadBusinesses({ silent: true });
       setMessage(tMsg("businessCreated"));
     } catch (error) {
       setMessage(
@@ -419,7 +400,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       }
 
       setEditingBusiness(false);
-      await loadBusinesses();
+      await loadBusinesses({ silent: true });
       setMessage(
         data.currencyChanged
           ? tMsg("businessEditedCurrency")
@@ -450,7 +431,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       }
 
       setConfirmDeleteBusiness(false);
-      await loadBusinesses();
+      await loadBusinesses({ silent: true });
 
       setMessage(
         data.archived ? tMsg("businessArchived") : tMsg("businessDeleted")
@@ -489,7 +470,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         throw new Error(data?.error || tMsg("businessReactivateError"));
       }
 
-      await loadBusinesses();
+      await loadBusinesses({ silent: true });
       setMessage(tMsg("businessReactivated"));
     } catch (error) {
       setMessage(
@@ -592,8 +573,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       resetServiceForm();
       setShowServiceForm(false);
 
-      captureScroll();
-      await loadBusinesses();
+      await loadBusinesses({ silent: true });
 
       setMessage(tMsg("serviceCreated"));
     } catch (error) {
@@ -697,8 +677,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
       setEditingServiceId(null);
 
-      captureScroll();
-      await loadBusinesses();
+      await loadBusinesses({ silent: true });
 
       setMessage(tMsg("serviceEdited"));
     } catch (error) {
@@ -735,8 +714,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
         throw new Error(data?.error || tMsg("serviceToggleError"));
       }
 
-      captureScroll();
-      await loadBusinesses();
+      await loadBusinesses({ silent: true });
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : tMsg("serviceToggleError")
@@ -761,8 +739,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
       setConfirmDeleteId(null);
 
-      captureScroll();
-      await loadBusinesses();
+      await loadBusinesses({ silent: true });
 
       setMessage(
         data.deactivated ? tMsg("serviceDeactivated") : tMsg("serviceDeleted")
@@ -1374,7 +1351,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
               {!isArchived && (
                 <>
-                  <section ref={servicesSectionRef} className={CARD_MAIN}>
+                  <section className={CARD_MAIN}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
                         <span className={SECTION_ICON}>
