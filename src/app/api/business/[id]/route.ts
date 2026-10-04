@@ -3,8 +3,6 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { COUNTRY_CURRENCY, isCountryCode } from "@/lib/currency";
-import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
-import { lockBusinessSchedule } from "@/lib/booking/schedule";
 import { normalizeTimeZone } from "@/lib/booking/time";
 
 const updateBusinessSchema = z.object({
@@ -21,12 +19,6 @@ const updateBusinessSchema = z.object({
   reactivate: z.boolean().optional(),
 });
 
-function resolveTimezone(country: string): string {
-  return country === "IR" ? "Asia/Tehran" : "UTC";
-}
-
-class BusinessNotFoundError extends Error {}
-
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -34,6 +26,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const user = await getCurrentUser();
+
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -48,55 +41,51 @@ export async function PUT(
     const parsed = updateBusinessSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "اطلاعات کسب‌وکار معتبر نیست.", details: parsed.error.flatten() },
+        {
+          error: "اطلاعات کسب‌وکار معتبر نیست.",
+          details: parsed.error.flatten(),
+        },
         { status: 400 }
       );
     }
 
     const existing = await prisma.business.findFirst({
       where: { id, ownerId: user.id },
-      select: { id: true },
+      select: { id: true, country: true, status: true, timezone: true },
     });
-    if (!existing) {
-      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
-    }
 
-    if (await isRateLimited(`business-update:${user.id}:${id}`, 60, 10 * 60 * 1000)) {
+    if (!existing) {
       return NextResponse.json(
-        { error: "درخواست‌های زیاد. کمی صبر کنید." },
-        { status: 429 }
+        { error: "کسب‌وکار پیدا نشد." },
+        { status: 404 }
       );
     }
-    triggerRateLimitCleanup();
+
+    const { name, description, country, reactivate } = parsed.data;
+
+    const countryChanged = existing.country !== country;
+    const currency = countryChanged ? COUNTRY_CURRENCY[country] : undefined;
+
+    const timezone = parsed.data.timezone
+      ? normalizeTimeZone(parsed.data.timezone)!
+      : countryChanged
+      ? country === "IR"
+        ? "Asia/Tehran"
+        : existing.timezone || "UTC"
+      : existing.timezone;
+
+    const status =
+      reactivate && existing.status === "ARCHIVED" ? "ACTIVE" : undefined;
 
     const result = await prisma.$transaction(async (tx) => {
-      await lockBusinessSchedule(tx, id);
-
-      const current = await tx.business.findFirst({
-        where: { id, ownerId: user.id },
-        select: { id: true, country: true, status: true },
-      });
-      if (!current) throw new BusinessNotFoundError();
-
-      const { name, description, country, reactivate } = parsed.data;
-      const countryChanged = current.country !== country;
-      const currency = countryChanged ? COUNTRY_CURRENCY[country] : undefined;
-      const timezone = parsed.data.timezone
-        ? normalizeTimeZone(parsed.data.timezone)!
-        : countryChanged
-          ? resolveTimezone(country)
-          : undefined;
-      const status =
-        reactivate && current.status === "ARCHIVED" ? "ACTIVE" : undefined;
-
       const business = await tx.business.update({
         where: { id },
         data: {
           name,
           description: description || null,
           country,
+          timezone,
           ...(currency ? { currency } : {}),
-          ...(timezone ? { timezone } : {}),
           ...(status ? { status } : {}),
         },
         include: {
@@ -112,14 +101,16 @@ export async function PUT(
           where: { businessId: id },
           data: { currency },
         });
-        const services = await tx.service.findMany({
+
+        const refreshed = await tx.service.findMany({
           where: { businessId: id },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         });
-        return { business, services, currencyChanged: true };
+
+        return { business, services: refreshed };
       }
 
-      return { business, services: business.services, currencyChanged: false };
+      return { business, services: business.services };
     });
 
     return NextResponse.json({
@@ -145,12 +136,9 @@ export async function PUT(
         })),
         _count: { bookings: result.business._count.bookings },
       },
-      currencyChanged: result.currencyChanged,
+      currencyChanged: countryChanged,
     });
   } catch (error) {
-    if (error instanceof BusinessNotFoundError) {
-      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
-    }
     console.error(
       "PUT /api/business/[id] failed:",
       error instanceof Error ? error.name : "UnknownError"
@@ -169,51 +157,39 @@ export async function DELETE(
   try {
     const { id } = await params;
     const user = await getCurrentUser();
+
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const existing = await prisma.business.findFirst({
       where: { id, ownerId: user.id },
-      select: { id: true },
+      select: {
+        id: true,
+        _count: { select: { bookings: true } },
+      },
     });
-    if (!existing) {
-      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
-    }
 
-    if (await isRateLimited(`business-delete:${user.id}:${id}`, 20, 10 * 60 * 1000)) {
+    if (!existing) {
       return NextResponse.json(
-        { error: "درخواست‌های زیاد. کمی صبر کنید." },
-        { status: 429 }
+        { error: "کسب‌وکار پیدا نشد." },
+        { status: 404 }
       );
     }
-    triggerRateLimitCleanup();
 
-    const result = await prisma.$transaction(async (tx) => {
-      await lockBusinessSchedule(tx, id);
-      const business = await tx.business.findFirst({
-        where: { id, ownerId: user.id },
-        select: { id: true, _count: { select: { bookings: true } } },
+    if (existing._count.bookings > 0) {
+      await prisma.business.update({
+        where: { id },
+        data: { status: "ARCHIVED" },
       });
-      if (!business) throw new BusinessNotFoundError();
 
-      if (business._count.bookings > 0) {
-        await tx.business.update({
-          where: { id },
-          data: { status: "ARCHIVED" },
-        });
-        return { archived: true, deleted: false };
-      }
-
-      await tx.business.delete({ where: { id } });
-      return { archived: false, deleted: true };
-    });
-
-    return NextResponse.json(result);
-  } catch (error) {
-    if (error instanceof BusinessNotFoundError) {
-      return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
+      return NextResponse.json({ archived: true });
     }
+
+    await prisma.business.delete({ where: { id } });
+
+    return NextResponse.json({ deleted: true });
+  } catch (error) {
     console.error(
       "DELETE /api/business/[id] failed:",
       error instanceof Error ? error.name : "UnknownError"
