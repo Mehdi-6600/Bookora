@@ -8,7 +8,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     setupFiles: ["./vitest.setup.ts"],
     env: {
-      JWT_SECRET: "a".repeat(32),
+      JWT_SECRET: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       DATABASE_URL: "postgres://u:p@h:5432/d",
       DIRECT_URL: "postgres://u:p@h:5432/d",
       TELEGRAM_BOT_TOKEN: "123456:ABC-DEF",
