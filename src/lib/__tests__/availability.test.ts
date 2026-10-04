@@ -9,7 +9,7 @@ describe("computeAvailableSlots", () => {
     closeTime: "12:00",
     breakStart: null,
     breakEnd: null,
-    busyRanges: [],
+    busyRanges: [] as { start: Date; end: Date }[],
   };
 
   it("creates 60-minute slots correctly", () => {
