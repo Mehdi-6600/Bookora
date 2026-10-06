@@ -7,6 +7,7 @@ import { formatPrice } from "@/lib/currency";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
 import { normalizePaymentReference } from "@/lib/payment-reference";
+import { lockPaymentReference } from "@/lib/booking/schedule";
 
 const receiptSchema = z.object({
   receiptToken: z.string().trim().min(10).max(100),
@@ -110,16 +111,57 @@ export async function POST(
       parsed.data.transactionReference
     );
 
-    const updateResult = await prisma.payment.updateMany({
-      where: {
-        id: payment.id,
-        status: "PENDING",
-        transactionReference: null,
-      },
-      data: { transactionReference: normalizedReference },
+    const result = await prisma.$transaction(async (tx) => {
+      await lockPaymentReference(tx, normalizedReference);
+
+      const [duplicatePayment, duplicateSubscription] = await Promise.all([
+        tx.payment.findFirst({
+          where: {
+            transactionReference: {
+              equals: normalizedReference,
+              mode: "insensitive",
+            },
+          },
+          select: { id: true },
+        }),
+        tx.subscription.findFirst({
+          where: {
+            receiptReference: {
+              equals: normalizedReference,
+              mode: "insensitive",
+            },
+          },
+          select: { id: true },
+        }),
+      ]);
+
+      if (duplicatePayment || duplicateSubscription) {
+        return { count: 0, duplicate: true };
+      }
+
+      const updateResult = await tx.payment.updateMany({
+        where: {
+          id: payment.id,
+          status: "PENDING",
+          transactionReference: null,
+        },
+        data: { transactionReference: normalizedReference },
+      });
+
+      return {
+        count: updateResult.count,
+        duplicate: false,
+      };
     });
 
-    if (updateResult.count === 0) {
+    if (result.duplicate) {
+      return NextResponse.json(
+        { error: "این کد پیگیری قبلاً ثبت شده است." },
+        { status: 409 }
+      );
+    }
+
+    if (result.count === 0) {
       return NextResponse.json(
         { error: "payment already reviewed" },
         { status: 409 }
