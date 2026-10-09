@@ -82,6 +82,18 @@ export async function POST(
       );
     }
 
+    // A hold that already expired can never be confirmed, so reject it up
+    // front instead of accepting a transfer reference that can never settle.
+    if (
+      booking.status !== "PENDING_PAYMENT" ||
+      booking.paymentStatus !== "PENDING"
+    ) {
+      return NextResponse.json(
+        { error: "booking expired" },
+        { status: 409 }
+      );
+    }
+
     const payment = await prisma.payment.findFirst({
       where: { bookingId: booking.id, type: "DEPOSIT" },
     });
