@@ -88,7 +88,9 @@ export async function PUT(req: NextRequest) {
           ? "settings.channel_url_changed"
           : "cities.approval_changed",
       actorUserId: guard.user.id,
-      detail: `keys=${notable.join(",")} values=${notable.map((k) => `${k}:${String((body as Record<string, unknown>)[k]).slice(0, 40)}`).join(",")}`,
+      // Keys only: setting values (including public URLs) belong in the
+      // settings table, not duplicated into free-form audit details.
+      detail: `keys=${notable.join(",")}`,
     });
   }
 
