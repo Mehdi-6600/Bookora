@@ -16,6 +16,7 @@ const db = {
 
 vi.mock("@/lib/prisma", () => {
   const prisma = {
+    adminSetting: { findMany: async () => [] },
     invitationTemplate: {
       findUnique: async () => ({ id: "tpl-1", body: "Book your appointment here: {link}", active: true }),
       findFirst: async () => ({ id: "tpl-1", body: "Book your appointment here: {link}", active: true }),
