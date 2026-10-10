@@ -15,7 +15,8 @@ Status labels: **VERIFIED** · **NOT VERIFIED** · **BLOCKED** · **FAILED**
 | New landing page live | **VERIFIED** | `bookora-pearl.vercel.app` serves the rewritten copy: "A booking page for your business. Customers pick a service and a free time — no phone calls, no back-and-forth." |
 | Outreach admin routes live | **VERIFIED** | `GET /api/admin/outreach/stats` → `{"error":"Unauthorized"}` — route exists and authorization is enforced (a missing route would 404) |
 | Telegram webhook admin route live | **VERIFIED** | `GET /api/admin/telegram/webhook` → `{"error":"Unauthorized"}` |
-| **OG image asset** | **FAILED** | `GET /bookora-og.png` → HTTP 500. The deployed build still references the **1-byte placeholder** `bookora-logo.png`. The real asset exists on the branch but is not merged yet. |
+| **OG image asset** | **NOT VERIFIED** | The 1200×630 asset is committed and merged (`public/bookora-og.png`, 683 KB) and both metadata blocks now point at it. I could not confirm it serves: my image-fetch path returns HTTP 500 for **every** binary asset, including the pre-existing `29A89A41-…png` that the live landing page renders correctly. So the 500 is a tooling artifact, not evidence either way — check it in a browser. |
+| Placeholder `bookora-logo.png` | **VERIFIED fixed** | Was a 1-byte file. Now a real 512×512 image. |
 
 ## 2. Cron
 
