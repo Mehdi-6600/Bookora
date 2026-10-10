@@ -107,14 +107,31 @@ funnel is ~120 lines on the existing Prisma/Postgres stack.
 
 | Blocker | Consequence |
 | --- | --- |
-| `prisma generate` cannot run (`binaries.prisma.sh` unreachable) | The local Prisma client is an `any` stub → `tsc --noEmit` reports **71 errors** that do not exist in CI (CI runs `prisma generate` first). I verified every one of the 71 traces to this stub. |
+| `prisma generate` cannot run (`binaries.prisma.sh` unreachable) | The local Prisma client is an `any` stub → `tsc --noEmit` reports **71 errors** that do not exist in CI. **Resolved by CI:** on PR #4, `prisma generate` → `Typecheck` → `Run tests` → `Build` all **pass**. See §7 below. |
 | No `DATABASE_URL` | `db:push` could not be run; the migration is delivered as SQL and is idempotent |
 | No Vercel / bot credentials | I could not deploy, register the webhook, or send a test Telegram message |
 | `curl` to the outside world is TLS-blocked | All live probing was done through the fetch tool instead |
 
 ---
 
-## 7. Recommended first niche
+## 7. Verification status after the PR
+
+PR **#4** (`arena/b3951939-bookora` → `main`), checked 2026-10-10:
+
+| Check | Result |
+| --- | --- |
+| GitHub Actions `test` — Install | ✅ success |
+| — Generate Prisma Client | ✅ success |
+| — **Typecheck** (`tsc --noEmit`) | ✅ **success** — the 71 sandbox errors were entirely the offline Prisma stub |
+| — **Run tests** | ✅ success |
+| — **Build** (`next build`) | ✅ success |
+| Vercel preview build | ✅ success |
+| Netlify deploy preview | ❌ fail — **pre-existing and unrelated.** The same four Netlify checks fail identically on PR #3, which is the base of this branch. A stray Netlify site is connected to this repo; the project actually deploys on Vercel. |
+
+So: the code compiles cleanly, all 142 tests pass, and the app builds. **It is
+still not deployed to production, and the migration is still not applied.**
+
+## 8. Recommended first niche
 
 See **[ACTION-PLAN.md](./ACTION-PLAN.md)** — Persian-speaking (Iran, Tehran
 first) barbershops and men's salons, with Tehran beauty salons as the second

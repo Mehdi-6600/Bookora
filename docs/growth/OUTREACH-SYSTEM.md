@@ -255,11 +255,28 @@ Test Files  16 passed (16)
 | `funnel` | 6 | Event validation, anonId rotation, no PII stored |
 | pre-existing 7 suites | 30 | Availability, origin, payments, JWT, plans, currency |
 
-**Not run here:** `next build` and `tsc --noEmit` clean. `tsc` reports 71 errors
-in my sandbox, **all** of them caused by the Prisma client being an untyped
-placeholder because `prisma generate` cannot download its engine here. CI runs
-`prisma generate` first and is unaffected. I verified this by inspection of
-every error — none is in new code that would survive a generated client.
+### Verified in CI — not just locally
+
+`prisma generate` cannot run in my sandbox (`binaries.prisma.sh` is
+unreachable), so `tsc --noEmit` there reports 71 errors that are entirely an
+artifact of the Prisma client being an `any` placeholder. I did not want to
+hand-wave that, so I measured it:
+
+| Measurement | Result |
+| --- | --- |
+| Clean worktree at base `708b279`, untouched, same broken client | **53 errors** |
+| This branch | **71 errors** |
+| Error codes present, base vs branch | **identical set**: TS7006, TS2339, TS2694, TS18046, TS2347, TS7053 |
+| Every one of the 18 extra errors | Sits on a `prisma.*` or `Prisma.*` call in a new file |
+
+**And then CI settled it.** On PR #4: Generate Prisma Client ✅ → **Typecheck
+✅** → **Run tests ✅** → **Build ✅**. The typecheck is clean once the client is
+real, and `next build` succeeds.
+
+The only failing check on the PR is the Netlify deploy preview, which **also
+fails identically on PR #3** (this branch's base) — a stray Netlify site is
+connected to the repo and cannot build a Next.js app. The project deploys on
+Vercel, whose preview build passes.
 
 ---
 
@@ -267,7 +284,7 @@ every error — none is in new code that would survive a generated client.
 
 | # | Blocker | Who |
 | --- | --- | --- |
-| 1 | **Nothing is deployed.** No merge, no Vercel deploy, no migration. | You |
+| 1 | **Not merged and not deployed.** PR #4 is open, CI green, Vercel preview build green — but production still runs the old code and the migration is not applied. | You |
 | 2 | **`TELEGRAM_WEBHOOK_SECRET` is not set** (≥32 chars required). Until it is, the webhook returns 503 and the bot is silent. | You |
 | 3 | **Webhook + commands not registered.** One POST to `/api/admin/telegram/webhook` fixes B1. | You |
 | 4 | **Migration not applied.** | You |

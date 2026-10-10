@@ -63,7 +63,7 @@ Everything else is blocked behind that. Concretely, in order:
 
 | # | Action | Why it is blocking | Owner |
 | --- | --- | --- | --- |
-| 1 | Merge and deploy the branch to Vercel | No deployment = no cron, no webhook, no dashboard | You |
+| 1 | **Merge PR #4 into `main`.** CI is green (typecheck, 142 tests, `next build`) and the Vercel preview build is green. Merging triggers the real deploy. | No deployment = no cron, no webhook, no dashboard | You |
 | 2 | Run `npm run db:push` against production (or `psql "$DIRECT_URL" -f prisma/sql/0001_outreach_growth.sql`) | The outreach tables do not exist yet | You |
 | 3 | Add `TELEGRAM_WEBHOOK_SECRET` (≥32 random chars) to Vercel env, redeploy | Without it `/api/telegram/webhook` returns **503** and the bot stays silent | You |
 | 4 | Press **Configure webhook, commands and Mini App button** | Registers `/start`, `/help`, `/stop` and the persistent Mini App button — the fix for blocker B1 | You |
@@ -76,6 +76,12 @@ Steps 1–4 are the blocker. Steps 5–7 are the first customer.
 **I could not do steps 1–4.** I have no Vercel deploy credentials, no production
 database credentials, and no bot token in this environment. I am reporting them
 as blockers rather than claiming they were completed.
+
+Everything I *could* verify, I did: PR #4 is open with CI green on install,
+`prisma generate`, typecheck, 142 tests and `next build`, and the Vercel preview
+build succeeds. The only red check is the Netlify deploy preview, which fails
+identically on PR #3 (this branch's base) and is a stray Netlify site connected
+to a Vercel-deployed project — not caused by these changes.
 
 ---
 
