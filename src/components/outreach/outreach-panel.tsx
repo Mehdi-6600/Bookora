@@ -1368,6 +1368,10 @@ function InvitationsTab({
                   </p>
                   <p className="mt-0.5 text-[11px] font-medium text-[#1A1F36]/60">
                     {invitation.language} · {formatDate(invitation.createdAt)}
+                    {invitation.prospect?.verificationStatus &&
+                    invitation.prospect.verificationStatus !== "VERIFIED"
+                      ? ` · ${VERIFICATION_FA[invitation.prospect.verificationStatus] ?? invitation.prospect.verificationStatus}`
+                      : ""}
                   </p>
                 </div>
                 <span className={`${BADGE} ${statusColor(invitation.status)}`}>

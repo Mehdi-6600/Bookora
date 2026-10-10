@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Tests the rules that keep outreach safe:
+ *  - only VERIFIED prospects are ever drafted, approved or messaged,
  *  - a prospect is never invited twice while an invitation is pending,
  *  - opted-out and do-not-contact businesses are excluded,
  *  - a message is only delivered to someone who already started the bot,
@@ -25,6 +26,8 @@ vi.mock("@/lib/prisma", () => {
     outreachProspect: {
       findMany: async ({ where, orderBy, take }: any) => {
         let rows = db.prospects.filter((row: Row) => {
+          if (where?.verificationStatus && row.verificationStatus !== where.verificationStatus)
+            return false;
           if (where?.status?.in && !where.status.in.includes(row.status)) return false;
           if (where?.id?.in && !where.id.in.includes(row.id)) return false;
           if ("optedOutAt" in (where ?? {}) && where.optedOutAt !== null) {
@@ -160,6 +163,7 @@ function prospect(overrides: Partial<Row> = {}): Row {
     publicUrl: "https://instagram.com/mehdi",
     telegramUsername: "mehdi_barber",
     status: "NEW",
+    verificationStatus: "VERIFIED",
     optedOutAt: null,
     contactedCount: 0,
     campaignId: null,
@@ -248,6 +252,41 @@ describe("preparing invitations", () => {
 
     const params = db.invitations.map((row: Row) => row.startParam);
     expect(new Set(params).size).toBe(params.length);
+  });
+
+  it("prepares drafts only for VERIFIED prospects", async () => {
+    db.prospects.push(prospect({ id: "verified" }));
+    db.prospects.push(
+      prospect({
+        id: "discovered",
+        verificationStatus: "DISCOVERED",
+        telegramUsername: "unverified_shop",
+        publicUrl: "https://instagram.com/unverified_shop",
+      })
+    );
+
+    const result = await prepareInvitations({ limit: 10 });
+
+    expect(result.prepared).toHaveLength(1);
+    expect(result.prepared[0].prospectId).toBe("verified");
+    expect(db.invitations).toHaveLength(1);
+  });
+
+  it("prepares follow-up invitations for prospects that started the bot", async () => {
+    // The campaign dry run plans STARTED_BOT prospects with a past follow-up
+    // date as recipients; preparation must not silently drop them.
+    db.prospects.push(
+      prospect({
+        id: "started",
+        status: "STARTED_BOT",
+        nextFollowUpAt: new Date(Date.now() - 1000),
+      })
+    );
+
+    const result = await prepareInvitations({ limit: 10, prospectIds: ["started"] });
+
+    expect(result.prepared).toHaveLength(1);
+    expect(db.invitations).toHaveLength(1);
   });
 
   it("reports a missing template instead of failing", async () => {
@@ -392,6 +431,23 @@ describe("sending approved invitations", () => {
 
     expect(db.deliveries).toHaveLength(0);
     expect(db.invitations[0].status).toBe("DRAFT");
+  });
+
+  it("skips approved invitations whose prospect is no longer verified", async () => {
+    db.prospects.push(prospect());
+    db.users.push({ id: "u1", telegramId: "555001", telegramUsername: "mehdi_barber" });
+
+    await prepareInvitations({ limit: 1 });
+    db.invitations[0].status = "APPROVED";
+    // The administrator rejected the prospect after approving its invitation.
+    db.prospects[0].verificationStatus = "REJECTED";
+
+    const outcomes = await sendApprovedInvitations({ limit: 10 });
+
+    expect(db.deliveries).toHaveLength(0);
+    expect(outcomes[0]).toMatchObject({ status: "SKIPPED", reason: "not_verified" });
+    expect(db.invitations[0].status).toBe("SKIPPED");
+    expect(db.invitations[0].failureReason).toBe("not_verified");
   });
 
   it("suppresses a contact that blocks the bot", async () => {
