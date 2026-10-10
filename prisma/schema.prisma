@@ -283,3 +283,235 @@ model RateLimit {
   @@index([expiresAt])
   @@map("rate_limits")
 }
+
+// ---------------------------------------------------------------------------
+// Growth / customer-acquisition models (PHASE 8 + PHASE 9)
+//
+// These tables store only PUBLIC business information that an administrator
+// deliberately enters or that an explicitly configured, authorized source
+// returns. No private contact data, no credentials and no scraped personal
+// data are stored here.
+// ---------------------------------------------------------------------------
+
+model OutreachCampaign {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  prospects OutreachProspect[]
+  botStarts BotStart[]
+
+  @@index([active])
+  @@map("outreach_campaigns")
+}
+
+model OutreachProspect {
+  id          String    @id @default(cuid())
+  publicName  String
+  category    String    @default("OTHER")
+  city        String?
+  country     String?
+  language    String    @default("en")
+  publicUrl   String?
+  telegramUsername String?
+  sourceUrl   String?
+  sourceName  String?
+  dedupeKey   String    @unique
+  status      String    @default("NEW")
+  notes       String?
+  nextFollowUpAt   DateTime?
+  lastContactedAt  DateTime?
+  contactedCount   Int      @default(0)
+  optedOutAt  DateTime?
+  campaignId  String?
+  convertedUserId       String?
+  convertedBusinessId   String?
+  activatedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  campaign    OutreachCampaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  invitations OutreachInvitation[]
+  botStarts   BotStart[]
+  candidates  DiscoveryCandidate[]
+
+  @@index([status])
+  @@index([campaignId])
+  @@index([nextFollowUpAt])
+  @@index([category])
+  @@index([optedOutAt])
+  @@map("outreach_prospects")
+}
+
+model InvitationTemplate {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  language  String   @default("en")
+  category  String   @default("ALL")
+  body      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invitations OutreachInvitation[]
+
+  @@index([language])
+  @@index([active])
+  @@map("invitation_templates")
+}
+
+model OutreachInvitation {
+  id             String    @id @default(cuid())
+  prospectId     String
+  templateId     String?
+  campaignId     String?
+  channel        String    @default("TELEGRAM")
+  language       String    @default("en")
+  body           String
+  deepLink       String
+  startParam     String    @unique
+  status         String    @default("DRAFT")
+  approvedAt     DateTime?
+  approvedByUserId String?
+  reviewedAt     DateTime?
+  rejectionNote  String?
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  failureReason  String?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  prospect OutreachProspect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  template InvitationTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([prospectId])
+  @@index([createdAt])
+  @@map("outreach_invitations")
+}
+
+/// One row per /start (or Mini App launch with a start parameter).
+/// Used for attribution only — no message content is stored.
+model BotStart {
+  id               String   @id @default(cuid())
+  telegramId       String
+  userId           String?
+  startParam       String?
+  prospectId       String?
+  campaignId       String?
+  wasExistingUser  Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  prospect OutreachProspect?  @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+  campaign OutreachCampaign?  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([telegramId])
+  @@index([startParam])
+  @@index([createdAt])
+  @@map("bot_starts")
+}
+
+/// Do-not-contact / opt-out suppression list.
+model OutreachSuppression {
+  id        String   @id @default(cuid())
+  identifier String  @unique
+  reason    String   @default("OPT_OUT")
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([reason])
+  @@map("outreach_suppressions")
+}
+
+model DiscoveryKeyword {
+  id        String   @id @default(cuid())
+  term      String
+  group     String
+  language  String   @default("en")
+  priority  Int      @default(1)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([group, language, term])
+  @@index([enabled])
+  @@index([group])
+  @@map("discovery_keywords")
+}
+
+model DiscoveryCandidate {
+  id           String    @id @default(cuid())
+  publicName   String
+  publicUrl    String?
+  description  String?
+  source       String
+  sourceRef    String?
+  group        String
+  matchedTerms String    @default("")
+  score        Int       @default(0)
+  city         String?
+  language     String    @default("en")
+  dedupeKey    String    @unique
+  status       String    @default("NEW")
+  discoveredOn DateTime
+  reviewNote   String?
+  prospectId   String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  prospect OutreachProspect? @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([discoveredOn])
+  @@index([group])
+  @@index([score])
+  @@map("discovery_candidates")
+}
+
+/// One row per scheduled daily run. `runDate` is unique so a retry (or a
+/// double trigger from the scheduler) cannot execute the job twice.
+model DiscoveryRun {
+  id                 String    @id @default(cuid())
+  runDate            String    @unique
+  timezone           String    @default("UTC")
+  status             String    @default("RUNNING")
+  discovered         Int       @default(0)
+  matched            Int       @default(0)
+  duplicates         Int       @default(0)
+  excluded           Int       @default(0)
+  invitationsPrepared Int      @default(0)
+  messagesSent       Int       @default(0)
+  messagesDelivered  Int       @default(0)
+  botStarts          Int       @default(0)
+  registrations      Int       @default(0)
+  activations        Int       @default(0)
+  firstBookings      Int       @default(0)
+  error              String?
+  startedAt          DateTime  @default(now())
+  finishedAt         DateTime?
+
+  @@index([startedAt])
+  @@map("discovery_runs")
+}
+
+/// Privacy-conscious acquisition funnel.
+/// `anonId` is a server-side hash of (IP + user-agent + rotating daily salt).
+/// No raw IP, no user agent string, no Telegram payload and no personal data
+/// are ever written to this table.
+model FunnelEvent {
+  id        String   @id @default(cuid())
+  event     String
+  anonId    String
+  locale    String?
+  ref       String?
+  createdAt DateTime @default(now())
+
+  @@index([event])
+  @@index([createdAt])
+  @@map("funnel_events")
+}

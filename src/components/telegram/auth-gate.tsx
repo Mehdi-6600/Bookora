@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
+import { Loader2, Send, ShieldCheck } from "lucide-react";
+import { track } from "@/lib/funnel-client";
 
 type TelegramUser = {
   id: string;
@@ -17,111 +19,83 @@ type Props = {
   children: (user: TelegramUser) => React.ReactNode;
 };
 
+const MAX_ATTEMPTS = 40;
+const RETRY_MS = 250;
+
 export function TelegramAuthGate({ children }: Props) {
+  const t = useTranslations("telegramAuth");
+  const locale = useLocale();
+
   const [user, setUser] = useState<TelegramUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    async function authenticate(attempt = 0) {
+    async function authenticate(attemptNumber = 0) {
       try {
-        const telegram = window.Telegram;
-        const tg = telegram?.WebApp;
+        const tg = window.Telegram?.WebApp;
 
-        if (!tg) {
-          if (attempt < 40) {
+        // The Telegram WebApp script and `initData` can both arrive a little
+        // after first paint inside the Mini App, so poll briefly before giving
+        // up instead of failing instantly.
+        if (!tg || !tg.initData) {
+          if (attemptNumber < MAX_ATTEMPTS) {
             timer = setTimeout(() => {
-              authenticate(attempt + 1);
-            }, 250);
+              authenticate(attemptNumber + 1);
+            }, RETRY_MS);
             return;
           }
 
           if (!cancelled) {
-            setError(
-              "Telegram WebApp SDK در دسترس نیست. Mini App را مستقیماً از داخل Telegram باز کنید."
-            );
+            setError(!tg ? "sdkMissing" : "initDataMissing");
             setLoading(false);
           }
-
           return;
         }
 
         tg.ready();
         tg.expand();
 
-        if (!tg.initData) {
-          if (attempt < 40) {
-            timer = setTimeout(() => {
-              authenticate(attempt + 1);
-            }, 250);
-            return;
-          }
-
-          if (!cancelled) {
-            setError(
-              "اطلاعات احراز هویت Telegram دریافت نشد. Mini App را دوباره از داخل Telegram باز کنید."
-            );
-            setLoading(false);
-          }
-
-          return;
-        }
-
         const response = await fetch("/api/auth/telegram", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           credentials: "include",
           cache: "no-store",
-          body: JSON.stringify({
-            initData: tg.initData,
-          }),
+          body: JSON.stringify({ initData: tg.initData }),
         });
 
-        let data: {
-          user?: TelegramUser;
-          error?: string;
-          reason?: string;
-        } = {};
-
+        let data: { user?: TelegramUser; error?: string } = {};
         try {
           data = await response.json();
         } catch {
-          throw new Error(
-            "پاسخ معتبر از سرور احراز هویت دریافت نشد."
-          );
+          if (!cancelled) {
+            setError("serverUnreachable");
+            setLoading(false);
+          }
+          return;
         }
 
-        if (!response.ok) {
-          throw new Error(
-            data?.reason
-              ? `${data.error || "احراز هویت Telegram ناموفق بود."}: ${data.reason}`
-              : data?.error || "احراز هویت Telegram ناموفق بود."
-          );
-        }
-
-        if (!data.user) {
-          throw new Error(
-            "کاربر احراز هویت شد اما اطلاعات کاربر از سرور دریافت نشد."
-          );
+        if (!response.ok || !data.user) {
+          if (!cancelled) {
+            setError("failed");
+            setLoading(false);
+          }
+          return;
         }
 
         if (!cancelled) {
           setUser(data.user);
           setError(null);
           setLoading(false);
+          track("auth_success", { locale });
         }
-      } catch (err) {
+      } catch {
         if (!cancelled) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "خطایی در احراز هویت رخ داد."
-          );
+          setError("failed");
           setLoading(false);
         }
       }
@@ -131,12 +105,10 @@ export function TelegramAuthGate({ children }: Props) {
 
     return () => {
       cancelled = true;
-
-      if (timer) {
-        clearTimeout(timer);
-      }
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt]);
 
   if (loading) {
     return (
@@ -145,38 +117,62 @@ export function TelegramAuthGate({ children }: Props) {
           <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-soft">
             <Loader2 className="h-8 w-8 animate-spin text-[#4F5FE8]" />
           </span>
-
-          <p className="text-base font-bold text-[#1A1F36]">
-            در حال ورود به Bookora...
-          </p>
+          <p className="text-base font-bold text-[#1A1F36]">{t("loading")}</p>
         </div>
       </div>
     );
   }
 
   if (error) {
+    const botUrl = "https://t.me/Bookora_App_bot";
+
     return (
-      <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-3xl bg-[#B8D4F5] p-8 text-center shadow-elevated">
-          <span className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-[#4F5FE8] shadow-soft">
+      <div
+        className="flex min-h-screen items-center justify-center p-6"
+        dir={locale === "fa" || locale === "ar" ? "rtl" : "ltr"}
+      >
+        <div className="w-full max-w-md space-y-4 rounded-3xl bg-[#B8D4F5] p-8 text-center shadow-elevated">
+          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#4F5FE8] shadow-soft">
             <ShieldCheck className="h-8 w-8 text-white" />
           </span>
 
-          <h1 className="text-xl font-bold text-[#1A1F36]">
-            ورود به Bookora
-          </h1>
+          <h1 className="text-xl font-bold text-[#1A1F36]">{t("title")}</h1>
+          <p className="text-sm font-medium leading-7 text-[#1A1F36]/70">
+            {t(error)}
+          </p>
 
-          <p className="mt-3 text-sm font-medium leading-7 text-[#1A1F36]/70">
-            {error}
+          <a
+            href={botUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => track("start_click", { locale })}
+            className="btn-elevated flex w-full items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-5 py-4 text-base font-bold text-white transition-transform active:scale-[0.98]"
+          >
+            <Send className="h-5 w-5" />
+            {t("openInTelegram")}
+          </a>
+
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              setError(null);
+              setAttempt((value) => value + 1);
+            }}
+            className="w-full rounded-2xl bg-white px-5 py-3 text-sm font-bold text-[#1A1F36] shadow-soft transition-transform active:scale-[0.98]"
+          >
+            {t("retry")}
+          </button>
+
+          <p className="text-xs font-medium leading-6 text-[#1A1F36]/60">
+            {t("whyTelegram")}
           </p>
         </div>
       </div>
     );
   }
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   return <>{children(user)}</>;
 }

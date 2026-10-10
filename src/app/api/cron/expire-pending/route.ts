@@ -1,26 +1,13 @@
-import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { pendingBookingCutoff } from "@/lib/booking/schedule";
+import { hasValidCronAuthorization, isCronSecretConfigured } from "@/lib/security/cron-auth";
 
 const BATCH_SIZE = 200;
 const MAX_BATCHES_PER_RUN = 20;
 
-function hasValidCronAuthorization(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || secret.length < 32) return false;
-
-  const supplied = request.headers.get("authorization") ?? "";
-  const expectedBuffer = Buffer.from(`Bearer ${secret}`);
-  const suppliedBuffer = Buffer.from(supplied);
-  return (
-    expectedBuffer.length === suppliedBuffer.length &&
-    timingSafeEqual(expectedBuffer, suppliedBuffer)
-  );
-}
-
 export async function GET(req: NextRequest) {
-  if (!process.env.CRON_SECRET || process.env.CRON_SECRET.length < 32) {
+  if (!isCronSecretConfigured(process.env.CRON_SECRET)) {
     return NextResponse.json(
       { error: "Cron authentication is not configured." },
       { status: 503 }
