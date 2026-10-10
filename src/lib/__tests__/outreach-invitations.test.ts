@@ -23,7 +23,7 @@ const db = {
 };
 
 vi.mock("@/lib/prisma", () => {
-  const prisma = {
+  const prisma: any = {
     outreachProspect: {
       findMany: async ({ where, orderBy, take }: any) => {
         let rows = db.prospects.filter((row: Row) => {
