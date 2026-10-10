@@ -21,10 +21,15 @@ const db = {
   users: [] as Row[],
   botStarts: [] as Row[],
   settings: [] as Row[],
+  consents: [] as Row[],
+  audit: [] as Row[],
+  auditFail: false,
 };
 
+vi.mock("@/lib/telegram/notify", () => ({ deliverTelegramMessage: async () => ({ ok: true, messageId: 1 }) }));
+
 vi.mock("@/lib/prisma", () => {
-  const prisma = {
+  const prisma: any = {
     outreachCampaign: {
       findUnique: async ({ where }: any) =>
         db.campaigns.find(
@@ -75,12 +80,18 @@ vi.mock("@/lib/prisma", () => {
       },
     },
     outreachInvitation: {
-      findMany: async ({ where }: any) =>
+      updateMany: async ({ where, data }: any) => {
+        const rows = db.invitations.filter((row: Row) => row.campaignId === where.campaignId && row.status === where.status && (!where.id?.in || where.id.in.includes(row.id)));
+        rows.forEach((row: Row) => Object.assign(row, data));
+        return { count: rows.length };
+      },
+      findMany: async ({ where, include }: any) =>
         db.invitations.filter((row: Row) => {
+          if (where?.campaignId && row.campaignId !== where.campaignId) return false;
           if (where?.status?.in) return where.status.in.includes(row.status);
           if (where?.status) return row.status === where.status;
           return true;
-        }),
+        }).map((row: Row) => include?.prospect ? { ...row, prospect: db.prospects.find((p: Row) => p.id === row.prospectId) } : row),
       findUnique: async ({ where }: any) =>
         db.invitations.find((row: Row) => row.startParam === where.startParam) ?? null,
       create: async ({ data }: any) => {
@@ -145,6 +156,12 @@ vi.mock("@/lib/prisma", () => {
         return created;
       },
     },
+    telegramBotOptIn: { findFirst: async ({ where }: any) =>
+      db.consents.find((row: Row) => row.prospectId === where.prospectId && row.revokedAt === null && row.startedAt >= where.startedAt.gte) ?? null },
+    outreachAuditEvent: { create: async ({ data }: any) => {
+      if (db.auditFail) throw new Error("audit unavailable");
+      db.audit.push(data); return data;
+    } },
     user: {
       findUnique: async ({ where }: any) =>
         db.users.find((row: Row) => row.telegramId === where.telegramId) ?? null,
@@ -157,11 +174,17 @@ vi.mock("@/lib/prisma", () => {
         db.settings.filter((row: Row) => where.key.in.includes(row.key)),
     },
   };
+  prisma.$transaction = async (fn: (tx: any) => Promise<any>) => {
+    const snapshots = { campaigns: structuredClone(db.campaigns), invitations: structuredClone(db.invitations), audit: structuredClone(db.audit) };
+    try { return await fn(prisma); }
+    catch (error) { db.campaigns = snapshots.campaigns; db.invitations = snapshots.invitations; db.audit = snapshots.audit; throw error; }
+  };
   return { prisma };
 });
 
 import {
   approveCampaign,
+  approveCampaignInvitations,
   dryRunCampaign,
   normalizeTargeting,
   planCampaign,
@@ -222,6 +245,9 @@ beforeEach(() => {
   db.users = [];
   db.botStarts = [];
   db.settings = [];
+  db.consents = [];
+  db.audit = [];
+  db.auditFail = false;
 
   db.templates.push({
     id: "tpl-1",
@@ -330,6 +356,7 @@ describe("campaign planning", () => {
   it("marks someone who started the bot as ELIGIBLE and everyone else MANUAL_ONLY", async () => {
     db.prospects[0].telegramUsername = "started_owner";
     db.users.push({ id: "u-1", telegramId: "111", telegramUsername: "started_owner" });
+    db.consents.push({ prospectId: "p-1", telegramId: "111", startedAt: new Date(), revokedAt: null });
 
     const plan = await planCampaign(baseCampaign());
     const byId = new Map(plan.recipients.map((r) => [r.prospectId, r]));
@@ -456,7 +483,8 @@ describe("approval", () => {
     if (!result.ok) expect(result.error).toMatch(/no eligible recipients/i);
   });
 
-  it("approves after a dry run when there is someone to reach", async () => {
+  it("approves after a dry run when every recipient has consent", async () => {
+    db.consents.push(...db.prospects.map((p: Row, i: number) => ({ prospectId: p.id, telegramId: String(100 + i), startedAt: new Date(), revokedAt: null })));
     db.campaigns.push(baseCampaign({ status: "REVIEW", lastDryRunAt: new Date() } as any) as Row);
 
     const result = await approveCampaign("cmp-1", "admin-1");
@@ -467,6 +495,40 @@ describe("approval", () => {
     expect(db.campaigns[0].approvedAt).toBeInstanceOf(Date);
     // Approval must not send anything.
     expect(db.invitations).toHaveLength(0);
+  });
+
+  it("rejects campaign approval when a planned recipient lacks consent", async () => {
+    db.campaigns.push(baseCampaign({ status: "REVIEW", lastDryRunAt: new Date() } as any) as Row);
+    const result = await approveCampaign("cmp-1", "admin-1");
+    expect(result.ok).toBe(false);
+    expect(db.campaigns[0].status).toBe("REVIEW");
+  });
+
+  it("bulk approval is all-or-nothing for unverified, suppressed and non-consenting drafts", async () => {
+    db.campaigns.push(baseCampaign({ status: "APPROVED" }) as Row);
+    db.invitations.push(
+      { id: "inv-1", campaignId: "cmp-1", prospectId: "p-1", status: "DRAFT" },
+      { id: "inv-2", campaignId: "cmp-1", prospectId: "p-2", status: "DRAFT" },
+    );
+    db.consents.push(
+      { prospectId: "p-1", telegramId: "111", startedAt: new Date(), revokedAt: null },
+      { prospectId: "p-2", telegramId: "222", startedAt: new Date(), revokedAt: null },
+    );
+    db.prospects[1].verificationStatus = "DISCOVERED";
+    expect((await approveCampaignInvitations("cmp-1", "admin-1")).ok).toBe(false);
+    expect(db.invitations.every((i: Row) => i.status === "DRAFT")).toBe(true);
+    db.prospects[1].verificationStatus = "VERIFIED";
+    db.suppressions.push({ identifier: "user:222" });
+    expect((await approveCampaignInvitations("cmp-1", "admin-1")).ok).toBe(false);
+    db.suppressions = [];
+    db.consents[1].revokedAt = new Date();
+    expect((await approveCampaignInvitations("cmp-1", "admin-1")).ok).toBe(false);
+    expect(db.invitations.every((i: Row) => i.status === "DRAFT")).toBe(true);
+    db.consents[1].revokedAt = null;
+    const result = await approveCampaignInvitations("cmp-1", "admin-1");
+    expect(result).toMatchObject({ ok: true, approved: 2 });
+    expect(db.invitations.every((i: Row) => i.status === "APPROVED")).toBe(true);
+    expect(db.audit.some((event: Row) => event.action === "invitations.approved")).toBe(true);
   });
 
   it("refuses to approve twice", async () => {
@@ -586,6 +648,7 @@ describe("campaign message builder", () => {
       prospect({ id: "p-1", publicName: "آرایشگاه مردانه یک", telegramUsername: "owner_one" })
     );
     db.users.push({ id: "u-1", telegramId: "111", telegramUsername: "owner_one" });
+    db.consents.push({ prospectId: "p-1", telegramId: "111", startedAt: new Date(), revokedAt: null });
   }
 
   it("saves the composed message as the campaign's own template", async () => {
@@ -751,13 +814,14 @@ describe("delivery safety switches", () => {
     if (!result.ok) expect(result.error).toMatch(/auto/i);
   });
 
-  it("audit logging is fail-soft: a missing audit table cannot break approval", async () => {
-    // The mocked prisma has NO outreachAuditEvent model at all — exactly the
-    // production state before `db push` applies 0003. The flow must still work.
+  it("audit failure rolls back campaign approval", async () => {
+    db.auditFail = true;
     db.campaigns = [];
     db.campaigns.push(
       baseCampaign({ status: "REVIEW", lastDryRunAt: new Date() } as any) as Row
     );
-    await expect(approveCampaign("cmp-1", "admin-1")).resolves.toMatchObject({ ok: true });
+    db.consents.push(...db.prospects.map((p: Row, index: number) => ({ prospectId: p.id, telegramId: String(100 + index), startedAt: new Date(), revokedAt: null })));
+    await expect(approveCampaign("cmp-1", "admin-1")).rejects.toThrow();
+    expect(db.campaigns[0].status).toBe("REVIEW");
   });
 });
