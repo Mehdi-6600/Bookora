@@ -16,7 +16,7 @@ Not medical. Not "every industry and country".
 
 | Criterion | Barbers / men's salons (fa) | Beauty salons (fa) | Medical (fa) |
 | --- | --- | --- | --- |
-| **Reachable by the founder** | ⭐ Best. Every one of the 11 Tehran barbers in the starter list publishes a public Instagram or Telegram handle, so a direct, personal message is possible with no gatekeeper. | ⭐ Also good — same public-profile pattern. | ✗ Worst. Receptionists, clinic managers, procurement. |
+| **Reachable by the founder** | ⭐ Best. Every one of the 8 usable candidates in the starter list publishes a public Instagram or Telegram handle, so a direct, personal message is possible with no gatekeeper. | ⭐ Also good — same public-profile pattern. | ✗ Worst. Receptionists, clinic managers, procurement. |
 | **Booking frequency** | ⭐ 20–40 short appointments/day, 30–60 min each, repeat every 3–6 weeks. Very high slot churn → the product is used every single day. | ⭐ Similar volume, longer slots. | Low volume, long lead times. |
 | **Existing booking habit** | ⭐ Actively booking today, mostly by Instagram DM and phone — publicly documented ([barber scheduling via messaging is the norm](https://en.mareaalcalina.com/como-vender/barberia-peluqueria-por-whatsapp), [UAE barbers expected to take WhatsApp bookings](https://www.yallasalon.me/guides/best-barbershop-booking-software-uae)). They already accept the *behaviour* Bookora needs; only the tool is missing. | ⭐ Same. | Formal referral/intake flow — a different product. |
 | **Likelihood of trying a new free tool** | ⭐ Owner-operated. The owner *is* the decision maker. One business, no IT, no procurement. | ⭐ Owner-operated too, but more multi-staff → more coordination. | ✗ Compliance, records, liability. |
@@ -33,9 +33,10 @@ concrete points:
    appointment, so the owner feels the value within days.
 2. **Simpler service menus.** A barber has 5–10 services. Bookora's service
    editor handles that in one screen with no migration pain.
-3. **The starter prospect list skews barber.** 11 of the 15 prospects found are
-   barbershops — supply-side evidence that they are the most publicly
-   discoverable segment in this market.
+3. **The starter prospect list skews barber.** 5 of the 8 usable candidates are
+   barbershops, and the directory that produced most of them lists
+   **"تلگرام: رزرو وقت"** (Telegram: booking appointments) against one of them —
+   supply-side evidence that this is the most publicly discoverable segment.
 
 Beauty salons are the second wedge, not a different project: same language, same
 templates, same funnel. Once the Persian onboarding is proven with 5 barbers,
@@ -107,10 +108,12 @@ to a Vercel-deployed project — not caused by these changes.
 
 ### Day 3 — Load 15 prospects and prepare the first drafts
 
-- Add all 15 prospects from `PROSPECTING.md`. Re-verify each Tier B profile
-  before adding — delete any you cannot confirm.
+- Add the **8 usable candidates** (3 Tier A + 5 Tier B) from `PROSPECTING.md`.
+  Re-verify every Tier B profile before adding — delete any you cannot confirm.
+  Do **not** contact the Tier C Dubai businesses (outside the niche) or the
+  rejected entries.
 - Install the starter keyword set. Set `outreach.timezone` to `Asia/Tehran`.
-- **Prepare** 5 invitations (not 15 — keep it personal).
+- **Prepare** 5 invitations (not 8 — keep it personal).
 - **Exit criteria:** 5 drafts, each reviewed and personalized with one
   specific line about that business.
 
@@ -147,7 +150,10 @@ to a Vercel-deployed project — not caused by these changes.
 - Add those referrals as new prospects (warm intros convert far better than
   cold ones).
 - Review the funnel: where did the 5 drop off? Fix the single biggest drop.
-- Add the next 10 prospects from the discovery seed list.
+- Extend the list the same way the first 8 were found: public Tehran salon
+  directories and Telegram pages you verify yourself. **The system's discovery
+  job will not find prospects for you** unless you configure an authorized
+  source — see `DISCOVERY.md`.
 - **Exit criteria:** a written, repeatable 5-message-per-day routine and at
   least 1 activated business + 2 warm referrals.
 
