@@ -46,6 +46,10 @@ const mocks = vi.hoisted(() => {
         return { key: args.where.key, value };
       }
     ),
+    findUnique: vi.fn(async ({ where }: { where: { key: string } }) => {
+      const value = state.settings.get(where.key);
+      return value === undefined ? null : { value };
+    }),
     createAuditEvent: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
       state.auditEvents.push(data);
       return data;
@@ -65,6 +69,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     adminSetting: {
       findMany: mocks.functions.findMany,
+      findUnique: mocks.functions.findUnique,
       upsert: mocks.functions.upsert,
     },
     outreachAuditEvent: {
