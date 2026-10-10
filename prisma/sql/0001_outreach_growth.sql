@@ -8,6 +8,10 @@
 --   psql "$DIRECT_URL" -f prisma/sql/0001_outreach_growth.sql
 --
 -- Either run this file OR `npm run db:push` — do not do both.
+--
+-- Idempotent: safe to run more than once. Every CREATE uses IF NOT EXISTS and
+-- every constraint is added inside an existence guard (the same pattern as
+-- 0002/0003), so a re-run on an already-migrated database is a no-op.
 
 CREATE TABLE IF NOT EXISTS "outreach_campaigns" (
     "id" TEXT NOT NULL,
@@ -56,8 +60,16 @@ CREATE INDEX IF NOT EXISTS "outreach_prospects_campaignId_idx" ON "outreach_pros
 CREATE INDEX IF NOT EXISTS "outreach_prospects_nextFollowUpAt_idx" ON "outreach_prospects"("nextFollowUpAt");
 CREATE INDEX IF NOT EXISTS "outreach_prospects_category_idx" ON "outreach_prospects"("category");
 CREATE INDEX IF NOT EXISTS "outreach_prospects_optedOutAt_idx" ON "outreach_prospects"("optedOutAt");
-ALTER TABLE "outreach_prospects" ADD CONSTRAINT "outreach_prospects_campaignId_fkey"
-    FOREIGN KEY ("campaignId") REFERENCES "outreach_campaigns"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'outreach_prospects_campaignId_fkey'
+  ) THEN
+    ALTER TABLE "outreach_prospects"
+      ADD CONSTRAINT "outreach_prospects_campaignId_fkey"
+      FOREIGN KEY ("campaignId") REFERENCES "outreach_campaigns"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "invitation_templates" (
     "id" TEXT NOT NULL,
@@ -103,10 +115,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS "outreach_invitations_startParam_key" ON "outr
 CREATE INDEX IF NOT EXISTS "outreach_invitations_status_idx" ON "outreach_invitations"("status");
 CREATE INDEX IF NOT EXISTS "outreach_invitations_prospectId_idx" ON "outreach_invitations"("prospectId");
 CREATE INDEX IF NOT EXISTS "outreach_invitations_createdAt_idx" ON "outreach_invitations"("createdAt");
-ALTER TABLE "outreach_invitations" ADD CONSTRAINT "outreach_invitations_prospectId_fkey"
-    FOREIGN KEY ("prospectId") REFERENCES "outreach_prospects"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "outreach_invitations" ADD CONSTRAINT "outreach_invitations_templateId_fkey"
-    FOREIGN KEY ("templateId") REFERENCES "invitation_templates"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'outreach_invitations_prospectId_fkey'
+  ) THEN
+    ALTER TABLE "outreach_invitations"
+      ADD CONSTRAINT "outreach_invitations_prospectId_fkey"
+      FOREIGN KEY ("prospectId") REFERENCES "outreach_prospects"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'outreach_invitations_templateId_fkey'
+  ) THEN
+    ALTER TABLE "outreach_invitations"
+      ADD CONSTRAINT "outreach_invitations_templateId_fkey"
+      FOREIGN KEY ("templateId") REFERENCES "invitation_templates"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "bot_starts" (
     "id" TEXT NOT NULL,
@@ -123,10 +152,27 @@ CREATE TABLE IF NOT EXISTS "bot_starts" (
 CREATE INDEX IF NOT EXISTS "bot_starts_telegramId_idx" ON "bot_starts"("telegramId");
 CREATE INDEX IF NOT EXISTS "bot_starts_startParam_idx" ON "bot_starts"("startParam");
 CREATE INDEX IF NOT EXISTS "bot_starts_createdAt_idx" ON "bot_starts"("createdAt");
-ALTER TABLE "bot_starts" ADD CONSTRAINT "bot_starts_prospectId_fkey"
-    FOREIGN KEY ("prospectId") REFERENCES "outreach_prospects"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "bot_starts" ADD CONSTRAINT "bot_starts_campaignId_fkey"
-    FOREIGN KEY ("campaignId") REFERENCES "outreach_campaigns"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'bot_starts_prospectId_fkey'
+  ) THEN
+    ALTER TABLE "bot_starts"
+      ADD CONSTRAINT "bot_starts_prospectId_fkey"
+      FOREIGN KEY ("prospectId") REFERENCES "outreach_prospects"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'bot_starts_campaignId_fkey'
+  ) THEN
+    ALTER TABLE "bot_starts"
+      ADD CONSTRAINT "bot_starts_campaignId_fkey"
+      FOREIGN KEY ("campaignId") REFERENCES "outreach_campaigns"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "outreach_suppressions" (
     "id" TEXT NOT NULL,
@@ -183,8 +229,16 @@ CREATE INDEX IF NOT EXISTS "discovery_candidates_status_idx" ON "discovery_candi
 CREATE INDEX IF NOT EXISTS "discovery_candidates_discoveredOn_idx" ON "discovery_candidates"("discoveredOn");
 CREATE INDEX IF NOT EXISTS "discovery_candidates_group_idx" ON "discovery_candidates"("group");
 CREATE INDEX IF NOT EXISTS "discovery_candidates_score_idx" ON "discovery_candidates"("score");
-ALTER TABLE "discovery_candidates" ADD CONSTRAINT "discovery_candidates_prospectId_fkey"
-    FOREIGN KEY ("prospectId") REFERENCES "outreach_prospects"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'discovery_candidates_prospectId_fkey'
+  ) THEN
+    ALTER TABLE "discovery_candidates"
+      ADD CONSTRAINT "discovery_candidates_prospectId_fkey"
+      FOREIGN KEY ("prospectId") REFERENCES "outreach_prospects"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "discovery_runs" (
     "id" TEXT NOT NULL,
