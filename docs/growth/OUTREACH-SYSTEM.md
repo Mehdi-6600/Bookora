@@ -6,6 +6,11 @@ Implemented 2026-10-10 · branch `arena/b3951939-bookora`
 
 ## 1. What was built
 
+> **Update:** this system was extended with a 100-city approval registry, a
+> per-campaign message builder, an audit trail and measured-vs-estimated
+> analytics. See [GROWTH-EXPANSION.md](./GROWTH-EXPANSION.md); the safety
+> model below still applies unchanged (and is now also audited).
+
 An admin-only **outreach and invitation system** inside the existing Next.js +
 Prisma + Postgres stack. No new infrastructure, no new dependencies, no new
 deployment target.

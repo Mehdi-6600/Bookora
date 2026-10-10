@@ -4,7 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { buildBotDeepLink, buildCampaignStartParam } from "@/lib/outreach/deeplink";
-import { isCityCode, isBusinessSegment } from "@/lib/outreach/cities";
+import {
+  isBusinessSegment,
+  parseCampaignCities,
+  getEffectiveApprovedCities,
+  MAX_CAMPAIGN_CITIES,
+} from "@/lib/outreach/cities";
+import { validateDestinationUrl } from "@/lib/outreach/message";
+import { getAuditEvents } from "@/lib/outreach/audit";
 import { normalizeLanguage } from "@/lib/outreach/types";
 import { planCampaign } from "@/lib/outreach/campaigns";
 
@@ -18,7 +25,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const campaign = await prisma.outreachCampaign.findUnique({
     where: { id },
     include: {
-      template: { select: { id: true, code: true, language: true } },
+      template: {
+        select: { id: true, code: true, language: true, body: true },
+      },
       _count: { select: { prospects: true, botStarts: true, invitations: true } },
     },
   });
@@ -28,16 +37,25 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const plan = await planCampaign(campaign);
+  // The message builder needs the CURRENT editable text; the audit trail shows
+  // who changed what. `getAuditEvents` is fail-soft (empty list until the
+  // additive 0003 migration is applied).
+  const auditEvents = await getAuditEvents({
+    entityId: campaign.id,
+    take: 25,
+  });
 
   return NextResponse.json(
     {
       campaign: {
         ...campaign,
         templateCode: campaign.template?.code ?? null,
+        templateBody: campaign.template?.body ?? null,
         deepLink: buildBotDeepLink(buildCampaignStartParam(campaign.code)),
       },
       counts: campaign._count,
       plan,
+      auditEvents,
     },
     { headers: { "Cache-Control": "no-store" } }
   );
@@ -47,7 +65,7 @@ const patchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(500).nullable().optional(),
   active: z.boolean().optional(),
-  cities: z.array(z.string()).max(4).optional(),
+  cities: z.array(z.string()).max(MAX_CAMPAIGN_CITIES).optional(),
   segments: z.array(z.string()).max(2).optional(),
   language: z.string().trim().max(8).optional(),
   objective: z.string().trim().max(200).nullable().optional(),
@@ -102,22 +120,50 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const data = parsed.data;
   const update: Record<string, unknown> = {};
 
+  if (data.cities !== undefined) {
+    const approvedCodes = await getEffectiveApprovedCities();
+    const targeting = parseCampaignCities(data.cities, approvedCodes);
+    if (targeting.tooMany) {
+      return NextResponse.json(
+        { error: `A campaign may target at most ${MAX_CAMPAIGN_CITIES} cities.` },
+        { status: 400 }
+      );
+    }
+    if (targeting.unknown.length > 0) {
+      return NextResponse.json(
+        { error: "unknown cities", unknown: targeting.unknown },
+        { status: 400 }
+      );
+    }
+    if (targeting.unapproved.length > 0) {
+      return NextResponse.json(
+        { error: "cities not approved", unapproved: targeting.unapproved },
+        { status: 400 }
+      );
+    }
+    update.cities = targeting.cities;
+  }
+
+  if (data.destinationUrl !== undefined && data.destinationUrl !== null) {
+    const valid = validateDestinationUrl(data.destinationUrl);
+    if (!valid.ok) {
+      return NextResponse.json({ error: `destinationUrl: ${valid.reason}` }, { status: 400 });
+    }
+    update.destinationUrl = valid.url;
+  } else if (data.destinationUrl === null) {
+    update.destinationUrl = null;
+  }
+
   if (data.name !== undefined) update.name = data.name;
   if (data.description !== undefined) update.description = data.description;
   if (data.active !== undefined) update.active = data.active;
   if (data.objective !== undefined) update.objective = data.objective;
   if (data.templateId !== undefined) update.templateId = data.templateId;
   if (data.cta !== undefined) update.cta = data.cta;
-  if (data.destinationUrl !== undefined) update.destinationUrl = data.destinationUrl;
   if (data.followUpPolicy !== undefined) update.followUpPolicy = data.followUpPolicy;
   if (data.channel !== undefined) update.channel = data.channel;
   if (data.sendLimit !== undefined) update.sendLimit = data.sendLimit;
   if (data.language !== undefined) update.language = normalizeLanguage(data.language);
-  if (data.cities !== undefined) {
-    update.cities = data.cities
-      .map((v) => v.trim().toUpperCase())
-      .filter(isCityCode);
-  }
   if (data.segments !== undefined) {
     update.segments = data.segments
       .map((v) => v.trim().toUpperCase())

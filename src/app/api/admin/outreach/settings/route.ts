@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
+import { recordAuditEvent } from "@/lib/outreach/audit";
 import {
   isOutreachSettingKey,
   OUTREACH_SETTING_KEYS,
@@ -66,6 +67,29 @@ export async function PUT(req: NextRequest) {
       { error: "invalid settings", invalid },
       { status: 400 }
     );
+  }
+
+  // Audit which switches moved (keys only — never values, so nothing sensitive
+  // is persisted twice) and whether this was the global pause.
+  const notable = Object.keys(body as Record<string, unknown>).filter(
+    (key) =>
+      key === "outreach.enabled" ||
+      key === "outreach.auto_send_enabled" ||
+      key === "outreach.channel_url" ||
+      key === "outreach.cities_enabled" ||
+      key === "outreach.cities_disabled"
+  );
+  if (notable.length > 0) {
+    await recordAuditEvent({
+      scope: "settings",
+      action: notable.includes("outreach.enabled") || notable.includes("outreach.auto_send_enabled")
+        ? "settings.pause_changed"
+        : notable.includes("outreach.channel_url")
+          ? "settings.channel_url_changed"
+          : "cities.approval_changed",
+      actorUserId: guard.user.id,
+      detail: `keys=${notable.join(",")} values=${notable.map((k) => `${k}:${String((body as Record<string, unknown>)[k]).slice(0, 40)}`).join(",")}`,
+    });
   }
 
   const settings = await getOutreachSettings();

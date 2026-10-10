@@ -101,7 +101,24 @@ vi.mock("@/lib/prisma", () => {
     },
     invitationTemplate: {
       findUnique: async ({ where }: any) =>
-        db.templates.find((row: Row) => row.id === where.id) ?? null,
+        db.templates.find(
+          (row: Row) => row.id === where.id || row.code === where.code
+        ) ?? null,
+      create: async ({ data }: any) => {
+        const row = {
+          id: "tpl-" + (db.templates.length + 1),
+          active: true,
+          category: "ALL",
+          ...data,
+        };
+        db.templates.push(row);
+        return row;
+      },
+      update: async ({ where, data }: any) => {
+        const row = db.templates.find((item: Row) => item.id === where.id) as Row;
+        Object.assign(row, data);
+        return row;
+      },
       findFirst: async ({ where }: any) =>
         db.templates.find(
           (row: Row) => row.active === true && row.language === where.language
@@ -149,8 +166,13 @@ import {
   normalizeTargeting,
   planCampaign,
   prepareCampaign,
+  saveCampaignMessage,
+  sendCampaignInvitations,
+  describeTargeting,
   type CampaignLike,
 } from "@/lib/outreach/campaigns";
+import { CITY_REGISTRY } from "@/lib/outreach/city-registry";
+import { renderTemplate, validateTemplateBody } from "@/lib/outreach/templates";
 
 function baseCampaign(overrides: Partial<CampaignLike> = {}): CampaignLike {
   return {
@@ -495,5 +517,247 @@ describe("preparation", () => {
     await prepareCampaign("cmp-1", "admin-1");
 
     expect(db.invitations.every((row) => row.campaignId === "cmp-1")).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Market registry integration (100-city scope)                                */
+/* -------------------------------------------------------------------------- */
+
+describe("registry-wide targeting", () => {
+  it("accepts every approved code up to 100 cities in one campaign", () => {
+    const all = CITY_REGISTRY.map((entry) => entry.code);
+    const result = normalizeTargeting({
+      cities: [...all, "TEHRAN", "nowhereville"],
+    });
+    // Only DEFAULT-approved codes survive normalisation; a campaign could hold
+    // all of them and still be one entry away from the cap.
+    expect(result.cities).toEqual(
+      expect.arrayContaining(["TEHRAN", "MASHHAD", "SHIRAZ", "KARAJ"])
+    );
+    expect(result.cities.length).toBeLessThanOrEqual(100);
+    expect(result.cities).not.toContain("NOWHEREVILLE");
+    expect(result.cities).not.toContain("ISFAHAN"); // registered ≠ approved
+  });
+
+  it("old four-city campaigns are untouched by the registry", () => {
+    const legacy = normalizeTargeting({
+      cities: ["TEHRAN", "MASHHAD", "SHIRAZ", "KARAJ"],
+      segments: ["MENS_BARBER", "WOMENS_SALON"],
+      language: "fa",
+    });
+    expect(legacy.cities).toEqual(["TEHRAN", "MASHHAD", "SHIRAZ", "KARAJ"]);
+  });
+
+  it("labels known codes in both languages and renders unknown ones verbatim", () => {
+    const plan = {
+      cities: ["TEHRAN", "LEFTOVER_CODE"],
+      segments: [],
+    } as any;
+    const described = describeTargeting(plan, "fa");
+    expect(described.cities).toContain("تهران");
+    // An unknown stored code must show itself, never another city's name.
+    expect(described.cities).toContain("LEFTOVER_CODE");
+    expect(described.cities).not.toContain("کرج");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Message builder: save, freeze and preview-equals-prepare                    */
+/* -------------------------------------------------------------------------- */
+
+describe("campaign message builder", () => {
+  function seededApprovedCampaign() {
+    db.campaigns = [];
+    db.prospects = [];
+    db.invitations = [];
+    db.templates = [];
+    db.campaigns.push(
+      baseCampaign({
+        id: "cmp-1",
+        status: "REVIEW",
+        lastDryRunAt: new Date(),
+        templateId: null,
+        cta: null,
+        destinationUrl: null,
+      } as any) as Row
+    );
+    db.prospects.push(
+      prospect({ id: "p-1", publicName: "آرایشگاه مردانه یک", telegramUsername: "owner_one" })
+    );
+    db.users.push({ id: "u-1", telegramId: "111", telegramUsername: "owner_one" });
+  }
+
+  it("saves the composed message as the campaign's own template", async () => {
+    seededApprovedCampaign();
+    db.settings.push({ key: "outreach.channel_url", value: "https://t.me/bookora_channel" });
+
+    const result = await saveCampaignMessage(
+      "cmp-1",
+      {
+        message: "سلام {businessName} 👋",
+        language: "fa",
+        cta: "لینک شما 👇",
+        destinations: { bot: true, channel: true, other: false },
+      },
+      "admin-1"
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.body).toContain("{businessName}");
+    expect(result.body).toContain("https://t.me/bookora_channel");
+    expect(result.body).toContain("{link}");
+    expect(db.templates).toHaveLength(1);
+    // Campaign-scoped template code derived from the campaign code.
+    expect(db.templates[0].code).toBe("msg_tehran_barbers");
+    expect(db.campaigns[0].templateId).toBe(db.templates[0].id);
+    // The preview is rendered from the stored body — it must show the sample
+    // business name (campaign name acts as the sample) and both links.
+    expect(result.preview).toContain("Tehran barbershops");
+    expect(result.preview).toContain("https://t.me/bookora_channel");
+    expect(result.preview).toContain("t.me/BookoraBot?start=preview_");
+    // The campaign-scoped template must pass the same validation prepare uses.
+    expect(validateTemplateBody(db.templates[0].body)).toBeNull();
+  });
+
+  it("the preview equals what preparation renders per recipient", async () => {
+    seededApprovedCampaign();
+
+    const result = await saveCampaignMessage(
+      "cmp-1",
+      {
+        message: "سلام {businessName} — {category}",
+        destinations: { bot: true },
+      },
+      "admin-1"
+    );
+    if (!result.ok) throw new Error("save failed");
+
+    await approveCampaign("cmp-1", "admin-1");
+    const prepared = await prepareCampaign("cmp-1", "admin-1");
+    expect(prepared.ok).toBe(true);
+    expect(db.invitations).toHaveLength(1);
+
+    // Preparation renders the stored body with a per-recipient deep link.
+    const rendered = renderTemplate(result.body, {
+      businessName: "آرایشگاه مردانه یک",
+      link: db.invitations[0].deepLink,
+      categoryLabel: "آرایشگاه مردانه",
+    });
+    expect(db.invitations[0].body).toBe(rendered);
+    expect(db.invitations[0].body).toContain("سلام آرایشگاه مردانه یک");
+    expect(db.invitations[0].body).toContain("t.me/BookoraBot?start=");
+  });
+
+  it("rejects dangerous URLs before anything is stored", async () => {
+    seededApprovedCampaign();
+    const result = await saveCampaignMessage(
+      "cmp-1",
+      {
+        message: "Hi {businessName}",
+        destinations: { bot: false, channel: false, other: true },
+        destinationUrl: "javascript:alert(1)",
+      },
+      "admin-1"
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(",")).toContain("scheme");
+    expect(db.templates).toHaveLength(0);
+  });
+
+  it("refuses to save when the channel URL was never configured", async () => {
+    seededApprovedCampaign();
+    const result = await saveCampaignMessage(
+      "cmp-1",
+      { message: "Hi {businessName}", destinations: { bot: false, channel: true } },
+      "admin-1"
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors).toContain("channelUrl.notConfigured");
+  });
+
+  it("freezes the message after approval, like targeting", async () => {
+    seededApprovedCampaign();
+    await saveCampaignMessage(
+      "cmp-1",
+      { message: "Hi {businessName}", destinations: { bot: true } },
+      "admin-1"
+    );
+    await approveCampaign("cmp-1", "admin-1");
+
+    const late = await saveCampaignMessage(
+      "cmp-1",
+      { message: "changed {businessName}", destinations: { bot: true } },
+      "admin-1"
+    );
+    expect(late.ok).toBe(false);
+    if (!late.ok) expect(late.errors).toContain("campaign.locked");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Global pause + fail-soft audit                                              */
+/* -------------------------------------------------------------------------- */
+
+describe("delivery safety switches", () => {
+  async function approvedReadyToDeliver() {
+    db.campaigns = [];
+    db.prospects = [];
+    db.invitations = [];
+    db.templates = [];
+    db.settings = [];
+    db.settings.push({ key: "outreach.daily_invitation_limit", value: "10" });
+    db.campaigns.push(
+      baseCampaign({ status: "APPROVED", lastDryRunAt: new Date() } as any) as Row
+    );
+    db.prospects.push(
+      prospect({ id: "p-1", publicName: "آرایشگاه یک", telegramUsername: "owner_one" })
+    );
+    db.users.push({ id: "u-1", telegramId: "111", telegramUsername: "owner_one" });
+    db.invitations.push({
+      id: "inv-1",
+      prospectId: "p-1",
+      status: "APPROVED",
+      startParam: "abc",
+      campaignId: "cmp-1",
+      body: "hi",
+      deepLink: "https://t.me/BookoraBot?start=abc",
+    });
+    return db.campaigns[0];
+  }
+
+  it("refuses to send while outreach is globally disabled", async () => {
+    const campaign = await approvedReadyToDeliver();
+    db.settings.push({ key: "outreach.enabled", value: "false" });
+
+    const result = await sendCampaignInvitations({ campaignId: campaign.id, limit: 5 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/disabled/i);
+    // Status untouched: not "SENDING", nothing delivered.
+    expect(db.campaigns[0].status).toBe("APPROVED");
+    expect(db.invitations[0].status).toBe("APPROVED");
+  });
+
+  it("refuses automatic delivery when auto-send is off", async () => {
+    const campaign = await approvedReadyToDeliver();
+    db.settings.push({ key: "outreach.auto_send_enabled", value: "false" });
+
+    const result = await sendCampaignInvitations({ campaignId: campaign.id, limit: 5 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/auto/i);
+  });
+
+  it("audit logging is fail-soft: a missing audit table cannot break approval", async () => {
+    // The mocked prisma has NO outreachAuditEvent model at all — exactly the
+    // production state before `db push` applies 0003. The flow must still work.
+    db.campaigns = [];
+    db.campaigns.push(
+      baseCampaign({ status: "REVIEW", lastDryRunAt: new Date() } as any) as Row
+    );
+    await expect(approveCampaign("cmp-1", "admin-1")).resolves.toMatchObject({ ok: true });
   });
 });

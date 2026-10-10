@@ -34,13 +34,19 @@ export function renderTemplate(body: string, vars: TemplateVariables): string {
     .trim();
 }
 
-/** Reject a template that carries no link — an invitation without a link cannot convert. */
+/**
+ * Reject an invitation that carries no link at all — an invitation without a
+ * link cannot convert. `{link}` (the per-recipient bot deep link) or an
+ * explicit http(s) URL baked into the body both count; a channel/contact-only
+ * message prepared by the campaign builder is legitimate.
+ */
 export function validateTemplateBody(body: string): string | null {
   const trimmed = body.trim();
   if (trimmed.length === 0) return "template.empty";
   if (trimmed.length > 1500) return "template.tooLong";
-  if (!trimmed.includes("{link}")) return "template.missingLink";
-  return null;
+  if (trimmed.includes("{link}")) return null;
+  if (/https?:\/\/\S+/i.test(trimmed)) return null;
+  return "template.missingLink";
 }
 
 export const CATEGORY_LABELS: Record<ProspectCategory, { en: string; fa: string; ar: string }> = {

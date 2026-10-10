@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeTimeZone } from "@/lib/booking/time";
+import {
+  MAX_CAMPAIGN_CITIES,
+  normalizeCityCodeList,
+} from "@/lib/outreach/city-registry";
 
 /**
  * Outreach configuration.
@@ -19,6 +23,13 @@ export const OUTREACH_SETTING_KEYS = [
   "outreach.feed_url",
   "outreach.feed_enabled",
   "outreach.min_score",
+  /// Public Bookora Telegram channel link. Empty until the owner supplies the
+  /// real URL — the system must never invent or guess a channel link.
+  "outreach.channel_url",
+  /// Administrator-approved extra city codes (comma separated registry codes).
+  "outreach.cities_enabled",
+  /// Registry codes explicitly disabled for new campaign targeting.
+  "outreach.cities_disabled",
 ] as const;
 
 export type OutreachSettingKey = (typeof OUTREACH_SETTING_KEYS)[number];
@@ -47,6 +58,10 @@ export type OutreachSettings = {
   feedUrl: string;
   feedEnabled: boolean;
   minScore: number;
+  /// Public channel link used by the campaign message builder. Empty string
+  /// means "not configured yet"; the builder then refuses to enable the
+  /// channel destination instead of fabricating a link.
+  channelUrl: string;
 };
 
 export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
@@ -59,6 +74,7 @@ export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
   feedUrl: "",
   feedEnabled: false,
   minScore: DEFAULT_MIN_SCORE,
+  channelUrl: "",
 };
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -130,6 +146,26 @@ export function coerceSettingValue(
         return null;
       }
     }
+    case "outreach.channel_url": {
+      // Same rules as the feed: https or empty. Never a fabricated default.
+      if (typeof raw !== "string") return null;
+      const trimmed = raw.trim();
+      if (trimmed.length === 0) return "";
+      if (trimmed.length > 500) return null;
+      try {
+        const url = new URL(trimmed);
+        if (url.protocol !== "https:") return null;
+        return url.toString();
+      } catch {
+        return null;
+      }
+    }
+    case "outreach.cities_enabled":
+    case "outreach.cities_disabled": {
+      const normalized = normalizeCityCodeList(raw, MAX_CAMPAIGN_CITIES);
+      if (normalized === null) return null;
+      return normalized.join(",");
+    }
     default:
       return null;
   }
@@ -173,6 +209,38 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
     feedUrl: map.get("outreach.feed_url") ?? "",
     feedEnabled: readBoolean(map.get("outreach.feed_enabled"), false),
     minScore: readInt(map.get("outreach.min_score"), DEFAULT_OUTREACH_SETTINGS.minScore, 0, 100),
+    channelUrl: map.get("outreach.channel_url") ?? "",
+  };
+}
+
+/**
+ * City approval overrides stored in `admin_settings`.
+ *
+ * Fail-soft by contract: if the settings table cannot be read, BOTH lists
+ * come back empty, so the effective approved set stays exactly the registry
+ * default (the four launch cities). A read error must never widen the
+ * outreach scope.
+ */
+export async function getCityApprovalOverrides(): Promise<{
+  enabled: string[];
+  disabled: string[];
+}> {
+  let rows: Array<{ key: string; value: string }> = [];
+  try {
+    rows = await prisma.adminSetting.findMany({
+      where: {
+        key: { in: ["outreach.cities_enabled", "outreach.cities_disabled"] },
+      },
+      select: { key: true, value: true },
+    });
+  } catch {
+    return { enabled: [], disabled: [] };
+  }
+
+  const map = new Map(rows.map((row) => [row.key, row.value]));
+  return {
+    enabled: normalizeCityCodeList(map.get("outreach.cities_enabled") ?? "", MAX_CAMPAIGN_CITIES) ?? [],
+    disabled: normalizeCityCodeList(map.get("outreach.cities_disabled") ?? "", MAX_CAMPAIGN_CITIES) ?? [],
   };
 }
 

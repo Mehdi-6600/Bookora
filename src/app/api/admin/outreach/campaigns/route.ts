@@ -8,12 +8,18 @@ import {
   buildCampaignStartParam,
 } from "@/lib/outreach/deeplink";
 import {
-  APPROVED_CITIES,
   BUSINESS_SEGMENTS,
-  isCityCode,
+  CITY_REGISTRY,
   isBusinessSegment,
+  parseCampaignCities,
+  getEffectiveApprovedCities,
+  MAX_CAMPAIGN_CITIES,
 } from "@/lib/outreach/cities";
 import { normalizeLanguage } from "@/lib/outreach/types";
+import { validateDestinationUrl } from "@/lib/outreach/message";
+import { getOutreachSettings } from "@/lib/outreach/settings";
+import { env } from "@/lib/env";
+import { recordAuditEvent } from "@/lib/outreach/audit";
 
 export async function GET() {
   const guard = await requireAdmin();
@@ -30,10 +36,31 @@ export async function GET() {
     },
   });
 
+  // The picker data is registry-wide: every known code with its labels and an
+  // `approved` flag, so the UI never hardcodes a city list and admins can see
+  // which markets exist but are not approved yet. `approved` reflects the
+  // effective per-deployment approval set from `admin_settings`.
+  const approved = await getEffectiveApprovedCities();
+  const settings = await getOutreachSettings();
+
   return NextResponse.json(
     {
-      cities: APPROVED_CITIES,
+      cities: approved,
       segments: BUSINESS_SEGMENTS,
+      maxCampaignCities: MAX_CAMPAIGN_CITIES,
+      cityRegistry: CITY_REGISTRY.map((entry) => ({
+        code: entry.code,
+        fa: entry.fa,
+        en: entry.en,
+        region: entry.region,
+        country: entry.country,
+        approved: approved.includes(entry.code),
+      })),
+      messageDefaults: {
+        botUrl: buildBotDeepLink("START_PARAM"),
+        botUsername: env.TELEGRAM_BOT_USERNAME,
+        channelUrl: settings.channelUrl,
+      },
       campaigns: campaigns.map((campaign) => ({
         id: campaign.id,
         code: campaign.code,
@@ -77,7 +104,7 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(500).nullable().optional(),
   active: z.boolean().default(true),
-  cities: z.array(z.string()).max(4).default([]),
+  cities: z.array(z.string()).max(MAX_CAMPAIGN_CITIES).default([]),
   segments: z.array(z.string()).max(2).default([]),
   language: z.string().trim().max(8).default("fa"),
   objective: z.string().trim().max(200).nullable().optional(),
@@ -89,11 +116,14 @@ const createSchema = z.object({
   sendLimit: z.number().int().min(0).max(100).nullable().optional(),
 });
 
-function cleanCities(values: string[]) {
-  return values
-    .map((value) => value.trim().toUpperCase())
-    .filter(isCityCode)
-    .filter((value, index, all) => all.indexOf(value) === index);
+/**
+ * Strict campaign city validation. Unknown codes and codes the administrator
+ * has not approved are reported back as explicit errors — never dropped
+ * silently, never substituted with another city.
+ */
+function validateCities(values: string[], approvedCodes: string[]) {
+  const parsed = parseCampaignCities(values, approvedCodes);
+  return parsed;
 }
 
 function cleanSegments(values: string[]) {
@@ -112,6 +142,8 @@ function campaignCode(): string {
 export async function POST(req: NextRequest) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
+
+  const approvedCodes = await getEffectiveApprovedCities();
 
   if (await isRateLimited(`outreach-campaign:${guard.user.id}`, 60, 10 * 60 * 1000)) {
     return NextResponse.json({ error: "Too many requests." }, { status: 429 });
@@ -134,6 +166,37 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data;
+
+  const targeting = validateCities(data.cities, approvedCodes);
+  if (targeting.tooMany) {
+    return NextResponse.json(
+      { error: `A campaign may target at most ${MAX_CAMPAIGN_CITIES} cities.` },
+      { status: 400 }
+    );
+  }
+  if (targeting.unknown.length > 0) {
+    return NextResponse.json(
+      { error: "unknown cities", unknown: targeting.unknown, hint: "Only codes from the market registry can be used; add new cities to prisma/../city-registry.ts first." },
+      { status: 400 }
+    );
+  }
+  if (targeting.unapproved.length > 0) {
+    return NextResponse.json(
+      { error: "cities not approved", unapproved: targeting.unapproved, hint: "Approve the market in Campaigns → Markets before targeting it." },
+      { status: 400 }
+    );
+  }
+
+  if (data.destinationUrl) {
+    const valid = validateDestinationUrl(data.destinationUrl);
+    if (!valid.ok) {
+      return NextResponse.json(
+        { error: `destinationUrl: ${valid.reason}` },
+        { status: 400 }
+      );
+    }
+  }
+
   const code = data.code ?? campaignCode();
 
   const existing = await prisma.outreachCampaign.findUnique({
@@ -164,7 +227,7 @@ export async function POST(req: NextRequest) {
       description: data.description ?? null,
       active: data.active,
       status: "DRAFT",
-      cities: cleanCities(data.cities),
+      cities: targeting.cities,
       segments: cleanSegments(data.segments),
       language: normalizeLanguage(data.language),
       objective: data.objective ?? null,
@@ -176,6 +239,14 @@ export async function POST(req: NextRequest) {
       sendLimit: data.sendLimit ?? null,
       requestedById: guard.user.id,
     },
+  });
+
+  await recordAuditEvent({
+    scope: "campaign",
+    entityId: campaign.id,
+    action: "campaign.created",
+    actorUserId: guard.user.id,
+    detail: `cities=${campaign.cities.length} language=${campaign.language}`,
   });
 
   return NextResponse.json(
