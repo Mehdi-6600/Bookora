@@ -6,8 +6,11 @@ import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import {
   buildDedupeKey,
   normalizeTelegramUsername,
+  publicUrlReasonText,
   toTelegramProfileUrl,
+  validatePublicProfileUrl,
 } from "@/lib/outreach/normalize";
+import { targetableProspectWhere } from "@/lib/outreach/campaigns";
 import { buildBotDeepLink, buildProspectStartParam } from "@/lib/outreach/deeplink";
 import {
   isProspectCategory,
@@ -70,6 +73,35 @@ export async function GET(req: NextRequest) {
     ];
   }
 
+  // Counts are database-wide and ignore the filters above, so the panel never
+  // reports the size of the currently loaded page as if it were the total.
+  const [total, byVerification, targetable, targetableWithBotStart, excludedOptOut] =
+    await Promise.all([
+      prisma.outreachProspect.count(),
+      prisma.outreachProspect.groupBy({ by: ["verificationStatus"], _count: { _all: true } }),
+      prisma.outreachProspect.count({ where: targetableProspectWhere() }),
+      prisma.outreachProspect.count({
+        where: { ...targetableProspectWhere(), botStarts: { some: {} } },
+      }),
+      prisma.outreachProspect.count({ where: { optedOutAt: { not: null } } }),
+    ]);
+  const verificationCounts = Object.fromEntries(
+    byVerification.map((row) => [row.verificationStatus, row._count._all])
+  );
+  const counts = {
+    total,
+    pendingVerification: verificationCounts.DISCOVERED ?? 0,
+    verified: verificationCounts.VERIFIED ?? 0,
+    rejected: verificationCounts.REJECTED ?? 0,
+    // Targetable = verified + city + segment + contactable status. Follow-up
+    // timing is applied per campaign, so this is an upper bound.
+    targetable,
+    eligibleEstimate: targetableWithBotStart,
+    manualOnlyEstimate: targetable - targetableWithBotStart,
+    excludedEstimate: total - targetable,
+    optedOut: excludedOptOut,
+  };
+
   const prospects = await prisma.outreachProspect.findMany({
     where,
     orderBy: [{ nextFollowUpAt: "asc" }, { createdAt: "desc" }],
@@ -98,6 +130,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     {
       statuses: PROSPECT_STATUSES,
+      counts,
+      filtered: prospects.length,
       cities: approvedCities,
       segments: BUSINESS_SEGMENTS,
       verificationStatuses: VERIFICATION_STATUSES,
@@ -194,6 +228,21 @@ export async function POST(req: NextRequest) {
   const data = parsed.data;
   const username = normalizeTelegramUsername(data.telegramUsername);
 
+  const publicUrlCheck = data.publicUrl ? validatePublicProfileUrl(data.publicUrl) : null;
+  if (publicUrlCheck && !publicUrlCheck.ok) {
+    return NextResponse.json(
+      { error: "invalid publicUrl", reason: publicUrlReasonText(publicUrlCheck.reason) },
+      { status: 400 }
+    );
+  }
+  const sourceUrlCheck = data.sourceUrl ? validatePublicProfileUrl(data.sourceUrl) : null;
+  if (sourceUrlCheck && !sourceUrlCheck.ok) {
+    return NextResponse.json(
+      { error: "invalid sourceUrl", reason: publicUrlReasonText(sourceUrlCheck.reason) },
+      { status: 400 }
+    );
+  }
+
   if (data.telegramUsername && !username) {
     return NextResponse.json(
       { error: "invalid telegram username" },
@@ -216,7 +265,7 @@ export async function POST(req: NextRequest) {
 
   const dedupeKey = buildDedupeKey({
     telegramUsername: username,
-    publicUrl: data.publicUrl ?? null,
+    publicUrl: publicUrlCheck?.ok ? publicUrlCheck.url : null,
     publicName: data.publicName,
     city: cityCode ?? (data.city ?? null),
   });
@@ -250,9 +299,9 @@ export async function POST(req: NextRequest) {
       neighborhood: data.neighborhood ?? null,
       country: data.country ?? null,
       language: normalizeLanguage(data.language),
-      publicUrl: data.publicUrl ?? null,
+      publicUrl: publicUrlCheck?.ok ? publicUrlCheck.url : null,
       telegramUsername: username,
-      sourceUrl: data.sourceUrl ?? null,
+      sourceUrl: sourceUrlCheck?.ok ? sourceUrlCheck.url : null,
       sourceName: data.sourceName ?? "manual",
       notes: data.notes ?? null,
       campaignId: data.campaignId ?? null,

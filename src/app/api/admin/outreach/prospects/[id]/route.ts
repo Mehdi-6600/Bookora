@@ -10,12 +10,18 @@ import {
   normalizeLanguage,
 } from "@/lib/outreach/types";
 import { recordOptOut } from "@/lib/outreach/invitations";
-import { buildSuppressionIdentifier } from "@/lib/outreach/normalize";
+import {
+  buildSuppressionIdentifier,
+  publicUrlReasonText,
+  validatePublicProfileUrl,
+} from "@/lib/outreach/normalize";
+import { isBusinessSegment, resolveCity } from "@/lib/outreach/cities";
 
 const patchSchema = z.object({
   publicName: z.string().trim().min(1).max(200).optional(),
   category: z.string().refine(isProspectCategory, "invalid category").optional(),
   city: z.string().trim().max(80).nullable().optional(),
+  segment: z.string().trim().max(32).nullable().optional(),
   country: z.string().trim().max(80).nullable().optional(),
   language: z.string().trim().max(8).optional(),
   publicUrl: z.string().trim().max(500).nullable().optional(),
@@ -111,6 +117,54 @@ export async function PATCH(
   }
 
   const data: Record<string, unknown> = { ...parsed.data };
+
+  // City is stored as a registry code only, never as free text.
+  if (parsed.data.city !== undefined) {
+    if (parsed.data.city === null || parsed.data.city === "") {
+      data.city = null;
+    } else {
+      const resolved = resolveCity(parsed.data.city);
+      if (!resolved.city) {
+        return NextResponse.json(
+          {
+            error: "unknown city",
+            reason: "unknown city",
+            hint: "Use a registry city name or code, e.g. Tehran or TEHRAN.",
+          },
+          { status: 400 }
+        );
+      }
+      data.city = resolved.city;
+    }
+  }
+
+  // Segment is an explicit choice from the taxonomy, or cleared.
+  if (parsed.data.segment !== undefined) {
+    if (parsed.data.segment === null || parsed.data.segment === "") {
+      data.segment = null;
+    } else {
+      const upper = parsed.data.segment.toUpperCase();
+      if (!isBusinessSegment(upper)) {
+        return NextResponse.json({ error: "unknown segment" }, { status: 400 });
+      }
+      data.segment = upper;
+    }
+  }
+
+  if (parsed.data.publicUrl !== undefined) {
+    if (parsed.data.publicUrl === null || parsed.data.publicUrl === "") {
+      data.publicUrl = null;
+    } else {
+      const check = validatePublicProfileUrl(parsed.data.publicUrl);
+      if (!check.ok) {
+        return NextResponse.json(
+          { error: "invalid publicUrl", reason: publicUrlReasonText(check.reason) },
+          { status: 400 }
+        );
+      }
+      data.publicUrl = check.url;
+    }
+  }
 
   if (typeof data.language === "string") {
     data.language = normalizeLanguage(data.language);

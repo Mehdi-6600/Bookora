@@ -85,15 +85,20 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ keyword }, { status: 201 });
 }
 
-/** Bulk-install the documented starter keyword set. */
+/**
+ * Install the documented starter keyword set. Only MISSING terms are created.
+ * Existing rows keep their enabled flag and priority, so a keyword the
+ * administrator disabled on purpose is never silently re-enabled.
+ */
 export async function PUT() {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
   let created = 0;
+  let kept = 0;
 
   for (const keyword of DEFAULT_KEYWORDS) {
-    await prisma.discoveryKeyword.upsert({
+    const existing = await prisma.discoveryKeyword.findUnique({
       where: {
         group_language_term: {
           group: keyword.group,
@@ -101,8 +106,16 @@ export async function PUT() {
           term: keyword.term,
         },
       },
-      update: { priority: keyword.priority },
-      create: {
+      select: { id: true },
+    });
+
+    if (existing) {
+      kept += 1;
+      continue;
+    }
+
+    await prisma.discoveryKeyword.create({
+      data: {
         term: keyword.term,
         group: keyword.group,
         language: keyword.language,
@@ -113,5 +126,5 @@ export async function PUT() {
     created += 1;
   }
 
-  return NextResponse.json({ seeded: created });
+  return NextResponse.json({ seeded: created, kept });
 }
