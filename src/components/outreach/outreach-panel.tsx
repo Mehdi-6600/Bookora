@@ -185,9 +185,11 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    const body = data as { error?: string; reason?: string };
     throw new Error(
-      (data as { error?: string; details?: unknown })?.error ??
-        `Request failed (${response.status})`
+      [body?.error ?? `Request failed (${response.status})`, body?.reason]
+        .filter(Boolean)
+        .join(": ")
     );
   }
 
@@ -226,6 +228,8 @@ export function OutreachPanel() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [templateOptions, setTemplateOptions] = useState<any[]>([]);
   const [prospects, setProspects] = useState<any[]>([]);
+  /** Database-wide prospect counts, independent of the loaded/filtered page. */
+  const [prospectCounts, setProspectCounts] = useState<any>(null);
   const [invitations, setInvitations] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [keywords, setKeywords] = useState<any[]>([]);
@@ -266,6 +270,7 @@ export function OutreachPanel() {
     if (verificationFilter) params.set("verification", verificationFilter);
     const data = await api<any>(`/api/admin/outreach/prospects?${params.toString()}`);
     setProspects(data.prospects ?? []);
+    setProspectCounts(data.counts ?? null);
   }, [prospectFilter, prospectQuery]);
 
   const loadInvitations = useCallback(async () => {
@@ -402,6 +407,7 @@ export function OutreachPanel() {
         <ProspectsTab
           cityData={cityData}
           prospects={prospects}
+          counts={prospectCounts}
           filter={prospectFilter}
           setFilter={setProspectFilter}
           query={prospectQuery}
@@ -523,9 +529,32 @@ function Overview({
   const t = useTranslations("outreach");
   const funnel: any[] = stats.funnel ?? [];
   const max = Math.max(1, ...funnel.map((step) => step.count));
+  const blockers: string[] = stats.discovery?.blockers ?? [];
 
   return (
     <div className="space-y-4">
+      <section className={CARD_MAIN}>
+        <h2 className="text-base font-bold text-[#1A1F36]">{t("countsTitle")}</h2>
+        <p className="mt-0.5 text-xs text-[#1A1F36]/60">{t("countsNote")}</p>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <DiagnosticStat label={t("totalProspects")} value={stats.prospects?.total ?? 0} color="bg-[#1A1F36]/10" />
+          <DiagnosticStat label={t("pendingVerification")} value={stats.prospects?.pendingVerification ?? 0} color="bg-[#FCA311]/15" textColor="text-[#B45309]" />
+          <DiagnosticStat label={t("verifiedProspects")} value={stats.prospects?.verified ?? 0} color="bg-[#34C759]/15" textColor="text-[#248A3D]" />
+          <DiagnosticStat label={t("rejectedProspects")} value={stats.prospects?.rejected ?? 0} color="bg-[#FF4D5E]/15" textColor="text-[#C0263A]" />
+          <DiagnosticStat label={t("targetableProspects")} value={stats.prospects?.targetable ?? 0} color="bg-[#4F5FE8]/15" textColor="text-[#4F5FE8]" />
+          <DiagnosticStat label={t("excludedEstimate")} value={stats.prospects?.excludedEstimate ?? 0} color="bg-[#1A1F36]/10" />
+        </div>
+        {blockers.length > 0 && (
+          <ul className="mt-3 space-y-2">
+            {blockers.map((code) => (
+              <li key={code} className="rounded-2xl bg-white p-3 text-xs font-medium text-[#1A1F36]">
+                {t(`blocker_${code}`)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <section className={CARD_MAIN}>
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-[#1A1F36]">{t("funnelTitle")}</h2>
@@ -711,6 +740,7 @@ function Stat({ label, value }: { label: string; value: unknown }) {
 
 function ProspectsTab({
   cityData,
+  counts: dbCounts,
   prospects: initialProspects,
   filter,
   setFilter,
@@ -760,31 +790,15 @@ function ProspectsTab({
     setProspects(data.prospects ?? []);
   }, [filter, query, verificationFilter]);
 
-  // Diagnostic counts
-  const totalProspects = prospects.length;
-  const verificationCounts = prospects.reduce(
-    (acc: Record<string, number>, p: any) => {
-      const v = p.verificationStatus || "DISCOVERED";
-      acc[v] = (acc[v] || 0) + 1;
-      return acc;
-    },
-    { DISCOVERED: 0, VERIFIED: 0, REJECTED: 0 }
-  );
-  const pendingVerification = verificationCounts.DISCOVERED || 0;
-  const verifiedCount = verificationCounts.VERIFIED || 0;
-  const rejectedCount = verificationCounts.REJECTED || 0;
-
-  // Eligibility estimates (client-side approximation)
-  const contactableStatuses = ["NEW", "INTERESTED"];
-  const followupableStatuses = ["CONTACTED", "STARTED_BOT"];
-  const contactable = prospects.filter((p: any) =>
-    contactableStatuses.includes(p.status) || (followupableStatuses.includes(p.status) && p.nextFollowUpAt && new Date(p.nextFollowUpAt).getTime() <= Date.now())
-  );
-  const verifiedContactable = contactable.filter((p: any) => p.verificationStatus === "VERIFIED" && !p.optedOutAt);
-  const hasTelegramId = verifiedContactable.filter((p: any) => p.telegramUserId || (p.botStartCount && p.botStartCount > 0));
-  const eligibleEstimate = hasTelegramId.length;
-  const manualOnlyEstimate = verifiedContactable.length - eligibleEstimate;
-  const excludedEstimate = totalProspects - verifiedContactable.length;
+  // Diagnostic counts. These are database-wide (see GET /prospects `counts`),
+  // never derived from the currently loaded or filtered page.
+  const totalProspects = dbCounts?.total ?? 0;
+  const pendingVerification = dbCounts?.pendingVerification ?? 0;
+  const verifiedCount = dbCounts?.verified ?? 0;
+  const rejectedCount = dbCounts?.rejected ?? 0;
+  const targetableCount = dbCounts?.targetable ?? 0;
+  const eligibleEstimate = dbCounts?.eligibleEstimate ?? 0;
+  const excludedEstimate = dbCounts?.excludedEstimate ?? 0;
 
   async function create() {
     await run(async () => {
@@ -868,9 +882,11 @@ function ProspectsTab({
           <DiagnosticStat label={t("pendingVerification")} value={pendingVerification} color="bg-[#FCA311]/15" textColor="text-[#B45309]" />
           <DiagnosticStat label={t("verifiedProspects")} value={verifiedCount} color="bg-[#34C759]/15" textColor="text-[#248A3D]" />
           <DiagnosticStat label={t("rejectedProspects")} value={rejectedCount} color="bg-[#FF4D5E]/15" textColor="text-[#C0263A]" />
-          <DiagnosticStat label={t("eligibleEstimate")} value={eligibleEstimate} color="bg-[#4F5FE8]/15" textColor="text-[#4F5FE8]" />
+          <DiagnosticStat label={t("targetableProspects")} value={targetableCount} color="bg-[#4F5FE8]/15" textColor="text-[#4F5FE8]" />
+          <DiagnosticStat label={t("eligibleEstimate")} value={eligibleEstimate} color="bg-[#34C759]/15" textColor="text-[#248A3D]" />
           <DiagnosticStat label={t("excludedEstimate")} value={excludedEstimate} color="bg-[#1A1F36]/10" />
         </div>
+        <p className="mt-2 text-[11px] font-medium text-[#1A1F36]/60">{t("countsNote")}</p>
 
         {open && (
           <div className="mt-4 space-y-3">
@@ -1735,6 +1751,37 @@ function KeywordsTab({ keywords, run, refresh }: any) {
 /* Discovery                                                               */
 /* ---------------------------------------------------------------------- */
 
+function formatSeedLine(item: any): string {
+  return [item?.publicName ?? "", item?.publicUrl ?? "", item?.city ?? ""]
+    .map((part) => String(part))
+    .join(" | ")
+    .replace(/(\s*\|\s*)+$/, "");
+}
+
+/** Parse "Name | https://url | city" lines. Empty lines are ignored; line numbers are kept. */
+function parseSeedText(text: string): Array<{
+  lineNo: number;
+  item: { publicName: string; publicUrl: string | null; city: string | null };
+}> {
+  const out: Array<{ lineNo: number; item: { publicName: string; publicUrl: string | null; city: string | null } }> = [];
+  text.split("\n").forEach((raw, index) => {
+    const line = raw.trim();
+    if (line.length === 0) return;
+    const parts = line.split("|").map((part) => part.trim());
+    out.push({
+      lineNo: index + 1,
+      item: {
+        publicName: parts[0] ?? "",
+        publicUrl: parts[1] ? parts[1] : null,
+        city: parts[2] ? parts[2] : null,
+      },
+    });
+  });
+  return out;
+}
+
+type SeedFeedback = { kind: "ok" | "err"; text: string; details?: string[] } | null;
+
 function DiscoveryTab({
   candidates,
   runs,
@@ -1747,6 +1794,15 @@ function DiscoveryTab({
   const t = useTranslations("outreach");
   const [selected, setSelected] = useState<string[]>([]);
   const [seedText, setSeedText] = useState("");
+  const [seedDirty, setSeedDirty] = useState(false);
+  const [seedSaving, setSeedSaving] = useState(false);
+  const [seedFeedback, setSeedFeedback] = useState<SeedFeedback>(null);
+  const [readiness, setReadiness] = useState<any>(null);
+  const [runState, setRunState] = useState<{
+    phase: "idle" | "running" | "done" | "error";
+    data?: any;
+    error?: string;
+  }>({ phase: "idle" });
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [savingChannelUrl, setSavingChannelUrl] = useState(false);
   const [channelUrlSaveState, setChannelUrlSaveState] = useState<{
@@ -1755,14 +1811,40 @@ function DiscoveryTab({
   } | null>(null);
 
   const s = settings?.settings ?? {};
+  const storedSeedItems: any[] | undefined = settings?.manualSeed?.items;
+  const storedSeedCount: number = settings?.manualSeed?.count ?? 0;
+
+  const loadReadiness = useCallback(async () => {
+    setReadiness(await api<any>("/api/admin/outreach/discovery"));
+  }, []);
+
+  useEffect(() => {
+    void loadReadiness().catch(() => undefined);
+  }, [loadReadiness]);
+
+  // Load the stored seed into the editor whenever the server copy changes and
+  // the administrator has not started editing it.
+  useEffect(() => {
+    if (seedDirty || !storedSeedItems) return;
+    setSeedText(storedSeedItems.map(formatSeedLine).join("\n"));
+  }, [storedSeedItems, seedDirty]);
 
   async function promote() {
     await run(async () => {
-      await api("/api/admin/outreach/candidates", {
+      const result = await api<any>("/api/admin/outreach/candidates", {
         method: "POST",
         body: JSON.stringify({ candidateIds: selected }),
       });
       setSelected([]);
+      setMessage({
+        kind: "ok",
+        text: t("promoteResult", {
+          promoted: result.promoted ?? 0,
+          skipped: result.skipped ?? 0,
+          unknownCity: result.unknownCity ?? 0,
+          unknownSegment: result.unknownSegment ?? 0,
+        }),
+      });
       await refresh();
     });
   }
@@ -1777,6 +1859,36 @@ function DiscoveryTab({
     });
   }
 
+  async function runNow() {
+    setRunState({ phase: "running" });
+    try {
+      const response = await fetch("/api/admin/outreach/discovery", {
+        method: "POST",
+        cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok) {
+        setRunState({ phase: "done", data });
+      } else {
+        setRunState({
+          phase: "error",
+          data,
+          error: data.error ?? `${t("requestFailed")} (${response.status})`,
+        });
+      }
+    } catch (error) {
+      setRunState({
+        phase: "error",
+        error: error instanceof Error ? error.message : t("requestFailed"),
+      });
+    }
+    await Promise.all([
+      loadReadiness().catch(() => undefined),
+      refresh().catch(() => undefined),
+      refreshSettings().catch(() => undefined),
+    ]);
+  }
+
   async function saveSettings(key: string, value: unknown) {
     await run(async () => {
       await api("/api/admin/outreach/settings", {
@@ -1784,6 +1896,7 @@ function DiscoveryTab({
         body: JSON.stringify({ [key]: value }),
       });
       await refreshSettings();
+      await loadReadiness();
     });
   }
 
@@ -1836,33 +1949,169 @@ function DiscoveryTab({
   }
 
   async function saveSeed() {
-    await run(async () => {
-      const lines = seedText
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
+    const parsed = parseSeedText(seedText);
 
-      const items = lines.map((line) => {
-        // Accept "Name | https://url | city" or a single URL.
-        const parts = line.split("|").map((part) => part.trim());
-        return {
-          publicName: parts[0] ?? line,
-          publicUrl: parts[1] ?? null,
-          city: parts[2] ?? null,
-        };
-      });
+    // Client-side checks give line numbers; the server re-validates everything.
+    const lineProblems = parsed
+      .filter(({ item }) => !item.publicName || /^https?:\/\//i.test(item.publicName))
+      .map(({ lineNo }) => t("seedLineProblem", { line: lineNo, reason: t("seedNeedsName") }));
+    if (lineProblems.length > 0) {
+      setSeedFeedback({ kind: "err", text: t("seedSaveFailed"), details: lineProblems });
+      return;
+    }
 
-      await api("/api/admin/outreach/settings", {
+    const clearing = parsed.length === 0 && storedSeedCount > 0;
+    if (clearing && !window.confirm(t("seedClearConfirm"))) return;
+
+    setSeedSaving(true);
+    setSeedFeedback(null);
+    try {
+      const response = await fetch("/api/admin/outreach/settings", {
         method: "POST",
-        body: JSON.stringify({ items }),
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          items: parsed.map(({ item }) => item),
+          mode: "replace",
+          confirmClear: clearing,
+        }),
       });
-      setSeedText("");
-      setMessage({ kind: "ok", text: t("saved") });
-    });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const details = Array.isArray(data.problems)
+          ? data.problems.map((problem: any) => {
+              const line = parsed[problem.index]?.lineNo ?? problem.index + 1;
+              return t("seedLineProblem", { line, reason: problem.reason });
+            })
+          : undefined;
+        setSeedFeedback({ kind: "err", text: data.error ?? t("seedSaveFailed"), details });
+        return;
+      }
+
+      // Confirm against the database, not the response alone.
+      const reloaded = await refreshSettings();
+      if (reloaded?.manualSeed?.count !== data.saved) {
+        setSeedFeedback({ kind: "err", text: t("seedVerifyFailed") });
+        return;
+      }
+
+      setSeedDirty(false);
+      setSeedText((data.items ?? []).map(formatSeedLine).join("\n"));
+      setSeedFeedback({ kind: "ok", text: t("seedSaved", { count: data.saved }) });
+    } catch (error) {
+      setSeedFeedback({
+        kind: "err",
+        text: error instanceof Error ? error.message : t("requestFailed"),
+      });
+    } finally {
+      setSeedSaving(false);
+    }
+  }
+
+  function renderBlockers(codes: string[]) {
+    return (
+      <ul className="mt-2 space-y-2">
+        {codes.map((code) => (
+          <li key={code} className="rounded-2xl bg-white p-3 text-xs font-medium text-[#1A1F36]">
+            {t(`blocker_${code}`)}
+          </li>
+        ))}
+      </ul>
+    );
   }
 
   return (
     <div className="space-y-4">
+      <section className={CARD_MAIN}>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-base font-bold text-[#1A1F36]">{t("readinessTitle")}</h2>
+          {readiness && (
+            <span
+              className={`${BADGE} ${
+                readiness.ready ? "bg-[#34C759]/15 text-[#248A3D]" : "bg-[#FCA311]/15 text-[#B45309]"
+              }`}
+            >
+              {readiness.ready ? t("readyBadge") : t("notReadyBadge")}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-[#1A1F36]/60">{t("readinessHelp")}</p>
+
+        {readiness && (
+          <div className="mt-3 space-y-1 text-xs font-medium text-[#1A1F36]">
+            <p>
+              {t("allowanceToday", {
+                remaining: readiness.limits?.remainingToday ?? 0,
+                limit: readiness.limits?.dailyDiscoveryLimit ?? 0,
+              })}
+            </p>
+            <p>
+              {readiness.keywords?.source === "starter"
+                ? t("keywordsStarter")
+                : t("keywordsConfigured", {
+                    enabled: readiness.keywords?.enabled ?? 0,
+                    configured: readiness.keywords?.configured ?? 0,
+                  })}
+            </p>
+            <p>{t("seedStoredCount", { count: readiness.inputs?.manualSeedCandidates ?? 0 })}</p>
+          </div>
+        )}
+
+        {readiness?.blockers?.length > 0 && renderBlockers(readiness.blockers)}
+
+        <button
+          type="button"
+          onClick={() => void runNow()}
+          disabled={runState.phase === "running"}
+          className={BTN_PRIMARY + " mt-4 w-full"}
+        >
+          {runState.phase === "running" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          {runState.phase === "running" ? t("runDiscoveryRunning") : t("runDiscoveryNow")}
+        </button>
+
+        {runState.phase === "done" && runState.data && (
+          <div className="mt-3">
+            <p role="status" className="rounded-2xl bg-[#34C759] p-3 text-sm font-bold text-white">
+              {t("runDiscoveryDone", {
+                discovered: runState.data.discovered ?? 0,
+                duplicates: runState.data.duplicates ?? 0,
+                excluded: runState.data.excluded ?? 0,
+              })}
+            </p>
+            {(runState.data.unknownCity > 0 || runState.data.unknownSegment > 0) && (
+              <p className="mt-2 text-xs font-medium text-[#1A1F36]">
+                {t("unknownCityLabel")}: {runState.data.unknownCity} · {t("unknownSegmentLabel")}:{" "}
+                {runState.data.unknownSegment}
+              </p>
+            )}
+            {runState.data.discovered === 0 && (
+              <div className="mt-2">
+                <p className="text-xs font-bold text-[#1A1F36]">{t("runDiscoveryNothingNew")}</p>
+                {renderBlockers(runState.data.blockers ?? [])}
+              </div>
+            )}
+          </div>
+        )}
+
+        {runState.phase === "error" && (
+          <div className="mt-3">
+            <p role="alert" className="rounded-2xl bg-[#FF4D5E] p-3 text-sm font-bold text-white">
+              {runState.data?.status === "FAILED"
+                ? t("runDiscoveryFailed")
+                : runState.data?.blockers?.length
+                  ? t("runDiscoveryBlocked")
+                  : runState.error}
+            </p>
+            {runState.data?.blockers?.length > 0 && renderBlockers(runState.data.blockers)}
+          </div>
+        )}
+      </section>
+
       <section className={CARD_MAIN}>
         <h2 className="text-base font-bold text-[#1A1F36]">{t("discoveryTitle")}</h2>
         <p className="mt-1 text-xs text-[#1A1F36]/60">{t("discoveryHelp")}</p>
@@ -2028,16 +2277,52 @@ function DiscoveryTab({
       <section className={CARD_MAIN}>
         <h2 className="text-base font-bold text-[#1A1F36]">{t("seedTitle")}</h2>
         <p className="mt-1 text-xs text-[#1A1F36]/60">{t("seedHelp")}</p>
+        <p className="mt-2 text-xs font-medium text-[#1A1F36]/70">
+          {storedSeedItems === undefined
+            ? t("seedLoading")
+            : t("seedStoredCount", { count: storedSeedCount })}
+        </p>
         <textarea
           value={seedText}
-          onChange={(e) => setSeedText(e.target.value)}
+          onChange={(e) => {
+            setSeedText(e.target.value);
+            setSeedDirty(true);
+            setSeedFeedback(null);
+          }}
+          aria-label={t("seedTitle")}
+          aria-invalid={seedFeedback?.kind === "err"}
+          disabled={seedSaving || storedSeedItems === undefined}
           className={INPUT + " mt-3 min-h-32 font-mono text-xs"}
           placeholder={"Mehdi Barber | https://instagram.com/mehdi_barber | Tehran"}
           dir="ltr"
         />
-        <button type="button" onClick={saveSeed} className={BTN_PRIMARY + " mt-3 w-full"}>
-          <Settings2 className="h-4 w-4" />
-          {t("saveSeed")}
+        {seedFeedback && (
+          <div className="mt-3" role={seedFeedback.kind === "err" ? "alert" : "status"}>
+            <p
+              className={
+                "rounded-2xl p-3 text-sm font-bold text-white " +
+                (seedFeedback.kind === "ok" ? "bg-[#34C759]" : "bg-[#FF4D5E]")
+              }
+            >
+              {seedFeedback.text}
+            </p>
+            {seedFeedback.details && seedFeedback.details.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs font-medium text-[#C0263A]" dir="ltr">
+                {seedFeedback.details.slice(0, 50).map((detail, index) => (
+                  <li key={index}>{detail}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void saveSeed()}
+          disabled={seedSaving || storedSeedItems === undefined}
+          className={BTN_PRIMARY + " mt-3 w-full"}
+        >
+          {seedSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings2 className="h-4 w-4" />}
+          {seedSaving ? t("saving") : t("saveSeed")}
         </button>
       </section>
 

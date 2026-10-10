@@ -44,11 +44,22 @@ vi.mock("@/lib/prisma", () => {
         return row;
       },
       findFirst: async () => db.discoveryRuns[db.discoveryRuns.length - 1] ?? null,
+      create: async ({ data }: any) => {
+        const row = { id: "run-" + db.discoveryRuns.length, ...data };
+        db.discoveryRuns.push(row);
+        return row;
+      },
     },
     discoveryKeyword: {
       findMany: async () => db.keywords,
     },
     discoveryCandidate: {
+      count: async ({ where }: any) =>
+        db.candidates.filter(
+          (row: Row) =>
+            !where?.discoveredOn ||
+            new Date(row.discoveredOn).getTime() === new Date(where.discoveredOn).getTime()
+        ).length,
       findMany: async ({ where }: any) =>
         db.candidates.filter((row: Row) => (where?.id?.in ?? []).includes(row.id)),
       update: async ({ where, data }: any) => {

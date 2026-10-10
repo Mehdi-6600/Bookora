@@ -11,12 +11,23 @@ import {
   MAX_DAILY_DISCOVERY_LIMIT,
   MAX_DAILY_INVITATION_LIMIT,
 } from "@/lib/outreach/settings";
+import {
+  MANUAL_SEED_SETTING_KEY,
+  readManualSeedEntries,
+  serializeManualSeed,
+  validateSeedItems,
+  type SeedEntry,
+} from "@/lib/outreach/sources";
+import { buildDedupeKey } from "@/lib/outreach/normalize";
 
 export async function GET() {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
-  const settings = await getOutreachSettings();
+  const [settings, seedItems] = await Promise.all([
+    getOutreachSettings(),
+    readManualSeedEntries(),
+  ]);
 
   return NextResponse.json(
     {
@@ -25,6 +36,17 @@ export async function GET() {
       limits: {
         maxDailyDiscoveryLimit: MAX_DAILY_DISCOVERY_LIMIT,
         maxDailyInvitationLimit: MAX_DAILY_INVITATION_LIMIT,
+      },
+      manualSeed: {
+        items: seedItems.map((item) => ({
+          publicName: item.publicName,
+          publicUrl: item.publicUrl,
+          telegramUsername: item.telegramUsername,
+          description: item.description,
+          city: item.city,
+          language: item.language,
+        })),
+        count: seedItems.length,
       },
     },
     { headers: { "Cache-Control": "no-store" } }
@@ -103,9 +125,16 @@ export async function PUT(req: NextRequest) {
  *
  * The administrator pastes PUBLIC business pages they have verified. This is
  * the only discovery input that works out of the box; no scraping is involved.
+ *
+ * Body: `{ items: [...], mode?: "append" | "replace", confirmClear?: boolean }`.
+ *  - Every row is validated. Any problem rejects the whole save with per-row
+ *    reasons, so nothing is dropped silently.
+ *  - `append` (default) merges into the stored list without removing entries.
+ *  - `replace` makes `items` the full list. Clearing a non-empty list also
+ *    requires `confirmClear: true`.
+ *  - The response is read back from the database, so it reports what was
+ *    actually persisted.
  */
-const SEED_KEY = "outreach.manual_seed";
-
 export async function POST(req: NextRequest) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
@@ -123,6 +152,9 @@ export async function POST(req: NextRequest) {
   }
 
   const items = (body as { items?: unknown })?.items;
+  const mode = (body as { mode?: unknown })?.mode === "replace" ? "replace" : "append";
+  const confirmClear = (body as { confirmClear?: unknown })?.confirmClear === true;
+
   if (!Array.isArray(items)) {
     return NextResponse.json(
       { error: "items must be an array of {publicName, publicUrl}" },
@@ -130,38 +162,84 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const cleaned = items
-    .slice(0, 1000)
-    .map((entry) => {
-      if (typeof entry !== "object" || entry === null) return null;
-      const row = entry as Record<string, unknown>;
-      const publicName =
-        typeof row.publicName === "string" ? row.publicName.trim().slice(0, 200) : "";
-      if (!publicName) return null;
+  const validated = validateSeedItems(items);
+  if (validated.problems.length > 0) {
+    return NextResponse.json(
+      {
+        error: "invalid seed entries: nothing was saved",
+        problems: validated.problems,
+      },
+      { status: 400 }
+    );
+  }
 
-      return {
-        publicName,
-        publicUrl:
-          typeof row.publicUrl === "string" ? row.publicUrl.trim().slice(0, 500) : null,
-        telegramUsername:
-          typeof row.telegramUsername === "string"
-            ? row.telegramUsername.trim().slice(0, 64)
-            : null,
-        description:
-          typeof row.description === "string"
-            ? row.description.trim().slice(0, 800)
-            : null,
-        city: typeof row.city === "string" ? row.city.trim().slice(0, 80) : null,
-        language: typeof row.language === "string" ? row.language.trim().slice(0, 8) : null,
-      };
-    })
-    .filter((row): row is NonNullable<typeof row> => row !== null);
+  const existing = await readManualSeedEntries();
+  let next: SeedEntry[];
 
+  if (mode === "replace") {
+    if (validated.items.length === 0 && existing.length > 0 && !confirmClear) {
+      return NextResponse.json(
+        {
+          error: "Refusing to clear the stored list without confirmClear.",
+          existingCount: existing.length,
+        },
+        { status: 409 }
+      );
+    }
+    next = validated.items;
+  } else {
+    const seen = new Set<string>();
+    next = [];
+    for (const entry of [...existing, ...validated.items]) {
+      const key = buildDedupeKey({
+        telegramUsername: entry.telegramUsername,
+        publicUrl: entry.publicUrl,
+        publicName: entry.publicName,
+        city: entry.city,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
+      next.push(entry);
+    }
+  }
+
+  const value = serializeManualSeed(next);
   await prisma.adminSetting.upsert({
-    where: { key: SEED_KEY },
-    update: { value: JSON.stringify(cleaned) },
-    create: { key: SEED_KEY, value: JSON.stringify(cleaned) },
+    where: { key: MANUAL_SEED_SETTING_KEY },
+    update: { value },
+    create: { key: MANUAL_SEED_SETTING_KEY, value },
   });
 
-  return NextResponse.json({ saved: cleaned.length });
+  // Confirm persistence by reading the stored value back.
+  const persisted = await readManualSeedEntries();
+  const persistedOk = persisted.length === next.length;
+
+  await recordAuditEvent({
+    scope: "settings",
+    action: "seed.saved",
+    actorUserId: guard.user.id,
+    detail: `mode=${mode} count=${persisted.length} added=${validated.items.length}`,
+  });
+
+  if (!persistedOk) {
+    return NextResponse.json(
+      { error: "Seed was not persisted. Try again." },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({
+    saved: persisted.length,
+    mode,
+    added: mode === "append" ? next.length - existing.length : validated.items.length,
+    persisted: true,
+    items: persisted.map((item) => ({
+      publicName: item.publicName,
+      publicUrl: item.publicUrl,
+      telegramUsername: item.telegramUsername,
+      description: item.description,
+      city: item.city,
+      language: item.language,
+    })),
+  });
 }

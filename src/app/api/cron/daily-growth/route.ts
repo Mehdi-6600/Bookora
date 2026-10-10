@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
   }
 
   const errors: string[] = [];
+  let discoveryBlocked = false;
   let discovered = 0;
   let matched = 0;
   let duplicates = 0;
@@ -72,10 +73,14 @@ export async function GET(req: NextRequest) {
   let messagesSent = 0;
   let messagesDelivered = 0;
 
-  const discovery = await runDailyDiscovery({ settings, now });
+  const discovery = await runDailyDiscovery({ settings, now, mode: "scheduled" });
 
   if (discovery.status === "FAILED") {
     errors.push(`discovery: ${discovery.error ?? "unknown error"}`);
+  } else if (discovery.status === "BLOCKED") {
+    // Not a failure, but nothing was imported: keep the run marked BLOCKED so
+    // the dashboard shows the next action instead of a silent success.
+    discoveryBlocked = true;
   } else {
     discovered = discovery.discovered;
     matched = discovery.matched;
@@ -138,7 +143,7 @@ export async function GET(req: NextRequest) {
   await prisma.discoveryRun.update({
     where: { runDate },
     data: {
-      status: errors.length > 0 ? "FAILED" : "OK",
+      status: errors.length > 0 ? "FAILED" : discoveryBlocked ? "BLOCKED" : "OK",
       timezone: settings.timezone,
       discovered,
       matched,
@@ -192,6 +197,7 @@ export async function GET(req: NextRequest) {
     conversions,
     pendingReview,
     reportsSent,
+    discoveryBlockers: discovery.blockers,
     errors,
   });
 }

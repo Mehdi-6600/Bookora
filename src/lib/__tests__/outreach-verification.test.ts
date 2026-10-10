@@ -16,6 +16,20 @@ const db = {
 
 vi.mock("@/lib/prisma", () => {
   const prisma = {
+    invitationTemplate: {
+      findUnique: async () => ({ id: "tpl-1", body: "Book your appointment here: {link}", active: true }),
+      findFirst: async () => ({ id: "tpl-1", body: "Book your appointment here: {link}", active: true }),
+    },
+    outreachInvitation: {
+      findMany: async () => [],
+    },
+    outreachSuppression: {
+      findFirst: async () => null,
+    },
+    user: {
+      findUnique: async () => null,
+      findFirst: async () => null,
+    },
     outreachProspect: {
       findUnique: async ({ where }: any) =>
         db.prospects.find((row: Row) => row.id === where.id) ?? null,

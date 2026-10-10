@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
 import { getFunnelSummary, FUNNEL_EVENTS, FUNNEL_STEP_LABELS } from "@/lib/funnel";
 import { getOutreachSettings } from "@/lib/outreach/settings";
+import { collectDiscoveryPreflight } from "@/lib/outreach/discovery";
+import { targetableProspectWhere } from "@/lib/outreach/campaigns";
 import { getConversionCounts } from "@/lib/outreach/attribution";
 import { PROSPECT_STATUSES } from "@/lib/outreach/types";
 import {
@@ -181,7 +183,8 @@ export async function GET() {
     campaignId: row.campaignId,
   }));
 
-  const [candidateTotal, candidateNew, lastRun, dueFollowUps] = await Promise.all([
+  const [candidateTotal, candidateNew, lastRun, dueFollowUps, prospectTotal, targetable, preflight] =
+    await Promise.all([
     prisma.discoveryCandidate.count(),
     prisma.discoveryCandidate.count({ where: { status: "NEW" } }),
     prisma.discoveryRun.findFirst({
@@ -204,6 +207,9 @@ export async function GET() {
     prisma.outreachProspect.count({
       where: { nextFollowUpAt: { lte: now }, status: { notIn: ["DO_NOT_CONTACT", "NOT_INTERESTED"] } },
     }),
+    prisma.outreachProspect.count(),
+    prisma.outreachProspect.count({ where: targetableProspectWhere() }),
+    collectDiscoveryPreflight(settings, now),
   ]);
 
   return NextResponse.json(
@@ -215,6 +221,13 @@ export async function GET() {
         byStatus,
         byVerification,
         dueFollowUps,
+        // Database-wide counts (not limited to any loaded page).
+        total: prospectTotal,
+        pendingVerification: byVerification.DISCOVERED ?? 0,
+        verified: byVerification.VERIFIED ?? 0,
+        rejected: byVerification.REJECTED ?? 0,
+        targetable,
+        excludedEstimate: prospectTotal - targetable,
       },
       invitations: { byStatus: byInvitation },
       discovery: {
@@ -222,6 +235,11 @@ export async function GET() {
         candidateNew,
         lastRun,
         settings,
+        blockers: preflight.blockers,
+        remainingToday: preflight.remaining,
+        keywordSource: preflight.keywordSet.source,
+        enabledKeywords: preflight.keywordSet.keywords.length,
+        manualSeedCandidates: preflight.seed.candidates,
       },
       last24h: conversions,
       acquisition: {

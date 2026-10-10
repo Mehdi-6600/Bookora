@@ -79,9 +79,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Promotion creates UNVERIFIED (DISCOVERED) prospects. Verification is a
+  // separate administrator action.
   const result = await promoteCandidates({
     candidateIds: parsed.data.candidateIds,
     campaignId: parsed.data.campaignId ?? null,
+    actorUserId: guard.user.id,
   });
 
   return NextResponse.json(result, { status: 201 });

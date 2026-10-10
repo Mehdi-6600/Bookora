@@ -82,6 +82,28 @@ const CONTACTABLE_STATUSES = ["NEW", "INTERESTED"];
 /** Statuses that permit one follow-up if the follow-up date has passed. */
 const FOLLOWUPABLE_STATUSES = ["CONTACTED", "STARTED_BOT"];
 
+/**
+ * The database predicate for "a prospect a campaign may target": verified by an
+ * administrator, not opted out, a registry city and a segment assigned, and a
+ * contactable status. The follow-up date is applied later by `planCampaign`, so
+ * counts built from this predicate are upper-bound estimates.
+ */
+export function targetableProspectWhere(
+  followUpPolicy: string = "ONE_FOLLOWUP"
+): Record<string, unknown> {
+  const statusFilter =
+    followUpPolicy === "NO_FOLLOWUP"
+      ? [...CONTACTABLE_STATUSES]
+      : [...CONTACTABLE_STATUSES, ...FOLLOWUPABLE_STATUSES];
+  return {
+    verificationStatus: "VERIFIED",
+    optedOutAt: null,
+    city: { not: null },
+    segment: { not: null },
+    status: { in: statusFilter },
+  };
+}
+
 export type RecipientDisposition = "ELIGIBLE" | "MANUAL_ONLY" | "BLOCKED";
 
 export type CampaignRecipient = {
@@ -155,6 +177,8 @@ export type CampaignLike = {
   followUpPolicy: string;
   channel: string;
   sendLimit: number | null;
+  /** Set by the dry run. Approval requires it (see `approveCampaign`). */
+  lastDryRunAt?: Date | null;
 };
 
 /** Validate and normalise targeting input from an admin request. */
@@ -226,19 +250,12 @@ export async function planCampaign(
     warnings.push("Campaign is still DRAFT. Run a dry run before approving.");
   }
 
-  const statusFilter =
-    campaign.followUpPolicy === "NO_FOLLOWUP"
-      ? [...CONTACTABLE_STATUSES]
-      : [...CONTACTABLE_STATUSES, ...FOLLOWUPABLE_STATUSES];
-
   const where: Record<string, unknown> = {
-    verificationStatus: "VERIFIED",
-    optedOutAt: null,
-    status: { in: statusFilter },
+    ...targetableProspectWhere(campaign.followUpPolicy),
+    // Narrowing by the campaign's cities/segments is additional to the base rule.
+    city: cities.length > 0 ? { in: cities } : { not: null },
+    segment: segments.length > 0 ? { in: segments } : { not: null },
   };
-
-  if (cities.length > 0) where.city = { in: cities };
-  if (segments.length > 0) where.segment = { in: segments };
 
   const prospects = await prisma.outreachProspect.findMany({
     where,

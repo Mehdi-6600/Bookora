@@ -134,3 +134,66 @@ export function sha256(value: string): string {
 export function toTelegramProfileUrl(username: string): string {
   return `https://t.me/${normalizeTelegramUsername(username) ?? username.replace(/^@/, "")}`;
 }
+
+export const PUBLIC_URL_MAX_LENGTH = 500;
+
+export type PublicUrlCheck =
+  | { ok: true; url: string }
+  | { ok: false; reason: "empty" | "too_long" | "invalid" | "scheme" | "credentials" | "host" };
+
+/**
+ * Validate a public profile / business page URL before it is stored.
+ *
+ * Only plain http(s) pages on a public-looking hostname are accepted. Anything
+ * that could execute (`javascript:`, `data:`), smuggle credentials
+ * (`https://user:pass@host`) or point at a local host is rejected. The URL is
+ * stored, never fetched, so this is a hygiene check, not an SSRF defence.
+ */
+export function validatePublicProfileUrl(value: unknown): PublicUrlCheck {
+  if (typeof value !== "string") return { ok: false, reason: "empty" };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { ok: false, reason: "empty" };
+  if (trimmed.length > PUBLIC_URL_MAX_LENGTH) return { ok: false, reason: "too_long" };
+  if (/\s/.test(trimmed)) return { ok: false, reason: "invalid" };
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { ok: false, reason: "scheme" };
+  }
+  if (url.username || url.password) return { ok: false, reason: "credentials" };
+
+  const host = url.hostname.toLowerCase();
+  const looksPublic =
+    host.includes(".") &&
+    !host.endsWith(".local") &&
+    !host.endsWith(".internal") &&
+    !/^[0-9.]+$/.test(host) &&
+    !host.startsWith("[");
+  if (!looksPublic) return { ok: false, reason: "host" };
+
+  return { ok: true, url: url.toString() };
+}
+
+/** Human-readable reason for a rejected URL (English; the UI maps codes to translations). */
+export function publicUrlReasonText(reason: Exclude<PublicUrlCheck, { ok: true }>["reason"]): string {
+  switch (reason) {
+    case "empty":
+      return "URL is empty.";
+    case "too_long":
+      return `URL must be at most ${PUBLIC_URL_MAX_LENGTH} characters.`;
+    case "scheme":
+      return "Only http:// or https:// links are allowed.";
+    case "credentials":
+      return "URLs must not contain a username or password.";
+    case "host":
+      return "URL must point to a public website or profile (for example instagram.com/name).";
+    default:
+      return "URL is not valid.";
+  }
+}
