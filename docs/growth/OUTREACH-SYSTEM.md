@@ -96,6 +96,7 @@ Also enforced:
 | Rule | Enforcement |
 | --- | --- |
 | Admin approval before any send | Invitations are created as `DRAFT`; only `APPROVED` ones are ever delivered |
+| Verified prospects only | Preparation, per-invitation approval and delivery each require `verificationStatus: VERIFIED`. A prospect unverified after approval is skipped at send time (`not_verified`), never messaged |
 | No bulk automation | Nothing sends more than `outreach.daily_invitation_limit` (default 10) per day |
 | Rate limiting | 1,100 ms sleep between deliveries in a run |
 | `/stop` and "STOP" | Immediately adds to the suppression list and marks `DO_NOT_CONTACT` |

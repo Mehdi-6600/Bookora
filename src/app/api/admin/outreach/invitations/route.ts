@@ -40,6 +40,7 @@ export async function GET(req: NextRequest) {
           telegramUsername: true,
           publicUrl: true,
           status: true,
+          verificationStatus: true,
         },
       },
       template: { select: { id: true, code: true } },

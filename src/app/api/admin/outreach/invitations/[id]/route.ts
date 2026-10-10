@@ -59,6 +59,25 @@ export async function PATCH(
       }
     }
 
+    // Approval arms automated delivery, so it requires a VERIFIED prospect.
+    // Verify the business in the Prospects tab first; the delivery job
+    // re-checks this again before every single message.
+    const withProspect = await prisma.outreachInvitation.findUnique({
+      where: { id },
+      select: {
+        prospect: { select: { verificationStatus: true } },
+      },
+    });
+    if (withProspect?.prospect?.verificationStatus !== "VERIFIED") {
+      return NextResponse.json(
+        {
+          error: "Only VERIFIED prospects can be approved for outreach.",
+          verificationStatus: withProspect?.prospect?.verificationStatus ?? null,
+        },
+        { status: 409 }
+      );
+    }
+
     const updated = await prisma.outreachInvitation.update({
       where: { id },
       data: {

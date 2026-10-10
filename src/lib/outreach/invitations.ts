@@ -87,6 +87,11 @@ async function pickTemplate(
 /**
  * Create DRAFT invitations for the best next prospects.
  *
+ * Only VERIFIED prospects are ever drafted: discovery hits stay DISCOVERED
+ * until an administrator verifies them, and verification is checked again at
+ * approval and at delivery time, so an unverified business can never receive
+ * an invitation from any path (campaign, generic prepare, or daily cron).
+ *
  * Duplicate protection: a prospect that already has an invitation in DRAFT or
  * APPROVED state is skipped, so a retried run can never create a second
  * pending outreach for the same business.
@@ -102,8 +107,11 @@ export async function prepareInvitations(options: {
   if (limit === 0) return { prepared: [], skipped: [] };
 
   const where: Record<string, unknown> = {
+    verificationStatus: "VERIFIED",
     optedOutAt: null,
-    status: { in: ["NEW", "INTERESTED", "CONTACTED"] },
+    // Mirrors the campaign planner's contactable + follow-upable statuses, so
+    // a dry-run recipient is never silently dropped at preparation time.
+    status: { in: ["NEW", "INTERESTED", "CONTACTED", "STARTED_BOT"] },
   };
 
   if (options.prospectIds && options.prospectIds.length > 0) {
@@ -228,9 +236,11 @@ export type SendOutcome = {
 /**
  * Deliver APPROVED invitations.
  *
- * A message is only sent to a prospect we can prove started the bot. Everyone
- * else is left in APPROVED state with `SKIPPED`-style reasons surfaced in the
- * run report so the administrator can do manual, targeted outreach instead.
+ * A message is only sent to a VERIFIED prospect we can prove started the bot.
+ * Everyone else is marked SKIPPED with the reason surfaced in the run report
+ * so the administrator can do manual, targeted outreach instead — or verify
+ * the prospect first. Verification is re-checked here (not just at approval)
+ * so a prospect unverified after approval is never messaged.
  */
 export async function sendApprovedInvitations(options: {
   limit: number;
@@ -251,6 +261,7 @@ export async function sendApprovedInvitations(options: {
         select: {
           id: true,
           status: true,
+          verificationStatus: true,
           telegramUsername: true,
           publicUrl: true,
           optedOutAt: true,
@@ -262,6 +273,26 @@ export async function sendApprovedInvitations(options: {
   const outcomes: SendOutcome[] = [];
 
   for (const invitation of pending) {
+    // Last line of defence: a prospect unverified (or rejected) after its
+    // invitation was approved must never be messaged. Skipped, never sent.
+    if (invitation.prospect.verificationStatus !== "VERIFIED") {
+      await prisma.outreachInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          status: "SKIPPED",
+          failureReason: "not_verified",
+          reviewedAt: new Date(),
+        },
+      });
+
+      outcomes.push({
+        invitationId: invitation.id,
+        status: "SKIPPED",
+        reason: "not_verified",
+      });
+      continue;
+    }
+
     const telegramUserId = await resolveTelegramUserId(invitation.prospect);
 
     const eligibility = await checkEligibility({
