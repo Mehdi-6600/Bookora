@@ -641,6 +641,7 @@ describe("campaign safety", () => {
     expect(beforeApproval.ok).toBe(false);
 
     await dryRunCampaign("cmp-1", "admin-1");
+    table("telegramBotOptIn").push({ telegramId: "999", prospectId: "verified", startedAt: new Date(), revokedAt: null, lastUpdateId: 1 });
     const approval = await approveCampaign("cmp-1", "admin-1");
     expect(approval.ok).toBe(true);
     expect(state.deliveries).toHaveLength(0);

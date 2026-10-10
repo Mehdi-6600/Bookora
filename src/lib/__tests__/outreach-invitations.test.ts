@@ -17,12 +17,13 @@ const db = {
   templates: [] as Row[],
   suppressions: [] as Row[],
   users: [] as Row[],
+  consents: [] as Row[],
   deliveries: [] as Array<{ id: string; text: string }>,
   deliveryShouldFail: false,
 };
 
 vi.mock("@/lib/prisma", () => {
-  const prisma = {
+  const prisma: any = {
     outreachProspect: {
       findMany: async ({ where, orderBy, take }: any) => {
         let rows = db.prospects.filter((row: Row) => {
@@ -76,6 +77,11 @@ vi.mock("@/lib/prisma", () => {
         db.invitations.push(row);
         return row;
       },
+      updateMany: async ({ where, data }: any) => {
+        const rows = db.invitations.filter((row: Row) => row.id === where.id && row.status === where.status);
+        rows.forEach((row: Row) => Object.assign(row, data));
+        return { count: rows.length };
+      },
       update: async ({ where, data }: any) => {
         const row = db.invitations.find((item: Row) => item.id === where.id) as Row;
         Object.assign(row, data);
@@ -109,6 +115,17 @@ vi.mock("@/lib/prisma", () => {
         return row;
       },
     },
+    adminSetting: { findMany: async () => [] },
+    outreachAuditEvent: { create: async ({ data }: any) => data },
+    telegramBotOptIn: {
+      findFirst: async ({ where }: any) => db.consents.find((row: Row) => row.prospectId === where.prospectId &&
+        row.revokedAt === null && row.startedAt >= where.startedAt.gte) ?? null,
+      updateMany: async ({ where, data }: any) => {
+        const rows = db.consents.filter((row: Row) => row.telegramId === where.telegramId);
+        rows.forEach((row: Row) => Object.assign(row, data));
+        return { count: rows.length };
+      },
+    },
     user: {
       findUnique: async ({ where }: any) =>
         db.users.find((row: Row) => row.telegramId === where.telegramId) ?? null,
@@ -123,6 +140,7 @@ vi.mock("@/lib/prisma", () => {
     },
   };
 
+  prisma.$transaction = async (work: (tx: any) => Promise<any>) => work(prisma);
   return { prisma };
 });
 
@@ -177,6 +195,7 @@ beforeEach(() => {
   db.templates = [{ ...TEMPLATE }];
   db.suppressions = [];
   db.users = [];
+  db.consents = [];
   db.deliveries = [];
   db.deliveryShouldFail = false;
 });
@@ -315,7 +334,7 @@ describe("delivery eligibility", () => {
     expect(result.reason).toBe(ELIGIBILITY_REASONS.NO_TELEGRAM_ID);
   });
 
-  it("refuses to message a resolved user who has no User row", async () => {
+  it("refuses to message a numeric ID with no Bot API consent", async () => {
     const result = await checkEligibility({
       id: "p1",
       status: "NEW",
@@ -329,8 +348,8 @@ describe("delivery eligibility", () => {
     expect(result.reason).toBe(ELIGIBILITY_REASONS.NOT_STARTED_BOT);
   });
 
-  it("allows delivery once the user has started the bot", async () => {
-    db.users.push({ id: "u1", telegramId: "555001", telegramUsername: "mehdi_barber" });
+  it("allows delivery only with current, prospect-bound Bot API consent", async () => {
+    db.consents.push({ prospectId: "p1", telegramId: "555001", startedAt: new Date(), revokedAt: null });
 
     const result = await checkEligibility({
       id: "p1",
@@ -391,6 +410,7 @@ describe("sending approved invitations", () => {
   it("delivers only to eligible recipients and records confirmed delivery", async () => {
     db.prospects.push(prospect());
     db.users.push({ id: "u1", telegramId: "555001", telegramUsername: "mehdi_barber" });
+    db.consents.push({ prospectId: "p0", telegramId: "555001", startedAt: new Date(), revokedAt: null });
 
     await prepareInvitations({ limit: 1 });
     db.invitations[0].status = "APPROVED";
@@ -424,6 +444,7 @@ describe("sending approved invitations", () => {
   it("does not send anything that is not approved", async () => {
     db.prospects.push(prospect());
     db.users.push({ id: "u1", telegramId: "555001", telegramUsername: "mehdi_barber" });
+    db.consents.push({ prospectId: "p0", telegramId: "555001", startedAt: new Date(), revokedAt: null });
 
     await prepareInvitations({ limit: 1 });
 
@@ -436,6 +457,7 @@ describe("sending approved invitations", () => {
   it("skips approved invitations whose prospect is no longer verified", async () => {
     db.prospects.push(prospect());
     db.users.push({ id: "u1", telegramId: "555001", telegramUsername: "mehdi_barber" });
+    db.consents.push({ prospectId: "p0", telegramId: "555001", startedAt: new Date(), revokedAt: null });
 
     await prepareInvitations({ limit: 1 });
     db.invitations[0].status = "APPROVED";
@@ -453,6 +475,7 @@ describe("sending approved invitations", () => {
   it("suppresses a contact that blocks the bot", async () => {
     db.prospects.push(prospect());
     db.users.push({ id: "u1", telegramId: "555001", telegramUsername: "mehdi_barber" });
+    db.consents.push({ prospectId: "p0", telegramId: "555001", startedAt: new Date(), revokedAt: null });
     db.deliveryShouldFail = true;
 
     await prepareInvitations({ limit: 1 });

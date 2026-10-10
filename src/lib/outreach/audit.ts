@@ -1,18 +1,11 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
-/**
- * Audit trail for important outreach state changes.
- *
- * Every function here is FAIL-SOFT by contract: the audit table is additive
- * (prisma/sql/0003_outreach_audit.sql) and may not exist yet on a deployed
- * database that has not run `npm run db:push`. Audit logging must never be
- * the reason a review, approval or preparation action fails — so all errors
- * are swallowed here and reads degrade to an empty list.
- *
- * Content policy: `action` values are stable machine names; `detail` carries
- * short summaries only (counts, statuses). No message bodies, no business
- * contacts, no credentials, no URLs with userinfo.
- */
+/** Required audit events must be written inside the same transaction as the
+ * state change. An unavailable audit table is an actionable failure, not success. */
+export class AuditUnavailableError extends Error {
+  constructor() { super("Audit storage is unavailable; check the database and retry. Required mutations are rolled back."); }
+}
 
 export const AUDIT_SCOPES = [
   "campaign",
@@ -47,9 +40,9 @@ export async function recordAuditEvent(event: {
   action: string;
   actorUserId?: string | null;
   detail?: unknown;
-}): Promise<void> {
+}, db: Prisma.TransactionClient = prisma): Promise<void> {
   try {
-    await prisma.outreachAuditEvent.create({
+    await db.outreachAuditEvent.create({
       data: {
         scope: event.scope,
         entityId: event.entityId ?? null,
@@ -59,7 +52,7 @@ export async function recordAuditEvent(event: {
       },
     });
   } catch {
-    // Missing table / transient DB error: auditing is best-effort by design.
+    throw new AuditUnavailableError();
   }
 }
 
@@ -89,6 +82,6 @@ export async function getAuditEvents(options: {
       take: Math.max(1, Math.min(100, options.take ?? 25)),
     });
   } catch {
-    return [];
+    throw new AuditUnavailableError();
   }
 }

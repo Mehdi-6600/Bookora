@@ -1,3 +1,4 @@
+import { withOutreachError } from "@/lib/outreach/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
@@ -6,7 +7,7 @@ import { recordAuditEvent } from "@/lib/outreach/audit";
 import {
   isOutreachSettingKey,
   OUTREACH_SETTING_KEYS,
-  setOutreachSetting,
+  coerceSettingValue,
   getOutreachSettings,
   MAX_DAILY_DISCOVERY_LIMIT,
   MAX_DAILY_INVITATION_LIMIT,
@@ -20,14 +21,13 @@ import {
 } from "@/lib/outreach/sources";
 import { buildDedupeKey } from "@/lib/outreach/normalize";
 
-export async function GET() {
+async function GETImpl() {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
-  const [settings, seedItems] = await Promise.all([
-    getOutreachSettings(),
-    readManualSeedEntries(),
-  ]);
+  const settings = await getOutreachSettings();
+  if (settings.readError) return NextResponse.json({ error: settings.readError }, { status: 503 });
+  const seedItems = await readManualSeedEntries();
 
   return NextResponse.json(
     {
@@ -53,7 +53,7 @@ export async function GET() {
   );
 }
 
-export async function PUT(req: NextRequest) {
+async function PUTImpl(req: NextRequest) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -73,46 +73,26 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
 
+  const entries = Object.entries(body as Record<string, unknown>);
   const invalid: string[] = [];
-
-  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-    if (!isOutreachSettingKey(key)) {
-      invalid.push(key);
-      continue;
-    }
-    const ok = await setOutreachSetting(key, value);
-    if (!ok) invalid.push(key);
+  const values: Array<{ key: string; value: string }> = [];
+  for (const [key, raw] of entries) {
+    if (!isOutreachSettingKey(key)) { invalid.push(key); continue; }
+    const value = coerceSettingValue(key, raw);
+    if (value === null) invalid.push(key);
+    else values.push({ key, value });
   }
-
   if (invalid.length > 0) {
-    return NextResponse.json(
-      { error: "invalid settings", invalid },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "invalid settings", invalid }, { status: 400 });
   }
-
-  // Audit which switches moved (keys only — never values, so nothing sensitive
-  // is persisted twice) and whether this was the global pause.
-  const notable = Object.keys(body as Record<string, unknown>).filter(
-    (key) =>
-      key === "outreach.enabled" ||
-      key === "outreach.auto_send_enabled" ||
-      key === "outreach.channel_url" ||
-      key === "outreach.cities_enabled" ||
-      key === "outreach.cities_disabled"
-  );
-  if (notable.length > 0) {
-    await recordAuditEvent({
-      scope: "settings",
-      action: notable.includes("outreach.enabled") || notable.includes("outreach.auto_send_enabled")
-        ? "settings.pause_changed"
-        : notable.includes("outreach.channel_url")
-          ? "settings.channel_url_changed"
-          : "cities.approval_changed",
-      actorUserId: guard.user.id,
-      // Keys only: setting values (including public URLs) belong in the
-      // settings table, not duplicated into free-form audit details.
-      detail: `keys=${notable.join(",")}`,
+  if (values.length > 0) {
+    await prisma.$transaction(async (tx) => {
+      for (const { key, value } of values) {
+        await tx.adminSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+      }
+      // Values (including URLs) are never duplicated into audit details.
+      await recordAuditEvent({ scope: "settings", action: "settings.updated",
+        actorUserId: guard.user.id, detail: `keys=${values.map((row) => row.key).join(",")}` }, tx);
     });
   }
 
@@ -135,7 +115,7 @@ export async function PUT(req: NextRequest) {
  *  - The response is read back from the database, so it reports what was
  *    actually persisted.
  */
-export async function POST(req: NextRequest) {
+async function POSTImpl(req: NextRequest) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -204,22 +184,18 @@ export async function POST(req: NextRequest) {
   }
 
   const value = serializeManualSeed(next);
-  await prisma.adminSetting.upsert({
-    where: { key: MANUAL_SEED_SETTING_KEY },
-    update: { value },
-    create: { key: MANUAL_SEED_SETTING_KEY, value },
+  await prisma.$transaction(async (tx) => {
+    await tx.adminSetting.upsert({
+      where: { key: MANUAL_SEED_SETTING_KEY }, update: { value },
+      create: { key: MANUAL_SEED_SETTING_KEY, value },
+    });
+    await recordAuditEvent({ scope: "settings", action: "seed.saved",
+      actorUserId: guard.user.id,
+      detail: `mode=${mode} count=${next.length} added=${validated.items.length}` }, tx);
   });
-
   // Confirm persistence by reading the stored value back.
   const persisted = await readManualSeedEntries();
   const persistedOk = persisted.length === next.length;
-
-  await recordAuditEvent({
-    scope: "settings",
-    action: "seed.saved",
-    actorUserId: guard.user.id,
-    detail: `mode=${mode} count=${persisted.length} added=${validated.items.length}`,
-  });
 
   if (!persistedOk) {
     return NextResponse.json(
@@ -243,3 +219,7 @@ export async function POST(req: NextRequest) {
     })),
   });
 }
+
+export const GET = withOutreachError(GETImpl);
+export const PUT = withOutreachError(PUTImpl);
+export const POST = withOutreachError(POSTImpl);

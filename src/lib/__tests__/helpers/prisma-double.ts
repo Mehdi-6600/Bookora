@@ -14,6 +14,9 @@ type DoubleState = { tables: Record<string, Row[]>; seq: number };
 
 /** Relation fields the pipeline reads, keyed by model delegate name. */
 const RELATIONS: Record<string, Record<string, { table: string; fk: string; many: boolean; localKey?: string }>> = {
+  outreachInvitation: {
+    prospect: { table: "outreachProspect", fk: "id", many: false, localKey: "prospectId" },
+  },
   outreachProspect: {
     botStarts: { table: "botStart", fk: "prospectId", many: true },
     invitations: { table: "outreachInvitation", fk: "prospectId", many: true },
@@ -85,6 +88,9 @@ function matchesValue(actual: unknown, condition: unknown): boolean {
         break;
       case "lte":
         if (!(actual instanceof Date && operand instanceof Date && actual.getTime() <= operand.getTime())) return false;
+        break;
+      case "lt":
+        if (!(typeof actual === "number" && typeof operand === "number" && actual < operand)) return false;
         break;
       case "gte":
         if (!(actual instanceof Date && operand instanceof Date && actual.getTime() >= operand.getTime())) return false;
@@ -336,6 +342,7 @@ export function createPrismaDouble(state: DoubleState) {
     "discoveryRun",
     "invitationTemplate",
     "outreachAuditEvent",
+    "telegramBotOptIn",
     "outreachCampaign",
     "outreachInvitation",
     "outreachProspect",
@@ -358,7 +365,12 @@ export function createPrismaDouble(state: DoubleState) {
     });
   }
   prisma.$transaction = async (work: unknown) => {
-    if (typeof work === "function") return work(prisma);
+    if (typeof work === "function") {
+      const snapshot = structuredClone(state.tables);
+      const seq = state.seq;
+      try { return await work(prisma); }
+      catch (error) { state.tables = snapshot; state.seq = seq; throw error; }
+    }
     return Promise.all(work as Promise<unknown>[]);
   };
   return prisma;

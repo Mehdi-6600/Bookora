@@ -1,3 +1,4 @@
+import { withOutreachError } from "@/lib/outreach/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
@@ -14,7 +15,7 @@ type Params = { params: Promise<{ id: string }> };
  * else stays APPROVED with a reason, for manual outreach through their own
  * public channels.
  */
-export async function POST(_req: NextRequest, { params }: Params) {
+async function POSTImpl(_req: NextRequest, { params }: Params) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -43,3 +44,5 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ ...result, limit });
 }
+
+export const POST = withOutreachError(POSTImpl);

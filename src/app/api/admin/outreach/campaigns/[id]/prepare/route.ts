@@ -1,3 +1,4 @@
+import { withOutreachError } from "@/lib/outreach/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
@@ -10,7 +11,7 @@ type Params = { params: Promise<{ id: string }> };
  * Create DRAFT invitations for an approved campaign. Idempotent: a prospect
  * that already has a pending invitation is never given a second one.
  */
-export async function POST(_req: NextRequest, { params }: Params) {
+async function POSTImpl(_req: NextRequest, { params }: Params) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -36,3 +37,5 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   return NextResponse.json(result);
 }
+
+export const POST = withOutreachError(POSTImpl);

@@ -65,8 +65,11 @@ export async function markRegistered(
 }
 
 /** Called after a booking is successfully created for a business. */
-export async function markFirstBooking(businessId: string): Promise<void> {
+export async function markFirstBooking(businessId: string, bookingId: string): Promise<void> {
   try {
+    const booking = await prisma.booking.findUnique({ where: { id: bookingId },
+      select: { businessId: true, isTestBooking: true } });
+    if (!booking || booking.businessId !== businessId || booking.isTestBooking) return;
     const prospect = await prisma.outreachProspect.findFirst({
       where: { convertedBusinessId: businessId },
       select: { id: true, status: true },
@@ -116,7 +119,7 @@ export async function getConversionCounts(since: Date): Promise<{
 
   const firstBookings = ids.length
     ? await prisma.booking.count({
-        where: { createdAt: { gte: since }, businessId: { in: ids } },
+        where: { createdAt: { gte: since }, businessId: { in: ids }, isTestBooking: false },
       })
     : 0;
 

@@ -144,6 +144,7 @@ model Booking {
   remainingAmount Decimal   @default(0) @db.Decimal(10, 2)
   currency        String    @default("EUR")
   paymentStatus   String    @default("PENDING")
+  isTestBooking   Boolean   @default(false)
   specialOfferId  String?
   receiptToken    String?   @unique
   idempotencyKey  String?   @unique
@@ -382,6 +383,7 @@ model OutreachProspect {
   invitations OutreachInvitation[]
   botStarts   BotStart[]
   candidates  DiscoveryCandidate[]
+  botOptIns   TelegramBotOptIn[]
 
   @@index([status])
   @@index([campaignId])
@@ -590,4 +592,19 @@ model OutreachAuditEvent {
   @@index([scope, entityId])
   @@index([createdAt])
   @@map("outreach_audit_events")
+}
+
+/// Only genuine, authenticated Telegram Bot API private /start updates can
+/// establish outreach consent. Mini App auth and usernames never write here.
+model TelegramBotOptIn {
+  telegramId   String    @id
+  prospectId   String?
+  startedAt    DateTime?
+  revokedAt    DateTime?
+  lastUpdateId Int
+
+  prospect OutreachProspect? @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+
+  @@index([prospectId, revokedAt])
+  @@map("telegram_bot_opt_ins")
 }
