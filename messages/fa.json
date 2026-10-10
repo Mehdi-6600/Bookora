@@ -628,6 +628,18 @@
     "verificationEvidencePlaceholder": "چه چیزی شهر و دسته را اثبات می‌کند؟",
     "verificationStatus": "وضعیت تأیید",
     "verified": "تأییدشده",
-    "viewPlan": "مشاهده برنامه"
+    "viewPlan": "مشاهده برنامه",
+    "totalProspects": "مجموع پروسپکت‌ها",
+    "pendingVerification": "در انتظار تأیید",
+    "verifiedProspects": "پروسپکت‌های تأییدشده",
+    "rejectedProspects": "پروسپکت‌های ردشده",
+    "eligibleEstimate": "پذیرش (برآورد)",
+    "excludedEstimate": "مستثنی (برآورد)",
+    "verificationAll": "همه وضعیت‌های تأیید",
+    "verificationBreakdown": "تحلیل وضعیت تأیید",
+    "discovered": "کشف‌شده",
+    "verified": "تأییدشده",
+    "rejected": "ردشده",
+    "verificationNote": "فقط پروسپکت‌های تأییدشده برای کمپین‌ها پذیرش هستند. پروسپکت‌های کشف‌شده نیاز به تأیید دستی دارند."
   }
 }

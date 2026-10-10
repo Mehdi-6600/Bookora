@@ -6,6 +6,7 @@ import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import {
   isProspectCategory,
   isProspectStatus,
+  isVerificationStatus,
   normalizeLanguage,
 } from "@/lib/outreach/types";
 import { recordOptOut } from "@/lib/outreach/invitations";
@@ -21,6 +22,9 @@ const patchSchema = z.object({
   telegramUsername: z.string().trim().max(64).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
   status: z.string().refine(isProspectStatus, "invalid status").optional(),
+  verificationStatus: z.string().refine(isVerificationStatus, "invalid verification status").optional(),
+  verificationConfidence: z.string().trim().max(16).nullable().optional(),
+  verificationEvidence: z.string().trim().max(1000).nullable().optional(),
   campaignId: z.string().trim().max(100).nullable().optional(),
   nextFollowUpAt: z.string().datetime().nullable().optional(),
 });
@@ -99,7 +103,7 @@ export async function PATCH(
 
   const existing = await prisma.outreachProspect.findUnique({
     where: { id },
-    select: { id: true, telegramUsername: true, publicUrl: true },
+    select: { id: true, telegramUsername: true, publicUrl: true, verificationStatus: true },
   });
 
   if (!existing) {
@@ -124,6 +128,11 @@ export async function PATCH(
       note: "Marked Do Not Contact in the admin dashboard",
     });
     delete data.status; // recordOptOut already sets it
+  }
+
+  // When verificationStatus changes to VERIFIED, stamp the verification date.
+  if (parsed.data.verificationStatus === "VERIFIED" && existing.verificationStatus !== "VERIFIED") {
+    data.verificationDate = new Date();
   }
 
   const prospect = await prisma.outreachProspect.update({

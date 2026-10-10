@@ -132,3 +132,27 @@ export const STATUS_LABELS: Record<ProspectStatus, { en: string; fa: string }> =
     NOT_INTERESTED: { en: "Not Interested", fa: "علاقه‌ای ندارد" },
     DO_NOT_CONTACT: { en: "Do Not Contact", fa: "عدم تماس" },
   };
+
+/** Verification states. A discovery hit is not automatically a prospect. */
+export const VERIFICATION_STATUSES = [
+  "DISCOVERED",
+  "VERIFIED",
+  "REJECTED",
+] as const;
+export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
+
+export function isVerificationStatus(value: unknown): value is VerificationStatus {
+  return (
+    typeof value === "string" &&
+    (VERIFICATION_STATUSES as readonly string[]).includes(value)
+  );
+}
+
+export const VERIFICATION_LABELS: Record<
+  VerificationStatus,
+  { en: string; fa: string }
+> = {
+  DISCOVERED: { en: "Discovered", fa: "کشف‌شده" },
+  VERIFIED: { en: "Verified", fa: "تأییدشده" },
+  REJECTED: { en: "Rejected", fa: "ردشده" },
+};

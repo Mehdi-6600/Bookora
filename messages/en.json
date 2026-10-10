@@ -628,6 +628,18 @@
     "verificationEvidencePlaceholder": "What proves the city and category?",
     "verificationStatus": "Verification",
     "verified": "Verified",
-    "viewPlan": "View plan"
+    "viewPlan": "View plan",
+    "totalProspects": "Total prospects",
+    "pendingVerification": "Pending verification",
+    "verifiedProspects": "Verified prospects",
+    "rejectedProspects": "Rejected prospects",
+    "eligibleEstimate": "Eligible (estimate)",
+    "excludedEstimate": "Excluded (estimate)",
+    "verificationAll": "All verification",
+    "verificationBreakdown": "Verification breakdown",
+    "discovered": "Discovered",
+    "verified": "Verified",
+    "rejected": "Rejected",
+    "verificationNote": "Only VERIFIED prospects are eligible for campaigns. Discovered prospects need manual verification."
   }
 }

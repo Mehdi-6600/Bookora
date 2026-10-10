@@ -628,6 +628,18 @@
     "verificationEvidencePlaceholder": "ما الذي يثبت المدينة والفئة؟",
     "verificationStatus": "التحقق",
     "verified": "موثوق",
-    "viewPlan": "عرض الخطة"
+    "viewPlan": "عرض الخطة",
+    "totalProspects": "إجمالي العملاء المحتملين",
+    "pendingVerification": "قيد التحقق",
+    "verifiedProspects": "عملاء محتملون موثوقون",
+    "rejectedProspects": "عملاء محتملون مرفوضون",
+    "eligibleEstimate": "مؤهل (تقدير)",
+    "excludedEstimate": "مستبعد (تقدير)",
+    "verificationAll": "كل حالات التحقق",
+    "verificationBreakdown": "تحليل حالة التحقق",
+    "discovered": "مكتشف",
+    "verified": "موثوق",
+    "rejected": "مرفوض",
+    "verificationNote": "فقط العملاء المحتملون الموثوقون مؤهلون للحملات. العملاء المكتشفون يحتاجون تحقق يدوي."
   }
 }
