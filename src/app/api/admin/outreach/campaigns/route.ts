@@ -1,3 +1,4 @@
+import { withOutreachError } from "@/lib/outreach/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -21,7 +22,7 @@ import { getOutreachSettings } from "@/lib/outreach/settings";
 import { env } from "@/lib/env";
 import { recordAuditEvent } from "@/lib/outreach/audit";
 
-export async function GET() {
+async function GETImpl() {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -139,7 +140,7 @@ function campaignCode(): string {
     .slice(-4)}`;
 }
 
-export async function POST(req: NextRequest) {
+async function POSTImpl(req: NextRequest) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -220,7 +221,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const campaign = await prisma.outreachCampaign.create({
+  const campaign = await prisma.$transaction(async (tx) => {
+  const campaign = await tx.outreachCampaign.create({
     data: {
       code,
       name: data.name,
@@ -247,6 +249,8 @@ export async function POST(req: NextRequest) {
     action: "campaign.created",
     actorUserId: guard.user.id,
     detail: `cities=${campaign.cities.length} language=${campaign.language}`,
+  }, tx);
+  return campaign;
   });
 
   return NextResponse.json(
@@ -257,3 +261,6 @@ export async function POST(req: NextRequest) {
     { status: 201 }
   );
 }
+
+export const GET = withOutreachError(GETImpl);
+export const POST = withOutreachError(POSTImpl);

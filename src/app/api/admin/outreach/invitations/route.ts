@@ -10,6 +10,7 @@ import type { InvitationStatus } from "@/lib/outreach/types";
 const STATUSES: InvitationStatus[] = [
   "DRAFT",
   "APPROVED",
+  "SENDING",
   "SENT",
   "DELIVERED",
   "FAILED",

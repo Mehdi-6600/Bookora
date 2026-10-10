@@ -11,6 +11,7 @@ import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
 import { markFirstBooking } from "@/lib/outreach/attribution";
 import { recordFunnelEvent } from "@/lib/funnel";
+import { getCurrentUser } from "@/lib/auth/session";
 import {
   activeBookingOverlapWhere,
   expireStalePendingBookings,
@@ -44,6 +45,7 @@ const createBookingSchema = z.object({
     .regex(phonePattern, "phone")
     .refine((value) => (value.match(/[0-9]/g) || []).length >= 6),
   customerEmail: z.string().trim().email().max(254).nullable().optional(),
+  isTestBooking: z.boolean().optional(),
 });
 
 class SlotTakenError extends Error {}
@@ -81,6 +83,7 @@ function sameIdempotentRequest(
     customerName: string;
     customerPhone: string;
     customerEmail: string | null;
+    isTestBooking: boolean;
   },
   input: z.infer<typeof createBookingSchema>,
   businessId: string,
@@ -92,7 +95,8 @@ function sameIdempotentRequest(
     existing.startAt.getTime() === startAt.getTime() &&
     existing.customerName === input.customerName &&
     existing.customerPhone === input.customerPhone &&
-    existing.customerEmail === (input.customerEmail || null)
+    existing.customerEmail === (input.customerEmail || null) &&
+    existing.isTestBooking === (input.isTestBooking ?? false)
   );
 }
 
@@ -162,6 +166,12 @@ export async function POST(
         { error: "invalid booking" },
         { status: 400 }
       );
+    }
+
+    // Public callers may request a test booking only with an authenticated
+    // administrator session. A client-supplied flag alone is never trusted.
+    if (parsed.data.isTestBooking && !(await getCurrentUser())?.isAdmin) {
+      return NextResponse.json({ error: "Only an administrator can create a test booking." }, { status: 403 });
     }
 
     const suppliedKey = req.headers.get("idempotency-key");
@@ -421,6 +431,7 @@ export async function POST(
           customerName: parsed.data.customerName,
           customerPhone: parsed.data.customerPhone,
           customerEmail: parsed.data.customerEmail || null,
+          isTestBooking: parsed.data.isTestBooking ?? false,
           startAt,
           endAt: new Date(
             startAt.getTime() + service.durationMinutes * 60_000
@@ -463,9 +474,9 @@ export async function POST(
       };
     });
 
-    if (transactionResult.created) {
-      // Best-effort growth attribution. Never fails the booking.
-      void markFirstBooking(businessRef.id);
+    if (transactionResult.created && !transactionResult.booking.isTestBooking) {
+      // Best-effort growth attribution for genuine bookings only.
+      void markFirstBooking(businessRef.id, transactionResult.booking.id);
 
       // Funnel: a real customer booking was created.
       await recordFunnelEvent({

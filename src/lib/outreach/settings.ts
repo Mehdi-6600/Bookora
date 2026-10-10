@@ -50,6 +50,7 @@ export const MAX_DAILY_INVITATION_LIMIT = 100;
 
 export type OutreachSettings = {
   enabled: boolean;
+  readError?: string;
   autoSendEnabled: boolean;
   dailyDiscoveryLimit: number;
   dailyInvitationLimit: number;
@@ -180,8 +181,9 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
       select: { key: true, value: true },
     });
   } catch {
-    // A missing table (migration not applied yet) must not break the app.
-    return { ...DEFAULT_OUTREACH_SETTINGS };
+    // Permission to send must never be inferred from a failed settings read.
+    return { ...DEFAULT_OUTREACH_SETTINGS, enabled: false, autoSendEnabled: false,
+      readError: "Outreach settings could not be read. Check the database and retry; approval and delivery are paused." };
   }
 
   const map = new Map(rows.map((row) => [row.key, row.value]));

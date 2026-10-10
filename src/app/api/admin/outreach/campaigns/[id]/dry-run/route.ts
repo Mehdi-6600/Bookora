@@ -1,3 +1,4 @@
+import { withOutreachError } from "@/lib/outreach/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
@@ -11,7 +12,7 @@ type Params = { params: Promise<{ id: string }> };
  * exact message and the delivery channel — without creating an invitation or
  * sending anything.
  */
-export async function POST(_req: NextRequest, { params }: Params) {
+async function POSTImpl(_req: NextRequest, { params }: Params) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -40,3 +41,5 @@ export async function POST(_req: NextRequest, { params }: Params) {
     { headers: { "Cache-Control": "no-store" } }
   );
 }
+
+export const POST = withOutreachError(POSTImpl);

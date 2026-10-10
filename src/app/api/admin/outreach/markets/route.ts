@@ -1,3 +1,4 @@
+import { withOutreachError } from "@/lib/outreach/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/admin-api";
@@ -34,7 +35,7 @@ async function currentApproved(): Promise<string[]> {
   return mergeApprovedCities(list("outreach.cities_enabled"), list("outreach.cities_disabled"));
 }
 
-export async function PUT(req: NextRequest) {
+async function PUTImpl(req: NextRequest) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -78,23 +79,19 @@ export async function PUT(req: NextRequest) {
   const enabledExtra = [...desired].filter((item) => !defaults.has(item));
   const disabledDefaults = [...defaults].filter((item) => !desired.has(item));
 
-  const upsert = (key: string, value: string) =>
-    prisma.adminSetting.upsert({
-      where: { key },
-      update: { value },
+  await prisma.$transaction(async (tx) => {
+    const upsert = (key: string, value: string) => tx.adminSetting.upsert({
+      where: { key }, update: { value },
       create: { key, value, description: "Outreach market approval" },
     });
-
-  await upsert("outreach.cities_enabled", enabledExtra.join(","));
-  await upsert("outreach.cities_disabled", disabledDefaults.join(","));
-
-  await recordAuditEvent({
-    scope: "cities",
-    entityId: code,
-    action: parsed.data.approved ? "cities.approved" : "cities.disabled",
-    actorUserId: guard.user.id,
-    detail: `count=${desired.size}`,
+    await upsert("outreach.cities_enabled", enabledExtra.join(","));
+    await upsert("outreach.cities_disabled", disabledDefaults.join(","));
+    await recordAuditEvent({ scope: "cities", entityId: code,
+      action: parsed.data.approved ? "cities.approved" : "cities.disabled",
+      actorUserId: guard.user.id, detail: `count=${desired.size}` }, tx);
   });
 
   return NextResponse.json({ ok: true, approved: [...desired] });
 }
+
+export const PUT = withOutreachError(PUTImpl);

@@ -317,14 +317,18 @@ export function OutreachPanel() {
     setBotInfo(await api("/api/admin/telegram/webhook"));
   }, []);
 
-  useEffect(() => {
-    void loadStats().catch(() => undefined);
-  }, [loadStats]);
+  const showLoadError = useCallback((error: unknown) => {
+    setMessage({ kind: "err", text: error instanceof Error ? error.message : "Unable to read outreach data; do not approve or send." });
+  }, []);
 
   useEffect(() => {
-    if (tab === "campaigns") void loadCampaigns().catch(() => undefined);
-    if (tab === "prospects") void loadProspects().catch(() => undefined);
-    if (tab === "invitations") void loadInvitations().catch(() => undefined);
+    void loadStats().catch(showLoadError);
+  }, [loadStats, showLoadError]);
+
+  useEffect(() => {
+    if (tab === "campaigns") void loadCampaigns().catch(showLoadError);
+    if (tab === "prospects") void loadProspects().catch(showLoadError);
+    if (tab === "invitations") void loadInvitations().catch(showLoadError);
     if (tab === "templates") void loadTemplates().catch(() => undefined);
     if (tab === "keywords") void loadKeywords().catch(() => undefined);
     if (tab === "discovery") {
@@ -341,7 +345,7 @@ export function OutreachPanel() {
         })
       );
     }
-    if (tab === "bot") void loadBot().catch(() => undefined);
+    if (tab === "bot") void loadBot().catch(showLoadError);
   }, [
     tab,
     loadProspects,
@@ -351,6 +355,7 @@ export function OutreachPanel() {
     loadDiscovery,
     loadSettings,
     loadBot,
+    showLoadError,
   ]);
 
   function copy(text: string) {
@@ -1317,10 +1322,11 @@ function InvitationsTab({
   }
 
   async function act(id: string, action: string) {
+    if (action === "mark_manual_sent" && !window.confirm("Confirm you already contacted this consenting recipient manually?")) return;
     await run(async () => {
       await api(`/api/admin/outreach/invitations/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...(action === "mark_manual_sent" ? { confirmedByOperator: true } : {}) }),
       });
       await refresh();
     });
@@ -2988,6 +2994,7 @@ function CampaignsTab({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [campaignDetails, setCampaignDetails] = useState<Record<string, any>>({});
+  const [auditByCampaign, setAuditByCampaign] = useState<Record<string, any[]>>({});
   const [showMarkets, setShowMarkets] = useState(false);
   const registry: CityEntry[] = cityRegistryOf(cityData);
   const maxCities = cityData?.maxCampaignCities ?? 100;
@@ -3067,6 +3074,7 @@ function CampaignsTab({
     await run(async () => {
       const data = await api<any>(`/api/admin/outreach/campaigns/${id}`);
       setCampaignDetails((current) => ({ ...current, [id]: data.campaign }));
+      setAuditByCampaign((current) => ({ ...current, [id]: data.auditEvents ?? [] }));
       setPlan({ ...data.plan, campaignId: id });
       setExpanded(id);
     });
@@ -3080,6 +3088,7 @@ function CampaignsTab({
     await run(async () => {
       const data = await api<any>(`/api/admin/outreach/campaigns/${id}`);
       setCampaignDetails((current) => ({ ...current, [id]: data.campaign }));
+      setAuditByCampaign((current) => ({ ...current, [id]: data.auditEvents ?? [] }));
       setEditing(id);
     });
   }
@@ -3320,6 +3329,15 @@ function CampaignsTab({
               />
             )}
 
+            {expanded === campaign.id && auditByCampaign[campaign.id] && (
+              <div className="mt-3 max-h-64 overflow-y-auto rounded-xl bg-white p-3" aria-label="Campaign audit events">
+                <h3 className="text-xs font-bold">Audit history</h3>
+                {auditByCampaign[campaign.id].length === 0 && <p className="text-xs">No audit events recorded.</p>}
+                {auditByCampaign[campaign.id].map((event: any) => (
+                  <p key={event.id} className="text-xs">{formatDate(event.createdAt)} · {event.action} · {event.actorUserId ?? "system"} · {event.scope}:{event.entityId ?? "—"}</p>
+                ))}
+              </div>
+            )}
             {expanded === campaign.id && plan && plan.campaignId === campaign.id && (
               <div className="mt-3 rounded-xl bg-[#B8D4F5]/30 p-3">
                 <p className="text-xs font-bold text-[#1A1F36]">
@@ -3371,7 +3389,13 @@ function CampaignsTab({
                   </p>
                 ))}
 
-                {plan.recipients?.slice(0, 3).map((recipient: any) => (
+                {plan.excluded?.map((recipient: any, index: number) => (
+                  <p key={`${recipient.prospectId}-${index}`} className="mt-1 text-[11px] text-[#B45309]">
+                    Excluded: {recipient.publicName} · {recipient.reason}
+                  </p>
+                ))}
+                <p className="mt-2 text-[11px] font-bold">CTA: {campaignDetails[campaign.id]?.cta ?? "See each message below"}. Preview links are placeholders; review the final DRAFT body before individual approval.</p>
+                {plan.recipients?.map((recipient: any) => (
                   <div
                     key={recipient.prospectId}
                     className="mt-2 rounded-lg bg-white p-2"
@@ -3382,6 +3406,7 @@ function CampaignsTab({
                         ? t("eligible")
                         : t("manualOnly")}
                     </p>
+                    <p className="text-[11px]">Verification: {recipient.verificationStatus} · Bot consent: {recipient.botConsent ? "current" : "none"} · Suppression: {recipient.suppressed ? "yes" : "no"} · Eligibility: {recipient.reason}</p>
                     {recipient.previewBody && (
                       <pre className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-[#1A1F36]/80">
                         {recipient.previewBody}

@@ -35,6 +35,7 @@ import {
   type DestinationSelection,
 } from "@/lib/outreach/message";
 import { recordAuditEvent } from "@/lib/outreach/audit";
+import { approvalBlocker } from "@/lib/outreach/approval-eligibility";
 import {
   prepareInvitations,
   sendApprovedInvitations,
@@ -114,6 +115,9 @@ export type CampaignRecipient = {
   neighborhood: string | null;
   language: string;
   disposition: RecipientDisposition;
+  verificationStatus: string;
+  botConsent: boolean;
+  suppressed: boolean;
   reason: string;
   channel: "TELEGRAM_BOT" | "MANUAL";
   destination: string;
@@ -413,6 +417,9 @@ export async function planCampaign(
       neighborhood: prospect.neighborhood ?? null,
       language: normalizeLanguage(prospect.language),
       disposition,
+      verificationStatus: prospect.verificationStatus,
+      botConsent: disposition === "ELIGIBLE",
+      suppressed: reason === "suppressed",
       reason,
       channel: disposition === "ELIGIBLE" ? "TELEGRAM_BOT" : "MANUAL",
       destination:
@@ -488,7 +495,8 @@ export async function dryRunCampaign(
 
   const plan = await planCampaign(campaign);
 
-  await prisma.outreachCampaign.update({
+  await prisma.$transaction(async (tx) => {
+  await tx.outreachCampaign.update({
     where: { id: campaignId },
     data: {
       lastDryRunAt: new Date(),
@@ -504,6 +512,7 @@ export async function dryRunCampaign(
     action: "campaign.dry_run",
     actorUserId,
     detail: `eligible=${plan.eligible} manualOnly=${plan.manualOnly} blocked=${plan.blocked}`,
+  }, tx);
   });
 
   return { ok: true, plan };
@@ -528,13 +537,20 @@ export async function approveCampaign(
   if (campaign.status === "APPROVED") {
     return { ok: false, error: "Campaign is already approved." };
   }
+  const settings = await getOutreachSettings();
+  if (settings.readError || !settings.enabled || !settings.autoSendEnabled) {
+    return { ok: false, error: settings.readError ?? "Outreach approval is paused in settings." };
+  }
   if (!campaign.lastDryRunAt) {
     return { ok: false, error: "Run a dry run before approving." };
   }
 
   const plan = await planCampaign(campaign);
+  if (plan.manualOnly > 0 || plan.recipients.some((r) => r.disposition !== "ELIGIBLE")) {
+    return { ok: false, error: "Every planned recipient must have current bot consent and eligibility before campaign approval." };
+  }
 
-  if (plan.eligible + plan.manualOnly === 0) {
+  if (plan.eligible === 0) {
     return {
       ok: false,
       error:
@@ -548,7 +564,8 @@ export async function approveCampaign(
     };
   }
 
-  await prisma.outreachCampaign.update({
+  await prisma.$transaction(async (tx) => {
+  await tx.outreachCampaign.update({
     where: { id: campaignId },
     data: {
       status: "APPROVED",
@@ -563,6 +580,7 @@ export async function approveCampaign(
     action: "campaign.approved",
     actorUserId,
     detail: `eligible=${plan.eligible} manualOnly=${plan.manualOnly}`,
+  }, tx);
   });
 
   return { ok: true, plan };
@@ -597,31 +615,23 @@ export async function prepareCampaign(
     return { ok: false, error: "No recipients to prepare." };
   }
 
-  const result = await prepareInvitations({
-    limit: plan.sendLimit,
-    actorUserId,
-    campaignId,
-    templateId: campaign.templateId,
-    prospectIds,
+  const result = await prisma.$transaction(async (tx) => {
+    const prepared = await prepareInvitations({
+      limit: plan.sendLimit, actorUserId, campaignId,
+      templateId: campaign.templateId, prospectIds, db: tx,
+    });
+    await tx.outreachCampaign.update({
+      where: { id: campaignId }, data: { lastPreparedAt: new Date() },
+    });
+    await recordAuditEvent({ scope: "campaign", entityId: campaignId,
+      action: "campaign.prepared", actorUserId,
+      detail: `prepared=${prepared.prepared.length} skipped=${prepared.skipped.length}` }, tx);
+    return prepared;
   });
-
   const reasons: Record<string, number> = {};
   for (const skip of result.skipped) {
     reasons[skip.reason] = (reasons[skip.reason] ?? 0) + 1;
   }
-
-  await prisma.outreachCampaign.update({
-    where: { id: campaignId },
-    data: { lastPreparedAt: new Date() },
-  });
-
-  await recordAuditEvent({
-    scope: "campaign",
-    entityId: campaignId,
-    action: "campaign.prepared",
-    actorUserId,
-    detail: `prepared=${result.prepared.length} skipped=${result.skipped.length}`,
-  });
 
   return {
     ok: true,
@@ -662,22 +672,31 @@ export async function approveCampaignInvitations(
     return { ok: false, error: "Campaign must be APPROVED first." };
   }
 
-  const result = await prisma.outreachInvitation.updateMany({
-    where: { campaignId, status: "DRAFT" },
-    data: {
-      status: "APPROVED",
-      approvedAt: new Date(),
-      approvedByUserId: actorUserId ?? null,
-      reviewedAt: new Date(),
-    },
+  const settings = await getOutreachSettings();
+  if (settings.readError || !settings.enabled || !settings.autoSendEnabled) {
+    return { ok: false, error: settings.readError ?? "Outreach approval is paused in settings." };
+  }
+  // Reject the entire batch if even one draft cannot pass the exact delivery
+  // gates. Never silently approve a subset or rely on a stale campaign preview.
+  const drafts = await prisma.outreachInvitation.findMany({
+    where: { campaignId, status: "DRAFT" }, include: { prospect: true },
   });
-
-  await recordAuditEvent({
-    scope: "invitation",
-    entityId: campaignId,
-    action: "invitations.approved",
-    actorUserId,
-    detail: `approved=${result.count}`,
+  for (const draft of drafts) {
+    const reason = await approvalBlocker(draft.prospect);
+    if (reason) return { ok: false, error: `Invitation ${draft.id}: ${reason}` };
+  }
+  if (drafts.length === 0) return { ok: true, approved: 0 };
+  const result = await prisma.$transaction(async (tx) => {
+    const updated = await tx.outreachInvitation.updateMany({
+      where: { campaignId, status: "DRAFT", id: { in: drafts.map((d) => d.id) } },
+      data: { status: "APPROVED", approvedAt: new Date(),
+        approvedByUserId: actorUserId ?? null, reviewedAt: new Date() },
+    });
+    if (updated.count !== drafts.length) throw new Error("Invitation list changed; refresh and retry approval.");
+    await recordAuditEvent({ scope: "invitation", entityId: campaignId,
+      action: "invitations.approved", actorUserId,
+      detail: `approved=${updated.count}` }, tx);
+    return updated;
   });
 
   return { ok: true, approved: result.count };
@@ -721,9 +740,10 @@ export async function sendCampaignInvitations(options: {
     };
   }
 
-  await prisma.outreachCampaign.update({
-    where: { id: options.campaignId },
-    data: { status: "SENDING" },
+  await prisma.$transaction(async (tx) => {
+    await tx.outreachCampaign.update({ where: { id: options.campaignId }, data: { status: "SENDING" } });
+    await recordAuditEvent({ scope: "campaign", entityId: options.campaignId,
+      action: "campaign.delivery_started" }, tx);
   });
 
   try {
@@ -739,7 +759,8 @@ export async function sendCampaignInvitations(options: {
     const failed = outcomes.filter((o) => o.status === "FAILED").length;
     const skipped = outcomes.filter((o) => o.status === "SKIPPED").length;
 
-    await prisma.outreachCampaign.update({
+    await prisma.$transaction(async (tx) => {
+    await tx.outreachCampaign.update({
       where: { id: options.campaignId },
       data: {
         status: failed > 0 && sent === 0 ? "FAILED" : "COMPLETED",
@@ -751,11 +772,13 @@ export async function sendCampaignInvitations(options: {
       entityId: options.campaignId,
       action: "campaign.delivery",
       detail: `sent=${sent} delivered=${delivered} failed=${failed} skipped=${skipped}`,
+    }, tx);
     });
 
     return { ok: true, sent, delivered, failed, skipped };
   } catch (error) {
-    await prisma.outreachCampaign.update({
+    await prisma.$transaction(async (tx) => {
+    await tx.outreachCampaign.update({
       where: { id: options.campaignId },
       data: { status: "FAILED" },
     });
@@ -764,7 +787,9 @@ export async function sendCampaignInvitations(options: {
       entityId: options.campaignId,
       action: "campaign.delivery_failed",
       detail: `error=${error instanceof Error ? error.name : "UnknownError"}`,
+    }, tx);
     });
+
     return {
       ok: false,
       error: error instanceof Error ? error.name : "UnknownError",
@@ -861,12 +886,13 @@ export async function saveCampaignMessage(
     select: { id: true },
   });
 
+  const template = await prisma.$transaction(async (tx) => {
   const template = existing
-    ? await prisma.invitationTemplate.update({
+    ? await tx.invitationTemplate.update({
         where: { id: existing.id },
         data: { body: composed.body, language, active: true },
       })
-    : await prisma.invitationTemplate.create({
+    : await tx.invitationTemplate.create({
         data: {
           code: templateCode,
           language,
@@ -876,7 +902,7 @@ export async function saveCampaignMessage(
         },
       });
 
-  await prisma.outreachCampaign.update({
+  await tx.outreachCampaign.update({
     where: { id: campaignId },
     data: {
       language,
@@ -895,6 +921,8 @@ export async function saveCampaignMessage(
     action: "campaign.message_saved",
     actorUserId,
     detail: `language=${language} destinations=${composed.links.map((l) => l.kind).join("+") || "none"} length=${composed.body.length}`,
+  }, tx);
+  return template;
   });
 
   const preview = renderTemplate(composed.body, {

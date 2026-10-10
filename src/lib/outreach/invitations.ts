@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildBotDeepLink, buildProspectStartParam } from "@/lib/outreach/deeplink";
 import {
@@ -24,6 +25,9 @@ import {
   type ProspectCategory,
 } from "@/lib/outreach/types";
 import { deliverTelegramMessage } from "@/lib/telegram/notify";
+import { currentBotConsent } from "@/lib/outreach/bot-consent";
+import { getOutreachSettings } from "@/lib/outreach/settings";
+import { recordAuditEvent } from "@/lib/outreach/audit";
 
 /**
  * Invitation lifecycle:
@@ -61,16 +65,17 @@ function uniqueStartParam(): string {
 async function pickTemplate(
   language: OutreachLanguage,
   category: ProspectCategory,
-  templateId?: string | null
+  templateId?: string | null,
+  db: Prisma.TransactionClient = prisma
 ) {
   if (templateId) {
-    const explicit = await prisma.invitationTemplate.findUnique({
+    const explicit = await db.invitationTemplate.findUnique({
       where: { id: templateId },
     });
     if (explicit && explicit.active) return explicit;
   }
 
-  const candidates = await prisma.invitationTemplate.findMany({
+  const candidates = await db.invitationTemplate.findMany({
     where: { active: true, language },
     orderBy: [{ category: "asc" }, { createdAt: "asc" }],
   });
@@ -102,7 +107,9 @@ export async function prepareInvitations(options: {
   campaignId?: string | null;
   templateId?: string | null;
   prospectIds?: string[];
+  db?: Prisma.TransactionClient;
 }): Promise<PrepareResult> {
+  const db = options.db ?? prisma;
   const limit = Math.max(0, Math.min(100, Math.round(options.limit)));
   if (limit === 0) return { prepared: [], skipped: [] };
 
@@ -121,7 +128,7 @@ export async function prepareInvitations(options: {
     where.campaignId = options.campaignId;
   }
 
-  const prospects = await prisma.outreachProspect.findMany({
+  const prospects = await db.outreachProspect.findMany({
     where,
     orderBy: [{ nextFollowUpAt: "asc" }, { createdAt: "asc" }],
     take: Math.max(limit * 3, 30),
@@ -129,7 +136,7 @@ export async function prepareInvitations(options: {
 
   const alreadyPending = new Set(
     (
-      await prisma.outreachInvitation.findMany({
+      await db.outreachInvitation.findMany({
         where: { status: { in: ["DRAFT", "APPROVED"] } },
         select: { prospectId: true },
       })
@@ -167,7 +174,7 @@ export async function prepareInvitations(options: {
       ? prospect.category
       : "OTHER";
 
-    const template = await pickTemplate(language, category, options.templateId);
+    const template = await pickTemplate(language, category, options.templateId, db);
     if (!template) {
       skipped.push({ prospectId: prospect.id, reason: "no_template" });
       continue;
@@ -182,7 +189,7 @@ export async function prepareInvitations(options: {
     let startParam = uniqueStartParam();
     // Extremely unlikely collision guard.
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const clash = await prisma.outreachInvitation.findUnique({
+      const clash = await db.outreachInvitation.findUnique({
         where: { startParam },
         select: { id: true },
       });
@@ -197,7 +204,7 @@ export async function prepareInvitations(options: {
       categoryLabel: categoryLabel(category, language),
     });
 
-    const invitation = await prisma.outreachInvitation.create({
+    const invitation = await db.outreachInvitation.create({
       data: {
         prospectId: prospect.id,
         templateId: template.id,
@@ -249,6 +256,10 @@ export async function sendApprovedInvitations(options: {
 }): Promise<SendOutcome[]> {
   const limit = Math.max(0, Math.min(100, Math.round(options.limit)));
 
+  const settings = await getOutreachSettings();
+  if (!settings.enabled || !settings.autoSendEnabled || settings.readError) {
+    throw new Error(settings.readError ?? "Outreach delivery is paused.");
+  }
   const pending = await prisma.outreachInvitation.findMany({
     where: {
       status: "APPROVED",
@@ -276,13 +287,18 @@ export async function sendApprovedInvitations(options: {
     // Last line of defence: a prospect unverified (or rejected) after its
     // invitation was approved must never be messaged. Skipped, never sent.
     if (invitation.prospect.verificationStatus !== "VERIFIED") {
-      await prisma.outreachInvitation.update({
+      await prisma.$transaction(async (tx) => {
+      await tx.outreachInvitation.update({
         where: { id: invitation.id },
         data: {
           status: "SKIPPED",
           failureReason: "not_verified",
           reviewedAt: new Date(),
         },
+      });
+
+      await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
+        action: "invitation.skipped", detail: "reason=not_verified" }, tx);
       });
 
       outcomes.push({
@@ -305,13 +321,18 @@ export async function sendApprovedInvitations(options: {
     });
 
     if (!eligibility.canAutoSend) {
-      await prisma.outreachInvitation.update({
+      await prisma.$transaction(async (tx) => {
+      await tx.outreachInvitation.update({
         where: { id: invitation.id },
         data: {
           status: "SKIPPED",
           failureReason: eligibility.reason,
           reviewedAt: new Date(),
         },
+      });
+
+      await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
+        action: "invitation.skipped", detail: `reason=${eligibility.reason}` }, tx);
       });
 
       outcomes.push({
@@ -322,11 +343,28 @@ export async function sendApprovedInvitations(options: {
       continue;
     }
 
+    const reserved = await prisma.$transaction(async (tx) => {
+      const consent = await currentBotConsent(invitation.prospect.id, tx);
+      if (!consent || consent.telegramId !== telegramUserId) return false;
+      const claimed = await tx.outreachInvitation.updateMany({
+        where: { id: invitation.id, status: "APPROVED",
+          prospect: { verificationStatus: "VERIFIED", optedOutAt: null } },
+        data: { status: "SENDING" },
+      });
+      if (!claimed.count) return false;
+      await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
+        action: "invitation.delivery_started", detail: `prospect=${invitation.prospect.id}` }, tx);
+      return true;
+    });
+    if (!reserved) continue;
+    // An audit failure before this point prevents the external send entirely.
+    // SENDING is never retried automatically if the result write fails.
     const result = await deliverTelegramMessage(telegramUserId as string, invitation.body);
     const now = new Date();
 
     if (!result.ok) {
-      await prisma.outreachInvitation.update({
+      await prisma.$transaction(async (tx) => {
+      await tx.outreachInvitation.update({
         where: { id: invitation.id },
         data: {
           status: "FAILED",
@@ -336,7 +374,9 @@ export async function sendApprovedInvitations(options: {
       });
 
       if (result.blocked) {
-        await prisma.outreachProspect.update({
+        await tx.telegramBotOptIn.updateMany({ where: { telegramId: telegramUserId as string },
+          data: { revokedAt: now } });
+        await tx.outreachProspect.update({
           where: { id: invitation.prospect.id },
           data: {
             status: "DO_NOT_CONTACT",
@@ -346,6 +386,9 @@ export async function sendApprovedInvitations(options: {
         });
       }
 
+      await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
+        action: "invitation.delivery_failed", detail: `code=${result.errorCode ?? "unknown"}` }, tx);
+      });
       outcomes.push({
         invitationId: invitation.id,
         status: "FAILED",
@@ -354,7 +397,8 @@ export async function sendApprovedInvitations(options: {
       continue;
     }
 
-    await prisma.outreachInvitation.update({
+    await prisma.$transaction(async (tx) => {
+    await tx.outreachInvitation.update({
       where: { id: invitation.id },
       data: {
         status: "DELIVERED",
@@ -364,7 +408,7 @@ export async function sendApprovedInvitations(options: {
       },
     });
 
-    await prisma.outreachProspect.update({
+    await tx.outreachProspect.update({
       where: { id: invitation.prospect.id },
       data: {
         status: invitation.prospect.status === "NEW" ? "CONTACTED" : invitation.prospect.status,
@@ -374,6 +418,9 @@ export async function sendApprovedInvitations(options: {
       },
     });
 
+    await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
+      action: "invitation.delivered", detail: `prospect=${invitation.prospect.id}` }, tx);
+    });
     outcomes.push({
       invitationId: invitation.id,
       status: "DELIVERED",

@@ -83,6 +83,7 @@ export function normalizeLanguage(value: unknown): OutreachLanguage {
 export const INVITATION_STATUSES = [
   "DRAFT",
   "APPROVED",
+  "SENDING",
   "SENT",
   "DELIVERED",
   "FAILED",

@@ -1,11 +1,11 @@
 import { prisma } from "@/lib/prisma";
+import { currentBotConsent } from "@/lib/outreach/bot-consent";
 import {
   CLOSED_PROSPECT_STATUSES,
   type ProspectStatus,
 } from "@/lib/outreach/types";
 import {
   buildSuppressionIdentifier,
-  normalizeTelegramUsername,
 } from "@/lib/outreach/normalize";
 
 /**
@@ -16,10 +16,10 @@ import {
  * already started it (or who otherwise has an established messaging
  * relationship). This module is the single place where that rule is enforced:
  *
- *   - If we have a `User` row for the numeric Telegram id, the person has
- *     started the bot, so automated delivery is allowed.
- *   - Otherwise the invitation must stay a DRAFT for manual, targeted outreach
- *     through that business's own public contact channels.
+ *   - An authenticated private /start binds a numeric chat id to the
+ *     invitation prospect in `telegram_bot_opt_ins`.
+ *   - Mini App sessions and usernames never confer sending permission.
+ *   - Expired, revoked or missing evidence blocks automated delivery.
  */
 
 export type EligibilityResult = {
@@ -99,14 +99,10 @@ export async function checkEligibility(prospect: {
     return { canAutoSend: false, reason: ELIGIBILITY_REASONS.NO_TELEGRAM_ID };
   }
 
-  // A `User` row exists only after the person pressed Start in the bot, which
-  // is exactly the condition Telegram requires for automated delivery.
-  const user = await prisma.user.findUnique({
-    where: { telegramId: prospect.telegramUserId },
-    select: { id: true },
-  });
-
-  if (!user) {
+  // Mini App authentication also creates User rows; only an authenticated
+  // private Bot API /start with an attributed invitation proves consent.
+  const consent = await currentBotConsent(prospect.id);
+  if (!consent || consent.telegramId !== prospect.telegramUserId) {
     return { canAutoSend: false, reason: ELIGIBILITY_REASONS.NOT_STARTED_BOT };
   }
 
@@ -120,16 +116,7 @@ export async function checkEligibility(prospect: {
  * username into a user id. It is only filled in once the person actually starts
  * the bot through the attributed deep link.
  */
-export async function resolveTelegramUserId(prospect: {
-  telegramUsername: string | null;
-}): Promise<string | null> {
-  const username = normalizeTelegramUsername(prospect.telegramUsername);
-  if (!username) return null;
-
-  const user = await prisma.user.findFirst({
-    where: { telegramUsername: { equals: username, mode: "insensitive" } },
-    select: { telegramId: true },
-  });
-
-  return user?.telegramId ?? null;
+export async function resolveTelegramUserId(prospect: { id: string }): Promise<string | null> {
+  const consent = await currentBotConsent(prospect.id);
+  return consent?.telegramId ?? null;
 }

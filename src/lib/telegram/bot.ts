@@ -14,6 +14,7 @@ import {
   welcomeKeyboard,
 } from "@/lib/telegram/onboarding";
 import { recordOptOut } from "@/lib/outreach/invitations";
+import { recordBotStartConsent, revokeBotConsent } from "@/lib/outreach/bot-consent";
 
 let bot: Bot | null = null;
 
@@ -27,9 +28,13 @@ function registerOnboardingHandlers(instance: Bot) {
     if (ctx.from) {
       // Awaited: on serverless the invocation can end as soon as the response
       // is returned, which would drop the attribution write.
+      if (String(ctx.chat.id) !== String(ctx.from.id)) return;
+      await recordBotStartConsent({
+        telegramId: String(ctx.from.id), chatId: String(ctx.chat.id),
+        updateId: ctx.update.update_id, startParam,
+      });
       await recordAttributedStart({
-        telegramId: String(ctx.from.id),
-        startParam,
+        telegramId: String(ctx.from.id), startParam,
       });
     }
 
@@ -60,6 +65,7 @@ function registerOnboardingHandlers(instance: Bot) {
     const language = languageFor(ctx.from?.language_code);
 
     if (ctx.from) {
+      await revokeBotConsent(String(ctx.from.id), ctx.update.update_id);
       await recordOptOut({
         telegramId: String(ctx.from.id),
         telegramUsername: ctx.from.username ?? null,

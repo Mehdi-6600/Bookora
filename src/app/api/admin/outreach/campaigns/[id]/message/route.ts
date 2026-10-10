@@ -1,3 +1,4 @@
+import { withOutreachError } from "@/lib/outreach/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/admin-api";
@@ -36,7 +37,7 @@ const messageSchema = z.object({
   destinationUrl: z.string().trim().max(500).nullable().optional(),
 });
 
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHImpl(req: NextRequest, { params }: Params) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -88,7 +89,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
  * locally with the shared pure module; this exists so an explicit server-side
  * check (with the deployment's real settings) can be requested at any time.
  */
-export async function POST(req: NextRequest, _params: Params) {
+async function POSTImpl(req: NextRequest, _params: Params) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -123,3 +124,6 @@ export async function POST(req: NextRequest, _params: Params) {
     errors: composed.errors,
   });
 }
+
+export const PATCH = withOutreachError(PATCHImpl);
+export const POST = withOutreachError(POSTImpl);

@@ -75,6 +75,10 @@ vi.mock("@/lib/prisma", () => ({
     outreachAuditEvent: {
       create: mocks.functions.createAuditEvent,
     },
+    $transaction: async (fn: (tx: any) => Promise<any>) => fn({
+      adminSetting: { upsert: mocks.functions.upsert },
+      outreachAuditEvent: { create: mocks.functions.createAuditEvent },
+    }),
   },
 }));
 
@@ -133,7 +137,7 @@ describe("admin outreach settings API", () => {
     expect(mocks.state.auditEvents).toHaveLength(1);
     expect(mocks.state.auditEvents[0]).toMatchObject({
       scope: "settings",
-      action: "settings.channel_url_changed",
+      action: "settings.updated",
       actorUserId: "admin-1",
       detail: "keys=outreach.channel_url",
     });

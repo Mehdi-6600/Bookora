@@ -1,3 +1,4 @@
+import { withOutreachError } from "@/lib/outreach/api-error";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -11,13 +12,13 @@ import {
   MAX_CAMPAIGN_CITIES,
 } from "@/lib/outreach/cities";
 import { validateDestinationUrl } from "@/lib/outreach/message";
-import { getAuditEvents } from "@/lib/outreach/audit";
+import { getAuditEvents, recordAuditEvent, AuditUnavailableError } from "@/lib/outreach/audit";
 import { normalizeLanguage } from "@/lib/outreach/types";
 import { planCampaign } from "@/lib/outreach/campaigns";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: NextRequest, { params }: Params) {
+async function GETImpl(_req: NextRequest, { params }: Params) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -37,13 +38,13 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const plan = await planCampaign(campaign);
-  // The message builder needs the CURRENT editable text; the audit trail shows
-  // who changed what. `getAuditEvents` is fail-soft (empty list until the
-  // additive 0003 migration is applied).
-  const auditEvents = await getAuditEvents({
-    entityId: campaign.id,
-    take: 25,
-  });
+  let auditEvents;
+  try {
+    auditEvents = await getAuditEvents({ entityId: campaign.id, take: 100 });
+  } catch (error) {
+    if (error instanceof AuditUnavailableError) return NextResponse.json({ error: error.message }, { status: 503 });
+    throw error;
+  }
 
   return NextResponse.json(
     {
@@ -77,7 +78,7 @@ const patchSchema = z.object({
   sendLimit: z.number().int().min(0).max(100).nullable().optional(),
 });
 
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHImpl(req: NextRequest, { params }: Params) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -170,15 +171,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       .filter(isBusinessSegment);
   }
 
-  const updated = await prisma.outreachCampaign.update({
-    where: { id },
-    data: update,
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.outreachCampaign.update({ where: { id }, data: update });
+    await recordAuditEvent({ scope: "campaign", entityId: id, action: "campaign.updated",
+      actorUserId: guard.user.id, detail: `keys=${Object.keys(update).join(",")}` }, tx);
+    return row;
   });
 
   return NextResponse.json({ campaign: updated });
 }
 
-export async function DELETE(_req: NextRequest, { params }: Params) {
+async function DELETEImpl(_req: NextRequest, { params }: Params) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
@@ -197,6 +200,14 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     );
   }
 
-  await prisma.outreachCampaign.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await tx.outreachCampaign.delete({ where: { id } });
+    await recordAuditEvent({ scope: "campaign", entityId: id, action: "campaign.deleted",
+      actorUserId: guard.user.id }, tx);
+  });
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withOutreachError(GETImpl);
+export const PATCH = withOutreachError(PATCHImpl);
+export const DELETE = withOutreachError(DELETEImpl);

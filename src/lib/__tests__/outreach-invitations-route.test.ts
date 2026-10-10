@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => {
     authMode: "admin" as "admin" | "anonymous",
     prospects: [] as Row[],
     invitations: [] as Row[],
+    audit: [] as Row[],
+    blocker: null as string | null,
   };
 
   const functions = {
@@ -58,10 +60,14 @@ const mocks = vi.hoisted(() => {
     }),
     isRateLimited: vi.fn(async () => false),
     triggerRateLimitCleanup: vi.fn(),
+    approvalBlocker: vi.fn(async (prospect: Row) => state.blocker ?? (prospect.verificationStatus === "VERIFIED" ? null : "Only VERIFIED prospects can be approved for outreach.")),
+    createAudit: vi.fn(async ({ data }: any) => { state.audit.push(data); return data; }),
   };
 
   return { state, functions };
 });
+
+vi.mock("@/lib/outreach/approval-eligibility", () => ({ approvalBlocker: mocks.functions.approvalBlocker }));
 
 vi.mock("@/lib/auth/admin-api", () => ({
   requireAdmin: mocks.functions.requireAdmin,
@@ -74,6 +80,11 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: mocks.functions.findUnique,
       update: mocks.functions.update,
     },
+    outreachProspect: { update: vi.fn(async () => ({})) },
+    outreachAuditEvent: { create: mocks.functions.createAudit },
+    $transaction: async (fn: (tx: any) => Promise<any>) => fn({ outreachInvitation: { update: mocks.functions.update },
+      outreachProspect: { update: vi.fn(async () => ({})) },
+      outreachAuditEvent: { create: mocks.functions.createAudit } }),
   },
 }));
 
@@ -112,6 +123,8 @@ beforeEach(() => {
   mocks.state.authMode = "admin";
   mocks.state.prospects = [];
   mocks.state.invitations = [];
+  mocks.state.audit = [];
+  mocks.state.blocker = null;
   vi.clearAllMocks();
 });
 
@@ -151,6 +164,16 @@ describe("invitation review API", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.state.invitations[0].status).toBe("APPROVED");
+  });
+
+  it("rejects manual-sent without confirmed consent or from an invalid state", async () => {
+    seed({}, { status: "APPROVED" });
+    const params = { params: Promise.resolve({ id: "inv-1" }) };
+    expect((await patchInvitation(patchRequest({ action: "mark_manual_sent" }), params)).status).toBe(409);
+    mocks.state.blocker = "suppressed";
+    expect((await patchInvitation(patchRequest({ action: "mark_manual_sent", confirmedByOperator: true }), params)).status).toBe(409);
+    expect(mocks.state.invitations[0].status).toBe("APPROVED");
+    expect(mocks.state.audit).toHaveLength(0);
   });
 
   it("lists invitations with the prospect verification status", async () => {
