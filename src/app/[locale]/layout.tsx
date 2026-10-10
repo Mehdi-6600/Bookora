@@ -1,16 +1,77 @@
 import type { Metadata, Viewport } from "next";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages, setRequestLocale } from "next-intl/server";
+import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 import Script from "next/script";
 import { routing, type Locale } from "@/i18n/routing";
 import { TelegramThemeSync } from "@/components/telegram/theme-sync";
+import { env } from "@/lib/env";
 import "../globals.css";
 
-export const metadata: Metadata = {
-  title: "Bookora",
-  description: "Let customers book you.",
-};
+const APP_URL = env.APP_URL.replace(/\/+$/, "");
+
+/**
+ * Per-locale metadata.
+ *
+ * Without this every shared link rendered the same generic title and
+ * description, so a barbershop sharing its booking page gave customers no
+ * reason to tap it.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const resolved = routing.locales.includes(locale as Locale)
+    ? (locale as Locale)
+    : routing.defaultLocale;
+
+  const t = await getTranslations({ locale: resolved, namespace: "homeNew" });
+
+  const description = t("valueProp");
+
+  return {
+    metadataBase: new URL(APP_URL),
+    title: {
+      default: "Bookora",
+      template: "%s | Bookora",
+    },
+    description,
+    applicationName: "Bookora",
+    alternates: {
+      canonical: resolved === routing.defaultLocale ? "/" : `/${resolved}`,
+      languages: {
+        en: "/",
+        fa: "/fa",
+        ar: "/ar",
+        "x-default": "/",
+      },
+    },
+    openGraph: {
+      type: "website",
+      siteName: "Bookora",
+      title: "Bookora",
+      description,
+      url: APP_URL,
+      images: [
+        {
+          url: "/bookora-og.png",
+          width: 1200,
+          height: 630,
+          alt: "Bookora — online booking for your business",
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: "Bookora",
+      description,
+      images: ["/bookora-og.png"],
+    },
+    robots: { index: true, follow: true },
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",

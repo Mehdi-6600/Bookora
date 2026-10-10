@@ -8,6 +8,7 @@ import { FREE_BUSINESS_LIMIT } from "@/lib/subscription/plans";
 import { activePaidSubscriptionWhere } from "@/lib/subscription/entitlement";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { normalizeTimeZone } from "@/lib/booking/time";
+import { markRegistered } from "@/lib/outreach/attribution";
 
 const createBusinessSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -185,6 +186,9 @@ export async function POST(req: NextRequest) {
 
           return created;
         });
+
+        // Best-effort growth attribution. Never fails the request.
+        void markRegistered(user.id, business.id);
 
         return NextResponse.json(
           {

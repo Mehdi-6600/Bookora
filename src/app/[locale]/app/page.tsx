@@ -30,6 +30,8 @@ import { TimeOffPanel } from "@/components/time-off-panel";
 import { PaymentMethodPanel } from "@/components/payment-method-panel";
 import { BookingsPanel } from "@/components/bookings-panel";
 import { LocaleSwitcher } from "@/components/locale-switcher";
+import { OnboardingChecklist } from "@/components/onboarding-checklist";
+import { track } from "@/lib/funnel-client";
 import { Link } from "@/i18n/navigation";
 import {
   CountryCode,
@@ -307,6 +309,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   useEffect(() => {
     loadBusinesses();
+    track("mini_app_launch", { locale: document.documentElement.lang });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -350,6 +353,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setCreateStep(1);
       await loadBusinesses({ silent: true });
       setMessage(tMsg("businessCreated"));
+      track("business_created");
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : tMsg("businessCreateError")
@@ -576,6 +580,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       await loadBusinesses({ silent: true });
 
       setMessage(tMsg("serviceCreated"));
+      track("service_created");
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : tMsg("serviceCreateError")
@@ -869,6 +874,14 @@ function Dashboard({ user }: { user: TelegramUser }) {
           </div>
         </div>
       </header>
+
+      {!adminView && selectedBusiness && !isArchived && (
+        <OnboardingChecklist
+          businessId={selectedBusiness.id}
+          hasActiveServices={activeServices > 0}
+          bookingUrl={bookingUrl}
+        />
+      )}
 
       {!adminView && (
         <SubscriptionPanel

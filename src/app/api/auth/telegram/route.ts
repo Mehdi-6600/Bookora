@@ -8,6 +8,7 @@ import { cookies } from "next/headers";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
 import { adminTelegramIds, adminTelegramIdsConfigured } from "@/lib/env";
+import { recordFunnelEvent } from "@/lib/funnel";
 
 const bodySchema = z.object({
   initData: z.string().min(1).max(10_000),
@@ -93,6 +94,13 @@ export async function POST(req: NextRequest) {
     sameSite: "lax",
     maxAge: THIRTY_DAYS_SECONDS,
     path: "/",
+  });
+
+  // Funnel: authentication succeeded. Server-side so it cannot be spoofed.
+  await recordFunnelEvent({
+    event: "auth_success",
+    ip: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? "",
   });
 
   return NextResponse.json({

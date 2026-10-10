@@ -9,6 +9,8 @@ import { formatPrice } from "@/lib/currency";
 import { notifyUser } from "@/lib/telegram/notify";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
+import { markFirstBooking } from "@/lib/outreach/attribution";
+import { recordFunnelEvent } from "@/lib/funnel";
 import {
   activeBookingOverlapWhere,
   expireStalePendingBookings,
@@ -460,6 +462,18 @@ export async function POST(
         service,
       };
     });
+
+    if (transactionResult.created) {
+      // Best-effort growth attribution. Never fails the booking.
+      void markFirstBooking(businessRef.id);
+
+      // Funnel: a real customer booking was created.
+      await recordFunnelEvent({
+        event: "booking_created",
+        ip,
+        userAgent: req.headers.get("user-agent") ?? "",
+      });
+    }
 
     if (
       transactionResult.created &&

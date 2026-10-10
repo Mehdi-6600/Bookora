@@ -25,11 +25,12 @@ import {
   XCircle,
 } from "lucide-react";
 import { TelegramAuthGate } from "@/components/telegram/auth-gate";
+import { OutreachPanel } from "@/components/outreach/outreach-panel";
 import { MANUAL_PAYMENT_SETTING_KEYS } from "@/lib/admin-settings";
 
 type SettingRow = { key: string; value: string };
 type FilterKey = "PENDING" | "ACTIVE" | "REJECTED";
-type TabKey = "requests" | "businesses";
+type TabKey = "requests" | "businesses" | "outreach";
 type BizStatusKey = "ALL" | "ACTIVE" | "ARCHIVED";
 
 type SubscriptionRow = {
@@ -384,6 +385,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
 
   const tabRequests = t("tabRequests");
   const tabBusinesses = t("tabBusinesses");
+  const tabOutreach = t("tabOutreach");
   const bizTitle = t("bizTitle");
   const bizSearchPlaceholder = t("bizSearchPlaceholder");
   const bizEmpty = t("bizEmpty");
@@ -443,6 +445,8 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const tabRequestsCls = tab === "requests" ? BTN_TAB_ACTIVE : BTN_TAB_IDLE;
   const tabBusinessesCls =
     tab === "businesses" ? BTN_TAB_ACTIVE : BTN_TAB_IDLE;
+  const tabOutreachCls =
+    tab === "outreach" ? BTN_TAB_ACTIVE : BTN_TAB_IDLE;
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
@@ -473,6 +477,13 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
             className={tabBusinessesCls}
           >
             {tabBusinesses}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("outreach")}
+            className={tabOutreachCls}
+          >
+            {tabOutreach}
           </button>
         </div>
       </header>
@@ -1110,6 +1121,9 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
           )}
         </section>
       )}
+
+      {/* ================ OUTREACH TAB ================ */}
+      {tab === "outreach" && <OutreachPanel />}
     </div>
   );
 }
