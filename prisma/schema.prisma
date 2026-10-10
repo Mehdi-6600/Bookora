@@ -299,13 +299,40 @@ model OutreachCampaign {
   name        String
   description String?
   active      Boolean  @default(true)
+
+  /// DRAFT -> REVIEW -> APPROVED -> SENDING -> COMPLETED / FAILED
+  status       String   @default("DRAFT")
+  /// Approved market scope: TEHRAN | MASHHAD | SHIRAZ | KARAJ
+  cities       String[] @default([])
+  /// MENS_BARBER | WOMENS_SALON
+  segments     String[] @default([])
+  language     String   @default("fa")
+  objective    String?
+  templateId   String?
+  cta          String?
+  destinationUrl String?
+  /// ONE_FOLLOWUP | NO_FOLLOWUP
+  followUpPolicy String @default("ONE_FOLLOWUP")
+  /// TELEGRAM_BOT | MANUAL
+  channel      String   @default("TELEGRAM_BOT")
+  sendLimit    Int?
+  requestedById String?
+  approvedById  String?
+  approvedAt    DateTime?
+  lastDryRunAt  DateTime?
+  lastPreparedAt DateTime?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  prospects OutreachProspect[]
-  botStarts BotStart[]
+  template   InvitationTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  prospects  OutreachProspect[]
+  botStarts  BotStart[]
+  invitations OutreachInvitation[]
 
   @@index([active])
+  @@index([status])
+  @@index([templateId])
   @@map("outreach_campaigns")
 }
 
@@ -313,7 +340,11 @@ model OutreachProspect {
   id          String    @id @default(cuid())
   publicName  String
   category    String    @default("OTHER")
+  /// Approved city code: TEHRAN | MASHHAD | SHIRAZ | KARAJ. Never free text.
   city        String?
+  /// MENS_BARBER | WOMENS_SALON
+  segment     String?
+  neighborhood String?
   country     String?
   language    String    @default("en")
   publicUrl   String?
@@ -322,9 +353,22 @@ model OutreachProspect {
   sourceName  String?
   dedupeKey   String    @unique
   status      String    @default("NEW")
+
+  /// DISCOVERED | VERIFIED | REJECTED. A discovery hit is not a prospect.
+  verificationStatus     String    @default("DISCOVERED")
+  verificationDate       DateTime?
+  /// HIGH | MEDIUM | LOW
+  verificationConfidence String?
+  verificationEvidence   String?
+  /// HIGH | MEDIUM | LOW - potential relevance of online booking
+  bookingRelevance       String?
+  /// ELIGIBLE | MANUAL_ONLY | NOT_ELIGIBLE | BLOCKED, from the last check
+  outreachEligibility    String?
+
   notes       String?
   nextFollowUpAt   DateTime?
   lastContactedAt  DateTime?
+  lastInteractionAt DateTime?
   contactedCount   Int      @default(0)
   optedOutAt  DateTime?
   campaignId  String?
@@ -344,12 +388,17 @@ model OutreachProspect {
   @@index([nextFollowUpAt])
   @@index([category])
   @@index([optedOutAt])
+  @@index([city])
+  @@index([segment])
+  @@index([verificationStatus])
+  @@index([city, segment])
   @@map("outreach_prospects")
 }
 
 model InvitationTemplate {
   id        String   @id @default(cuid())
   code      String   @unique
+  campaigns OutreachCampaign[]
   language  String   @default("en")
   category  String   @default("ALL")
   body      String
@@ -369,6 +418,7 @@ model OutreachInvitation {
   prospectId     String
   templateId     String?
   campaignId     String?
+  campaign       OutreachCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   channel        String    @default("TELEGRAM")
   language       String    @default("en")
   body           String
@@ -391,6 +441,7 @@ model OutreachInvitation {
 
   @@index([status])
   @@index([prospectId])
+  @@index([campaignId])
   @@index([createdAt])
   @@map("outreach_invitations")
 }
@@ -509,9 +560,12 @@ model FunnelEvent {
   anonId    String
   locale    String?
   ref       String?
+  /// Campaign code when the visit came from an attributed campaign link.
+  campaignId String?
   createdAt DateTime @default(now())
 
   @@index([event])
   @@index([createdAt])
+  @@index([campaignId])
   @@map("funnel_events")
 }

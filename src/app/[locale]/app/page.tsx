@@ -309,7 +309,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
   useEffect(() => {
     loadBusinesses();
-    track("mini_app_launch", { locale: document.documentElement.lang });
+    track("signup_started", { locale: document.documentElement.lang });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

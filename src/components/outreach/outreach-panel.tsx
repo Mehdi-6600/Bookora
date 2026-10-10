@@ -31,10 +31,19 @@ import {
  * invitations whose recipient has already started the bot.
  */
 
-type Tab = "overview" | "prospects" | "invitations" | "templates" | "keywords" | "discovery" | "bot";
+type Tab =
+  | "overview"
+  | "campaigns"
+  | "prospects"
+  | "invitations"
+  | "templates"
+  | "keywords"
+  | "discovery"
+  | "bot";
 
 const TABS: Tab[] = [
   "overview",
+  "campaigns",
   "prospects",
   "invitations",
   "templates",
@@ -53,6 +62,8 @@ const BTN_DANGER =
   "flex items-center justify-center gap-2 rounded-2xl bg-[#FF4D5E] px-4 py-2.5 text-sm font-bold text-white shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50";
 const BTN_GHOST =
   "flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-bold text-[#1A1F36] shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50";
+const BTN_NEUTRAL =
+  "flex items-center justify-center gap-2 rounded-2xl bg-white px-3 py-2 text-xs font-bold text-[#1A1F36] shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50";
 const INPUT =
   "w-full rounded-2xl bg-white px-3 py-2.5 text-sm font-medium text-[#1A1F36] outline-none placeholder:text-[#1A1F36]/40 shadow-soft";
 const LABEL = "mb-1 block text-[11px] font-bold uppercase tracking-wide text-[#1A1F36]/60";
@@ -70,6 +81,26 @@ const PROSPECT_STATUSES = [
 ];
 
 const CATEGORIES = ["BARBER", "BEAUTY", "MEDICAL", "OTHER"];
+
+/** The approved market scope. Karaj is tracked separately from Tehran. */
+const CITY_OPTIONS = ["TEHRAN", "MASHHAD", "SHIRAZ", "KARAJ"];
+const CITY_FA: Record<string, string> = {
+  TEHRAN: "تهران",
+  MASHHAD: "مشهد",
+  SHIRAZ: "شیراز",
+  KARAJ: "کرج",
+};
+const SEGMENT_OPTIONS = ["MENS_BARBER", "WOMENS_SALON"];
+const SEGMENT_FA: Record<string, string> = {
+  MENS_BARBER: "آرایشگاه مردانه",
+  WOMENS_SALON: "سالن زیبایی زنانه",
+};
+const VERIFICATION_OPTIONS = ["DISCOVERED", "VERIFIED", "REJECTED"];
+const VERIFICATION_FA: Record<string, string> = {
+  DISCOVERED: "کشف‌شده",
+  VERIFIED: "تأییدشده",
+  REJECTED: "ردشده",
+};
 const LANGUAGES = ["en", "fa", "ar"];
 const GROUPS = ["BARBER", "BEAUTY", "MEDICAL"];
 
@@ -147,6 +178,8 @@ export function OutreachPanel() {
   );
 
   const [stats, setStats] = useState<any>(null);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [templateOptions, setTemplateOptions] = useState<any[]>([]);
   const [prospects, setProspects] = useState<any[]>([]);
   const [invitations, setInvitations] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -213,6 +246,13 @@ export function OutreachPanel() {
     setSettings(data);
   }, []);
 
+  const loadCampaigns = useCallback(async () => {
+    const data = await api<any>("/api/admin/outreach/campaigns");
+    setCampaigns(data.campaigns ?? []);
+    const templates = await api<any>("/api/admin/outreach/templates");
+    setTemplateOptions(templates.templates ?? []);
+  }, []);
+
   const loadBot = useCallback(async () => {
     setBotInfo(await api("/api/admin/telegram/webhook"));
   }, []);
@@ -222,6 +262,7 @@ export function OutreachPanel() {
   }, [loadStats]);
 
   useEffect(() => {
+    if (tab === "campaigns") void loadCampaigns().catch(() => undefined);
     if (tab === "prospects") void loadProspects().catch(() => undefined);
     if (tab === "invitations") void loadInvitations().catch(() => undefined);
     if (tab === "templates") void loadTemplates().catch(() => undefined);
@@ -279,6 +320,16 @@ export function OutreachPanel() {
 
       {tab === "overview" && stats && (
         <Overview stats={stats} locale={locale} onReload={() => run(loadStats)} />
+      )}
+
+      {tab === "campaigns" && (
+        <CampaignsTab
+          campaigns={campaigns}
+          templates={templateOptions}
+          run={run}
+          refresh={loadCampaigns}
+          setMessage={setMessage}
+        />
       )}
 
       {tab === "prospects" && (
@@ -513,10 +564,14 @@ function ProspectsTab({
     publicName: "",
     category: "BARBER",
     city: "",
-    language: "en",
+    segment: "",
+    neighborhood: "",
+    language: "fa",
     publicUrl: "",
     telegramUsername: "",
     sourceUrl: "",
+    verificationStatus: "VERIFIED",
+    verificationEvidence: "",
     notes: "",
   });
 
@@ -527,9 +582,12 @@ function ProspectsTab({
         body: JSON.stringify({
           ...form,
           city: form.city || null,
+          segment: form.segment || null,
+          neighborhood: form.neighborhood || null,
           publicUrl: form.publicUrl || null,
           telegramUsername: form.telegramUsername || null,
           sourceUrl: form.sourceUrl || null,
+          verificationEvidence: form.verificationEvidence || null,
           notes: form.notes || null,
         }),
       });
@@ -538,10 +596,14 @@ function ProspectsTab({
         publicName: "",
         category: "BARBER",
         city: "",
-        language: "en",
+        segment: "",
+        neighborhood: "",
+        language: "fa",
         publicUrl: "",
         telegramUsername: "",
         sourceUrl: "",
+        verificationStatus: "VERIFIED",
+        verificationEvidence: "",
         notes: "",
       });
       await refresh();
@@ -625,12 +687,66 @@ function ProspectsTab({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={LABEL}>{t("city")}</label>
-                <input
+                <select
                   value={form.city}
                   onChange={(e) => setForm({ ...form, city: e.target.value })}
                   className={INPUT}
+                >
+                  <option value="">{t("cityUnassigned")}</option>
+                  {CITY_OPTIONS.map((city) => (
+                    <option key={city} value={city}>
+                      {CITY_FA[city]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={LABEL}>{t("segment")}</label>
+                <select
+                  value={form.segment}
+                  onChange={(e) => setForm({ ...form, segment: e.target.value })}
+                  className={INPUT}
+                >
+                  <option value="">{t("segmentAuto")}</option>
+                  {SEGMENT_OPTIONS.map((segment) => (
+                    <option key={segment} value={segment}>
+                      {SEGMENT_FA[segment]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={LABEL}>{t("neighborhood")}</label>
+                <input
+                  value={form.neighborhood}
+                  onChange={(e) =>
+                    setForm({ ...form, neighborhood: e.target.value })
+                  }
+                  className={INPUT}
                 />
               </div>
+              <div>
+                <label className={LABEL}>{t("verificationStatus")}</label>
+                <select
+                  value={form.verificationStatus}
+                  onChange={(e) =>
+                    setForm({ ...form, verificationStatus: e.target.value })
+                  }
+                  className={INPUT}
+                >
+                  {VERIFICATION_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {VERIFICATION_FA[status]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={LABEL}>{t("telegramUsername")}</label>
                 <input
@@ -653,6 +769,18 @@ function ProspectsTab({
                 className={INPUT}
                 placeholder="https://..."
                 dir="ltr"
+              />
+            </div>
+
+            <div>
+              <label className={LABEL}>{t("verificationEvidence")}</label>
+              <input
+                value={form.verificationEvidence}
+                onChange={(e) =>
+                  setForm({ ...form, verificationEvidence: e.target.value })
+                }
+                className={INPUT}
+                placeholder={t("verificationEvidencePlaceholder")}
               />
             </div>
 
@@ -755,9 +883,16 @@ function ProspectsTab({
                     {prospect.publicName}
                   </p>
                   <p className="mt-0.5 text-[11px] font-medium text-[#1A1F36]/60">
-                    {prospect.category}
-                    {prospect.city ? ` · ${prospect.city}` : ""}
+                    {prospect.city ? CITY_FA[prospect.city] ?? prospect.city : t("cityUnassigned")}
+                    {prospect.segment
+                      ? ` · ${SEGMENT_FA[prospect.segment] ?? prospect.segment}`
+                      : ""}
+                    {prospect.neighborhood ? ` · ${prospect.neighborhood}` : ""}
                     {prospect.language ? ` · ${prospect.language}` : ""}
+                    {prospect.verificationStatus &&
+                    prospect.verificationStatus !== "VERIFIED"
+                      ? ` · ${VERIFICATION_FA[prospect.verificationStatus] ?? prospect.verificationStatus}`
+                      : ""}
                   </p>
                 </div>
                 <span className={`${BADGE} ${statusColor(prospect.status)}`}>
@@ -1689,6 +1824,382 @@ function BotTab({ info, run, refresh, setMessage }: any) {
           {t("openBot")}
         </a>
       </section>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Campaigns — four-city, two-segment targeting with dry run and approval      */
+/* -------------------------------------------------------------------------- */
+
+const CAMPAIGN_STATUS_COLORS: Record<string, string> = {
+  DRAFT: "bg-[#1A1F36]/10 text-[#1A1F36]/70",
+  REVIEW: "bg-[#FF9F0A]/15 text-[#B45309]",
+  APPROVED: "bg-[#4F5FE8]/15 text-[#4F5FE8]",
+  SENDING: "bg-[#FF9F0A]/15 text-[#B45309]",
+  COMPLETED: "bg-[#34C759]/15 text-[#248A3D]",
+  FAILED: "bg-[#FF4D5E]/15 text-[#C0263A]",
+};
+
+function CampaignsTab({
+  campaigns,
+  templates,
+  run,
+  refresh,
+  setMessage,
+}: any) {
+  const t = useTranslations("outreach");
+  const [open, setOpen] = useState(false);
+  const [plan, setPlan] = useState<any>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    cities: [] as string[],
+    segments: [] as string[],
+    language: "fa",
+    templateId: "",
+    sendLimit: "" as string,
+    objective: "",
+  });
+
+  function toggle(list: string[], value: string) {
+    return list.includes(value)
+      ? list.filter((item) => item !== value)
+      : [...list, value];
+  }
+
+  async function create() {
+    await run(async () => {
+      await api("/api/admin/outreach/campaigns", {
+        method: "POST",
+        body: JSON.stringify({
+          name: form.name,
+          cities: form.cities,
+          segments: form.segments,
+          language: form.language,
+          templateId: form.templateId || null,
+          objective: form.objective || null,
+          sendLimit: form.sendLimit ? Number(form.sendLimit) : null,
+        }),
+      });
+      setOpen(false);
+      setForm({
+        name: "",
+        cities: [],
+        segments: [],
+        language: "fa",
+        templateId: "",
+        sendLimit: "",
+        objective: "",
+      });
+      await refresh();
+      setMessage({ kind: "ok", text: t("campaignCreated") });
+    });
+  }
+
+  async function act(id: string, action: string) {
+    await run(async () => {
+      const data = await api<any>(
+        `/api/admin/outreach/campaigns/${id}/${action}`,
+        { method: "POST" }
+      );
+      if (data.plan) setPlan({ ...data.plan, campaignId: id });
+      await refresh();
+      setMessage({
+        kind: "ok",
+        text:
+          action === "dry-run"
+            ? t("dryRunDone")
+            : action === "approve"
+              ? t("campaignApproved")
+              : action === "prepare"
+                ? `${t("preparedCount")}: ${data.prepared ?? 0}`
+                : action === "approve-invitations"
+                  ? `${t("approvedInvitations")}: ${data.approved ?? 0}`
+                  : `${t("sent")}: ${data.sent ?? 0} · ${t("delivered")}: ${
+                      data.delivered ?? 0
+                    }`,
+      });
+    });
+  }
+
+  async function loadPlan(id: string) {
+    await run(async () => {
+      const data = await api<any>(`/api/admin/outreach/campaigns/${id}`);
+      setPlan({ ...data.plan, campaignId: id });
+      setExpanded(id);
+    });
+  }
+
+  return (
+    <div className={CARD_MAIN}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-extrabold text-[#1A1F36]">
+            {t("campaignsTitle")}
+          </h2>
+          <p className="mt-1 text-xs font-medium text-[#1A1F36]/60">
+            {t("campaignsHelp")}
+          </p>
+        </div>
+        <button className={BTN_PRIMARY} onClick={() => setOpen((v) => !v)}>
+          {t("newCampaign")}
+        </button>
+      </div>
+
+      {open && (
+        <div className={`${CARD_INNER} mt-3 space-y-3`}>
+          <div>
+            <label className={LABEL}>{t("campaignName")}</label>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className={INPUT}
+              placeholder={t("campaignNamePlaceholder")}
+            />
+          </div>
+
+          <div>
+            <label className={LABEL}>{t("cities")}</label>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {CITY_OPTIONS.map((city) => {
+                const active = form.cities.includes(city);
+                return (
+                  <button
+                    key={city}
+                    type="button"
+                    onClick={() =>
+                      setForm({ ...form, cities: toggle(form.cities, city) })
+                    }
+                    className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                      active
+                        ? "bg-[#4F5FE8] text-white"
+                        : "bg-[#1A1F36]/5 text-[#1A1F36]/70"
+                    }`}
+                  >
+                    {CITY_FA[city]}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1 text-[11px] font-medium text-[#1A1F36]/50">
+              {t("citiesHelp")}
+            </p>
+          </div>
+
+          <div>
+            <label className={LABEL}>{t("segments")}</label>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {SEGMENT_OPTIONS.map((segment) => {
+                const active = form.segments.includes(segment);
+                return (
+                  <button
+                    key={segment}
+                    type="button"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        segments: toggle(form.segments, segment),
+                      })
+                    }
+                    className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                      active
+                        ? "bg-[#4F5FE8] text-white"
+                        : "bg-[#1A1F36]/5 text-[#1A1F36]/70"
+                    }`}
+                  >
+                    {SEGMENT_FA[segment]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className={LABEL}>{t("template")}</label>
+              <select
+                value={form.templateId}
+                onChange={(e) =>
+                  setForm({ ...form, templateId: e.target.value })
+                }
+                className={INPUT}
+              >
+                <option value="">{t("templateAuto")}</option>
+                {templates.map((template: any) => (
+                  <option key={template.id} value={template.id}>
+                    {template.code} · {template.language}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={LABEL}>{t("sendLimit")}</label>
+              <input
+                value={form.sendLimit}
+                onChange={(e) =>
+                  setForm({ ...form, sendLimit: e.target.value })
+                }
+                className={INPUT}
+                placeholder="10"
+                inputMode="numeric"
+                dir="ltr"
+              />
+            </div>
+          </div>
+
+          <button
+            className={BTN_PRIMARY}
+            disabled={form.name.trim().length === 0}
+            onClick={create}
+          >
+            {t("createCampaign")}
+          </button>
+        </div>
+      )}
+
+      <div className="mt-3 space-y-3">
+        {campaigns.length === 0 && (
+          <p className={`${CARD_INNER} text-sm text-[#1A1F36]/60`}>
+            {t("noCampaigns")}
+          </p>
+        )}
+
+        {campaigns.map((campaign: any) => (
+          <div key={campaign.id} className={CARD_INNER}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-[#1A1F36]">
+                  {campaign.name}
+                </p>
+                <p className="mt-0.5 text-[11px] font-medium text-[#1A1F36]/60">
+                  {campaign.cities.length > 0
+                    ? campaign.cities.map((c: string) => CITY_FA[c] ?? c).join("، ")
+                    : t("allCities")}
+                  {" · "}
+                  {campaign.segments.length > 0
+                    ? campaign.segments
+                        .map((s: string) => SEGMENT_FA[s] ?? s)
+                        .join("، ")
+                    : t("allSegments")}
+                </p>
+              </div>
+              <span
+                className={`${BADGE} ${
+                  CAMPAIGN_STATUS_COLORS[campaign.status] ?? ""
+                }`}
+              >
+                {campaign.status}
+              </span>
+            </div>
+
+            <p className="mt-2 text-[11px] font-medium text-[#1A1F36]/50" dir="ltr">
+              {campaign.deepLink}
+            </p>
+
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                className={BTN_NEUTRAL}
+                onClick={() => void run(() => act(campaign.id, "dry-run"))}
+              >
+                {t("dryRun")}
+              </button>
+              <button
+                className={BTN_PRIMARY}
+                onClick={() => void run(() => act(campaign.id, "approve"))}
+                disabled={campaign.status === "APPROVED"}
+              >
+                {t("approve")}
+              </button>
+              <button
+                className={BTN_NEUTRAL}
+                onClick={() => void run(() => act(campaign.id, "prepare"))}
+                disabled={campaign.status !== "APPROVED"}
+              >
+                {t("prepare")}
+              </button>
+              <button
+                className={BTN_NEUTRAL}
+                onClick={() => void run(() => loadPlan(campaign.id))}
+              >
+                {t("viewPlan")}
+              </button>
+            </div>
+
+            {expanded === campaign.id && plan && (
+              <div className="mt-3 rounded-xl bg-[#B8D4F5]/30 p-3">
+                <p className="text-xs font-bold text-[#1A1F36]">
+                  {t("eligible")}: {plan.eligible} · {t("manualOnly")}:{" "}
+                  {plan.manualOnly} · {t("blocked")}: {plan.blocked}
+                </p>
+
+                {plan.byCitySegment?.length > 0 && (
+                  <div className="mt-2 overflow-x-auto">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="text-[#1A1F36]/60">
+                          <th className="py-1 text-start">{t("city")}</th>
+                          <th className="py-1 text-start">{t("segment")}</th>
+                          <th className="py-1 text-end">{t("eligible")}</th>
+                          <th className="py-1 text-end">{t("manualOnly")}</th>
+                          <th className="py-1 text-end">{t("blocked")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {plan.byCitySegment.map((cell: any, index: number) => (
+                          <tr key={index} className="font-bold text-[#1A1F36]">
+                            <td className="py-1">
+                              {cell.city === "UNASSIGNED"
+                                ? t("cityUnassigned")
+                                : CITY_FA[cell.city] ?? cell.city}
+                            </td>
+                            <td className="py-1">
+                              {cell.segment === "UNASSIGNED"
+                                ? "—"
+                                : SEGMENT_FA[cell.segment] ?? cell.segment}
+                            </td>
+                            <td className="py-1 text-end">{cell.eligible}</td>
+                            <td className="py-1 text-end">{cell.manualOnly}</td>
+                            <td className="py-1 text-end">{cell.blocked}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {plan.warnings?.map((warning: string, index: number) => (
+                  <p
+                    key={index}
+                    className="mt-2 text-[11px] font-bold text-[#B45309]"
+                  >
+                    ⚠️ {warning}
+                  </p>
+                ))}
+
+                {plan.recipients?.slice(0, 3).map((recipient: any) => (
+                  <div
+                    key={recipient.prospectId}
+                    className="mt-2 rounded-lg bg-white p-2"
+                  >
+                    <p className="text-[11px] font-bold text-[#1A1F36]">
+                      {recipient.publicName} ·{" "}
+                      {recipient.disposition === "ELIGIBLE"
+                        ? t("eligible")
+                        : t("manualOnly")}
+                    </p>
+                    {recipient.previewBody && (
+                      <pre className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-[#1A1F36]/80">
+                        {recipient.previewBody}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

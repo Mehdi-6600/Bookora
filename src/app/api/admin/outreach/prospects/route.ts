@@ -16,6 +16,18 @@ import {
   PROSPECT_STATUSES,
 } from "@/lib/outreach/types";
 import { isSuppressed } from "@/lib/outreach/eligibility";
+import {
+  APPROVED_CITIES,
+  BUSINESS_SEGMENTS,
+  VERIFICATION_STATUSES,
+  BOOKING_RELEVANCE,
+  isCityCode,
+  isBusinessSegment,
+  isVerificationStatus,
+  isBookingRelevance,
+  resolveCity,
+  detectSegment,
+} from "@/lib/outreach/cities";
 
 export async function GET(req: NextRequest) {
   const guard = await requireAdmin();
@@ -24,6 +36,9 @@ export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
   const status = params.get("status");
   const category = params.get("category");
+  const city = params.get("city");
+  const segment = params.get("segment");
+  const verification = params.get("verification");
   const q = (params.get("q") ?? "").trim().slice(0, 100);
 
   const where: Record<string, unknown> = {};
@@ -33,6 +48,16 @@ export async function GET(req: NextRequest) {
   }
   if (category && isProspectCategory(category)) {
     where.category = category;
+  }
+  // City is a stable code, never free text, so city reporting can be trusted.
+  if (city && isCityCode(city.toUpperCase())) {
+    where.city = city.toUpperCase();
+  }
+  if (segment && isBusinessSegment(segment.toUpperCase())) {
+    where.segment = segment.toUpperCase();
+  }
+  if (verification && isVerificationStatus(verification.toUpperCase())) {
+    where.verificationStatus = verification.toUpperCase();
   }
   if (q) {
     where.OR = [
@@ -69,6 +94,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     {
       statuses: PROSPECT_STATUSES,
+      cities: APPROVED_CITIES,
+      segments: BUSINESS_SEGMENTS,
+      verificationStatuses: VERIFICATION_STATUSES,
+      bookingRelevanceLevels: BOOKING_RELEVANCE,
       prospects: prospects.map((prospect) => ({
         id: prospect.id,
         publicName: prospect.publicName,
@@ -84,9 +113,18 @@ export async function GET(req: NextRequest) {
         sourceUrl: prospect.sourceUrl,
         sourceName: prospect.sourceName,
         status: prospect.status,
+        segment: prospect.segment,
+        neighborhood: prospect.neighborhood,
+        verificationStatus: prospect.verificationStatus,
+        verificationDate: prospect.verificationDate,
+        verificationConfidence: prospect.verificationConfidence,
+        verificationEvidence: prospect.verificationEvidence,
+        bookingRelevance: prospect.bookingRelevance,
+        outreachEligibility: prospect.outreachEligibility,
         notes: prospect.notes,
         nextFollowUpAt: prospect.nextFollowUpAt,
         lastContactedAt: prospect.lastContactedAt,
+        lastInteractionAt: prospect.lastInteractionAt,
         contactedCount: prospect.contactedCount,
         optedOutAt: prospect.optedOutAt,
         convertedBusinessId: prospect.convertedBusinessId,
@@ -106,7 +144,14 @@ export async function GET(req: NextRequest) {
 const createSchema = z.object({
   publicName: z.string().trim().min(1).max(200),
   category: z.string().refine(isProspectCategory, "invalid category").default("OTHER"),
+  /// Accepted as "TEHRAN" | "کرج" | "karaj" etc; stored as a stable code.
   city: z.string().trim().max(80).nullable().optional(),
+  segment: z.string().trim().max(32).nullable().optional(),
+  neighborhood: z.string().trim().max(120).nullable().optional(),
+  verificationStatus: z.string().trim().max(24).nullable().optional(),
+  verificationConfidence: z.string().trim().max(16).nullable().optional(),
+  verificationEvidence: z.string().trim().max(1000).nullable().optional(),
+  bookingRelevance: z.string().trim().max(16).nullable().optional(),
   country: z.string().trim().max(80).nullable().optional(),
   language: z.string().trim().max(8).optional(),
   publicUrl: z.string().trim().max(500).nullable().optional(),
@@ -152,11 +197,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Resolve the approved city. A business must be assignable to exactly one of
+  // the four approved cities; an ambiguous or unknown city is stored as null
+  // and reported as UNASSIGNED rather than guessed.
+  const cityResolution = resolveCity(data.city);
+  const cityCode = cityResolution.city;
+
+  // Infer the segment from the business name when the admin did not set one.
+  const segmentResolution = detectSegment(data.publicName);
+  const segmentValue =
+    data.segment && isBusinessSegment(data.segment.trim().toUpperCase())
+      ? data.segment.trim().toUpperCase()
+      : (segmentResolution.segment ?? null);
+
   const dedupeKey = buildDedupeKey({
     telegramUsername: username,
     publicUrl: data.publicUrl ?? null,
     publicName: data.publicName,
-    city: data.city ?? null,
+    city: cityCode ?? (data.city ?? null),
   });
 
   const existing = await prisma.outreachProspect.findUnique({
@@ -183,7 +241,9 @@ export async function POST(req: NextRequest) {
     data: {
       publicName: data.publicName,
       category: data.category,
-      city: data.city ?? null,
+      city: cityCode ?? null,
+      segment: segmentValue,
+      neighborhood: data.neighborhood ?? null,
       country: data.country ?? null,
       language: normalizeLanguage(data.language),
       publicUrl: data.publicUrl ?? null,
@@ -195,8 +255,33 @@ export async function POST(req: NextRequest) {
       nextFollowUpAt: data.nextFollowUpAt ? new Date(data.nextFollowUpAt) : null,
       dedupeKey,
       status: "NEW",
+      verificationStatus:
+        data.verificationStatus &&
+        isVerificationStatus(data.verificationStatus.toUpperCase())
+          ? data.verificationStatus.toUpperCase()
+          : "DISCOVERED",
+      verificationDate:
+        data.verificationStatus?.toUpperCase() === "VERIFIED" ? new Date() : null,
+      verificationConfidence:
+        data.verificationConfidence &&
+        ["HIGH", "MEDIUM", "LOW"].includes(data.verificationConfidence.toUpperCase())
+          ? data.verificationConfidence.toUpperCase()
+          : null,
+      verificationEvidence: data.verificationEvidence ?? null,
+      bookingRelevance:
+        data.bookingRelevance && isBookingRelevance(data.bookingRelevance.toUpperCase())
+          ? data.bookingRelevance.toUpperCase()
+          : null,
     },
   });
 
-  return NextResponse.json({ prospect }, { status: 201 });
+  return NextResponse.json(
+    {
+      prospect,
+      cityResolved: cityResolution.city
+        ? { city: cityResolution.city, confidence: cityResolution.confidence }
+        : { city: null, reason: cityResolution.reason },
+    },
+    { status: 201 }
+  );
 }

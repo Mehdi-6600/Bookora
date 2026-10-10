@@ -91,7 +91,7 @@ export function TelegramAuthGate({ children }: Props) {
           setUser(data.user);
           setError(null);
           setLoading(false);
-          track("auth_success", { locale });
+          track("registration_completed", { locale });
         }
       } catch {
         if (!cancelled) {
@@ -145,7 +145,7 @@ export function TelegramAuthGate({ children }: Props) {
             href={botUrl}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={() => track("start_click", { locale })}
+            onClick={() => track("signup_cta_click", { locale })}
             className="btn-elevated flex w-full items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-5 py-4 text-base font-bold text-white transition-transform active:scale-[0.98]"
           >
             <Send className="h-5 w-5" />

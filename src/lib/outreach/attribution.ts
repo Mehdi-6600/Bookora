@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { parseStartPayload } from "@/lib/outreach/deeplink";
 
 /**
  * Conversion attribution.
@@ -120,4 +121,96 @@ export async function getConversionCounts(since: Date): Promise<{
     : 0;
 
   return { botStarts, registrations, activations, firstBookings };
+}
+
+/**
+ * Record an attributed start of the bot.
+ *
+ * Called from BOTH places where we can observe a start:
+ *   - the Telegram `/start` command handler, and
+ *   - the Mini App authentication callback (where Telegram puts the same
+ *     `start_param` inside the *signed* initData).
+ *
+ * The second path is what preserves attribution through the auth redirect —
+ * previously the parameter was dropped as soon as the web app authenticated.
+ *
+ * Idempotent: at most one attributed start per (telegramId, startParam), so a
+ * user who triggers both paths is counted once, not twice.
+ *
+ * Stores no message content and no personal profile data.
+ */
+export async function recordAttributedStart(input: {
+  telegramId: string;
+  startParam: string | undefined;
+}): Promise<void> {
+  try {
+    const raw = input.startParam?.trim() || undefined;
+    const payload = parseStartPayload(raw);
+
+    const user = await prisma.user.findUnique({
+      where: { telegramId: input.telegramId },
+      select: { id: true },
+    });
+
+    let prospectId: string | null = null;
+    let campaignId: string | null = null;
+
+    if (payload.kind === "prospect" && raw) {
+      const invitation = await prisma.outreachInvitation.findUnique({
+        where: { startParam: raw },
+        select: { id: true, prospectId: true, campaignId: true },
+      });
+
+      if (invitation) {
+        prospectId = invitation.prospectId;
+        campaignId = invitation.campaignId;
+
+        await prisma.outreachProspect.update({
+          where: { id: invitation.prospectId },
+          data: {
+            status: "STARTED_BOT",
+            convertedUserId: user?.id ?? null,
+            lastInteractionAt: new Date(),
+          },
+        });
+
+        await prisma.outreachInvitation.update({
+          where: { id: invitation.id },
+          data: { deliveredAt: new Date() },
+        });
+      }
+    } else if (payload.kind === "campaign") {
+      const campaign = await prisma.outreachCampaign.findUnique({
+        where: { code: payload.code },
+        select: { id: true },
+      });
+      campaignId = campaign?.id ?? null;
+    }
+
+    // Idempotency guard: one attributed start per (telegramId, startParam).
+    if (raw) {
+      const existing = await prisma.botStart.findFirst({
+        where: { telegramId: input.telegramId, startParam: raw },
+        select: { id: true },
+      });
+      if (existing) return;
+    }
+
+    await prisma.botStart.create({
+      data: {
+        telegramId: input.telegramId,
+        userId: user?.id ?? null,
+        startParam: raw ?? null,
+        prospectId,
+        campaignId,
+        wasExistingUser: Boolean(user),
+      },
+    });
+  } catch (error) {
+    // Attribution must never break the /start or auth response.
+    console.error(
+      "recordAttributedStart failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+  }
 }

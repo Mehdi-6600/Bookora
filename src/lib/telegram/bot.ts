@@ -2,8 +2,8 @@ import { Bot, InlineKeyboard } from "grammy";
 import { Prisma } from "@prisma/client";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
+import { recordAttributedStart } from "@/lib/outreach/attribution";
 import { PLANS, parseInvoicePayload } from "@/lib/subscription/plans";
-import { parseStartPayload } from "@/lib/outreach/deeplink";
 import {
   HELP,
   START_BUTTON,
@@ -17,77 +17,6 @@ import { recordOptOut } from "@/lib/outreach/invitations";
 
 let bot: Bot | null = null;
 
-/**
- * Record a bot start for attribution.
- *
- * Stores the numeric Telegram id, the resolved user id and the start
- * parameter. No message content and no personal profile data are stored.
- */
-async function recordBotStart(input: {
-  telegramId: string;
-  startParam: string | undefined;
-}): Promise<void> {
-  try {
-    const payload = parseStartPayload(input.startParam);
-
-    const user = await prisma.user.findUnique({
-      where: { telegramId: input.telegramId },
-      select: { id: true },
-    });
-
-    let prospectId: string | null = null;
-    let campaignId: string | null = null;
-
-    if (payload.kind === "prospect") {
-      const invitation = await prisma.outreachInvitation.findUnique({
-        where: { startParam: input.startParam ?? "" },
-        select: { id: true, prospectId: true, campaignId: true },
-      });
-
-      if (invitation) {
-        prospectId = invitation.prospectId;
-        campaignId = invitation.campaignId;
-
-        await prisma.outreachProspect.update({
-          where: { id: invitation.prospectId },
-          data: {
-            status: "STARTED_BOT",
-            convertedUserId: user?.id ?? null,
-          },
-        });
-
-        await prisma.outreachInvitation.update({
-          where: { id: invitation.id },
-          data: { deliveredAt: new Date() },
-        });
-      }
-    } else if (payload.kind === "campaign") {
-      const campaign = await prisma.outreachCampaign.findUnique({
-        where: { code: payload.code },
-        select: { id: true },
-      });
-      campaignId = campaign?.id ?? null;
-    }
-
-    await prisma.botStart.create({
-      data: {
-        telegramId: input.telegramId,
-        userId: user?.id ?? null,
-        startParam: input.startParam ?? null,
-        prospectId,
-        campaignId,
-        wasExistingUser: Boolean(user),
-      },
-    });
-  } catch (error) {
-    // Attribution must never break the /start response.
-    console.error(
-      "recordBotStart failed:",
-      error instanceof Error ? error.name : "UnknownError"
-    );
-  }
-}
-
 function registerOnboardingHandlers(instance: Bot) {
   instance.command("start", async (ctx) => {
     if (ctx.chat.type !== "private") return;
@@ -98,7 +27,7 @@ function registerOnboardingHandlers(instance: Bot) {
     if (ctx.from) {
       // Awaited: on serverless the invocation can end as soon as the response
       // is returned, which would drop the attribution write.
-      await recordBotStart({
+      await recordAttributedStart({
         telegramId: String(ctx.from.id),
         startParam,
       });
