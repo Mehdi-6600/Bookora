@@ -155,6 +155,8 @@ export type CampaignLike = {
   followUpPolicy: string;
   channel: string;
   sendLimit: number | null;
+  /** Set by the dry run. Approval requires it (see `approveCampaign`). */
+  lastDryRunAt?: Date | null;
 };
 
 /** Validate and normalise targeting input from an admin request. */
@@ -237,8 +239,10 @@ export async function planCampaign(
     status: { in: statusFilter },
   };
 
-  if (cities.length > 0) where.city = { in: cities };
-  if (segments.length > 0) where.segment = { in: segments };
+  // A prospect without a registry city or a segment can never be targeted,
+  // even when the campaign does not narrow by that field.
+  where.city = cities.length > 0 ? { in: cities } : { not: null };
+  where.segment = segments.length > 0 ? { in: segments } : { not: null };
 
   const prospects = await prisma.outreachProspect.findMany({
     where,
