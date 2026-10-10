@@ -192,3 +192,31 @@ export const DEFAULT_KEYWORDS: Array<{
   { term: "فیزیوتراپی", group: "MEDICAL", language: "fa", priority: 4 },
   { term: "کلینیک", group: "MEDICAL", language: "fa", priority: 3 },
 ];
+
+export type KeywordSetSource = "starter" | "configured";
+
+/**
+ * Decide which keywords discovery matches with.
+ *
+ *  - No keyword rows at all (never configured): the starter set applies, held
+ *    in memory only. Nothing is written, so the admin can still customise it.
+ *  - Rows exist: ONLY the enabled ones apply. If the administrator disabled
+ *    every keyword on purpose, the result is empty and discovery reports
+ *    `keywords_disabled` instead of silently re-enabling the starter set.
+ */
+export function resolveKeywordSet(
+  rows: MatchableKeyword[]
+): { keywords: MatchableKeyword[]; source: KeywordSetSource; configuredCount: number } {
+  if (rows.length === 0) {
+    return {
+      keywords: DEFAULT_KEYWORDS.map((keyword) => ({ ...keyword, enabled: true })),
+      source: "starter",
+      configuredCount: 0,
+    };
+  }
+  return {
+    keywords: rows.filter((keyword) => keyword.enabled !== false),
+    source: "configured",
+    configuredCount: rows.length,
+  };
+}

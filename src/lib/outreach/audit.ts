@@ -20,6 +20,8 @@ export const AUDIT_SCOPES = [
   "settings",
   "cities",
   "invitation",
+  "discovery",
+  "prospect",
 ] as const;
 export type AuditScope = (typeof AUDIT_SCOPES)[number];
 
