@@ -259,10 +259,11 @@ export function OutreachPanel() {
     setStats(await api("/api/admin/outreach/stats"));
   }, []);
 
-  const loadProspects = useCallback(async () => {
+  const loadProspects = useCallback(async (verificationFilter?: string) => {
     const params = new URLSearchParams();
     if (prospectFilter) params.set("status", prospectFilter);
     if (prospectQuery.trim()) params.set("q", prospectQuery.trim());
+    if (verificationFilter) params.set("verification", verificationFilter);
     const data = await api<any>(`/api/admin/outreach/prospects?${params.toString()}`);
     setProspects(data.prospects ?? []);
   }, [prospectFilter, prospectQuery]);
@@ -648,6 +649,25 @@ function Overview({
         </p>
       </section>
 
+      {stats.prospects?.byVerification && (
+        <section className={CARD_MAIN}>
+          <h2 className="text-base font-bold text-[#1A1F36]">{t("verificationBreakdown")}</h2>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {Object.entries(stats.prospects.byVerification as Record<string, number>).map(([status, count]) => (
+              <div key={status} className={CARD_INNER}>
+                <span className={`${BADGE} ${statusColor(status)}`}>
+                  {status === "DISCOVERED" ? t("discovered") : status === "VERIFIED" ? t("verified") : t("rejected")}
+                </span>
+                <p className="mt-2 text-lg font-bold text-[#1A1F36]">{count}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-[#1A1F36]/60">
+            {t("verificationNote")}
+          </p>
+        </section>
+      )}
+
       <section className={CARD_MAIN}>
         <h2 className="text-base font-bold text-[#1A1F36]">{t("lastRunTitle")}</h2>
         {stats.discovery?.lastRun ? (
@@ -691,7 +711,7 @@ function Stat({ label, value }: { label: string; value: unknown }) {
 
 function ProspectsTab({
   cityData,
-  prospects,
+  prospects: initialProspects,
   filter,
   setFilter,
   query,
@@ -708,6 +728,7 @@ function ProspectsTab({
   const approvedCities = cityRegistry.filter((entry) => entry.approved);
   const otherCities = cityRegistry.filter((entry) => !entry.approved);
   const [open, setOpen] = useState(false);
+  const [prospects, setProspects] = useState<any[]>(initialProspects);
   const [form, setForm] = useState({
     publicName: "",
     category: "BARBER",
@@ -722,6 +743,48 @@ function ProspectsTab({
     verificationEvidence: "",
     notes: "",
   });
+  const [verificationFilter, setVerificationFilter] = useState("");
+
+  // Sync with parent when initialProspects changes
+  useEffect(() => {
+    setProspects(initialProspects);
+  }, [initialProspects]);
+
+  // Local reload that includes verification filter
+  const reload = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (filter) params.set("status", filter);
+    if (query.trim()) params.set("q", query.trim());
+    if (verificationFilter) params.set("verification", verificationFilter);
+    const data = await api<any>(`/api/admin/outreach/prospects?${params.toString()}`);
+    setProspects(data.prospects ?? []);
+  }, [filter, query, verificationFilter]);
+
+  // Diagnostic counts
+  const totalProspects = prospects.length;
+  const verificationCounts = prospects.reduce(
+    (acc: Record<string, number>, p: any) => {
+      const v = p.verificationStatus || "DISCOVERED";
+      acc[v] = (acc[v] || 0) + 1;
+      return acc;
+    },
+    { DISCOVERED: 0, VERIFIED: 0, REJECTED: 0 }
+  );
+  const pendingVerification = verificationCounts.DISCOVERED || 0;
+  const verifiedCount = verificationCounts.VERIFIED || 0;
+  const rejectedCount = verificationCounts.REJECTED || 0;
+
+  // Eligibility estimates (client-side approximation)
+  const contactableStatuses = ["NEW", "INTERESTED"];
+  const followupableStatuses = ["CONTACTED", "STARTED_BOT"];
+  const contactable = prospects.filter((p: any) =>
+    contactableStatuses.includes(p.status) || (followupableStatuses.includes(p.status) && p.nextFollowUpAt && new Date(p.nextFollowUpAt).getTime() <= Date.now())
+  );
+  const verifiedContactable = contactable.filter((p: any) => p.verificationStatus === "VERIFIED" && !p.optedOutAt);
+  const hasTelegramId = verifiedContactable.filter((p: any) => p.telegramUserId || (p.botStartCount && p.botStartCount > 0));
+  const eligibleEstimate = hasTelegramId.length;
+  const manualOnlyEstimate = verifiedContactable.length - eligibleEstimate;
+  const excludedEstimate = totalProspects - verifiedContactable.length;
 
   async function create() {
     await run(async () => {
@@ -754,7 +817,7 @@ function ProspectsTab({
         verificationEvidence: "",
         notes: "",
       });
-      await refresh();
+      await reload();
       setMessage({ kind: "ok", text: t("saved") });
     });
   }
@@ -765,14 +828,24 @@ function ProspectsTab({
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-      await refresh();
+      await reload();
+    });
+  }
+
+  async function setVerificationStatus(id: string, verificationStatus: string) {
+    await run(async () => {
+      await api(`/api/admin/outreach/prospects/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ verificationStatus }),
+      });
+      await reload();
     });
   }
 
   async function remove(id: string) {
     await run(async () => {
       await api(`/api/admin/outreach/prospects/${id}`, { method: "DELETE" });
-      await refresh();
+      await reload();
     });
   }
 
@@ -788,6 +861,16 @@ function ProspectsTab({
         </div>
 
         <p className="mt-1 text-xs text-[#1A1F36]/60">{t("prospectsHelp")}</p>
+
+        {/* Diagnostic summary */}
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <DiagnosticStat label={t("totalProspects")} value={totalProspects} color="bg-[#1A1F36]/10" />
+          <DiagnosticStat label={t("pendingVerification")} value={pendingVerification} color="bg-[#FCA311]/15" textColor="text-[#B45309]" />
+          <DiagnosticStat label={t("verifiedProspects")} value={verifiedCount} color="bg-[#34C759]/15" textColor="text-[#248A3D]" />
+          <DiagnosticStat label={t("rejectedProspects")} value={rejectedCount} color="bg-[#FF4D5E]/15" textColor="text-[#C0263A]" />
+          <DiagnosticStat label={t("eligibleEstimate")} value={eligibleEstimate} color="bg-[#4F5FE8]/15" textColor="text-[#4F5FE8]" />
+          <DiagnosticStat label={t("excludedEstimate")} value={excludedEstimate} color="bg-[#1A1F36]/10" />
+        </div>
 
         {open && (
           <div className="mt-4 space-y-3">
@@ -984,13 +1067,13 @@ function ProspectsTab({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") void onReload();
+                if (e.key === "Enter") void reload();
               }}
               placeholder={t("searchProspects")}
               className={INPUT + " ps-9"}
             />
           </div>
-          <button type="button" onClick={onReload} className={BTN_GHOST}>
+          <button type="button" onClick={reload} className={BTN_GHOST}>
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
@@ -1000,7 +1083,7 @@ function ProspectsTab({
             type="button"
             onClick={() => {
               setFilter("");
-              setTimeout(onReload, 0);
+              setTimeout(reload, 0);
             }}
             className={
               "shrink-0 rounded-2xl px-3 py-2 text-[10px] font-bold " +
@@ -1015,7 +1098,7 @@ function ProspectsTab({
               type="button"
               onClick={() => {
                 setFilter(status);
-                setTimeout(onReload, 0);
+                setTimeout(reload, 0);
               }}
               className={
                 "shrink-0 rounded-2xl px-3 py-2 text-[10px] font-bold " +
@@ -1025,6 +1108,41 @@ function ProspectsTab({
               }
             >
               {status}
+            </button>
+          ))}
+        </div>
+
+        {/* Verification status filter */}
+        <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => {
+              setVerificationFilter("");
+              setTimeout(reload, 0);
+            }}
+            className={
+              "shrink-0 rounded-2xl px-3 py-2 text-[10px] font-bold " +
+              (verificationFilter === "" ? "btn-selected" : "bg-white text-[#1A1F36] shadow-soft")
+            }
+          >
+            {t("verificationAll")}
+          </button>
+          {VERIFICATION_OPTIONS.map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => {
+                setVerificationFilter(status);
+                setTimeout(reload, 0);
+              }}
+              className={
+                "shrink-0 rounded-2xl px-3 py-2 text-[10px] font-bold " +
+                (verificationFilter === status
+                  ? "btn-selected"
+                  : "bg-white text-[#1A1F36] shadow-soft")
+              }
+            >
+              {VERIFICATION_FA[status]}
             </button>
           ))}
         </div>
@@ -1098,6 +1216,18 @@ function ProspectsTab({
                   ))}
                 </select>
 
+                <select
+                  value={prospect.verificationStatus || "DISCOVERED"}
+                  onChange={(e) => void setVerificationStatus(prospect.id, e.target.value)}
+                  className="rounded-xl bg-[#1A1F36]/5 px-3 py-2 text-xs font-bold text-[#1A1F36]"
+                >
+                  {VERIFICATION_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {VERIFICATION_FA[status]}
+                    </option>
+                  ))}
+                </select>
+
                 <button
                   type="button"
                   onClick={() => onCopy(prospect.manualDeepLink)}
@@ -1128,6 +1258,20 @@ function ProspectsTab({
     </div>
   );
 }
+function DiagnosticStat({
+  label,
+  value,
+  color,
+  textColor = "text-[#1A1F36]",
+}: { label: string; value: number; color: string; textColor?: string }) {
+  return (
+    <div className={`rounded-2xl p-3 ${color}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-[#1A1F36]/50">{label}</p>
+      <p className={`mt-0.5 text-lg font-extrabold ${textColor}`}>{value}</p>
+    </div>
+  );
+}
+
 
 /* ---------------------------------------------------------------------- */
 /* Invitations                                                             */

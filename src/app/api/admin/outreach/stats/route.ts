@@ -23,7 +23,7 @@ export async function GET() {
   const since7d = new Date(now.getTime() - 7 * DAY);
   const since24h = new Date(now.getTime() - DAY);
 
-  const [statusCounts, funnel, settings, conversions, invitationCounts] =
+  const [statusCounts, funnel, settings, conversions, invitationCounts, verificationCounts] =
     await Promise.all([
       prisma.outreachProspect.groupBy({
         by: ["status"],
@@ -36,6 +36,10 @@ export async function GET() {
         by: ["status"],
         _count: { _all: true },
       }),
+      prisma.outreachProspect.groupBy({
+        by: ["verificationStatus"],
+        _count: { _all: true },
+      }),
     ]);
 
   const byStatus = Object.fromEntries(
@@ -43,6 +47,9 @@ export async function GET() {
   );
   const byInvitation = Object.fromEntries(
     invitationCounts.map((row) => [row.status, row._count._all])
+  );
+  const byVerification = Object.fromEntries(
+    verificationCounts.map((row) => [row.verificationStatus ?? "DISCOVERED", row._count._all])
   );
 
   const funnelMap = new Map(funnel.map((row) => [row.event, row.count]));
@@ -206,6 +213,7 @@ export async function GET() {
       prospects: {
         statuses: PROSPECT_STATUSES,
         byStatus,
+        byVerification,
         dueFollowUps,
       },
       invitations: { byStatus: byInvitation },

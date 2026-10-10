@@ -474,30 +474,20 @@ export async function getEffectiveApprovedCities(): Promise<string[]> {
   return mergeApprovedCities(enabled, disabled);
 }
 
+import {
+  VERIFICATION_STATUSES,
+  type VerificationStatus,
+  isVerificationStatus,
+  VERIFICATION_LABELS,
+} from "@/lib/outreach/types";
+
 /** Verification states. A discovery hit is not automatically a prospect. */
-export const VERIFICATION_STATUSES = [
-  "DISCOVERED",
-  "VERIFIED",
-  "REJECTED",
-] as const;
-export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
-
-export function isVerificationStatus(
-  value: unknown
-): value is VerificationStatus {
-  return (
-    typeof value === "string" &&
-    (VERIFICATION_STATUSES as readonly string[]).includes(value)
-  );
-}
-
-export const VERIFICATION_LABELS: Record<
-  VerificationStatus,
-  { en: string; fa: string }
-> = {
-  DISCOVERED: { en: "Discovered", fa: "کشف‌شده" },
-  VERIFIED: { en: "Verified", fa: "تأییدشده" },
-  REJECTED: { en: "Rejected", fa: "ردشده" },
+// Re-exported from types.ts for backward compatibility.
+export {
+  VERIFICATION_STATUSES,
+  type VerificationStatus,
+  isVerificationStatus,
+  VERIFICATION_LABELS,
 };
 
 /** How likely this business is to benefit from online booking. */
