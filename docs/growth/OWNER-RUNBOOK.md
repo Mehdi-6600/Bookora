@@ -35,7 +35,7 @@ npm run db:push
 2. Paste the contents of `prisma/sql/0001_outreach_growth.sql`, run it.
 3. Paste the contents of `prisma/sql/0002_four_city_campaigns.sql`, run it.
 
-Both files are safe to run more than once — they only add tables and columns, never drop or delete anything.
+All migration files are safe to run more than once — they only add tables, columns and constraints, never drop or delete anything. (0001's foreign-key constraints are existence-guarded, matching 0002/0003; before that guard, re-running 0001 failed with PostgreSQL error 42710 "constraint … already exists".)
 
 > ⚠️ `0002` is on the branch that has not merged yet. **Do step 1 after the merge**, or run only `0001` now and `0002` after.
 
