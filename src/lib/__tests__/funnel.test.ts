@@ -11,17 +11,19 @@ import {
 } from "@/lib/funnel";
 
 describe("funnel event vocabulary", () => {
-  it("contains exactly the nine documented acquisition steps in order", () => {
+  it("contains exactly the eleven documented activation milestones in order", () => {
     expect(FUNNEL_EVENTS).toEqual([
-      "landing_view",
-      "start_click",
-      "mini_app_launch",
-      "auth_success",
-      "business_created",
-      "service_created",
-      "working_hours_configured",
-      "booking_link_opened",
-      "booking_created",
+      "landing_view", // 1
+      "campaign_view", // 2
+      "signup_cta_click", // 3
+      "signup_started", // 4
+      "registration_completed", // 5
+      "business_created", // 6
+      "service_created", // 7
+      "working_hours_configured", // 8
+      "booking_link_opened", // 9
+      "booking_created", // 10
+      "paid_conversion", // 11
     ]);
   });
 

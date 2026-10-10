@@ -234,11 +234,16 @@ export type SendOutcome = {
  */
 export async function sendApprovedInvitations(options: {
   limit: number;
+  /** Restrict delivery to a single campaign. */
+  campaignId?: string | null;
 }): Promise<SendOutcome[]> {
   const limit = Math.max(0, Math.min(100, Math.round(options.limit)));
 
   const pending = await prisma.outreachInvitation.findMany({
-    where: { status: "APPROVED" },
+    where: {
+      status: "APPROVED",
+      ...(options.campaignId ? { campaignId: options.campaignId } : {}),
+    },
     orderBy: { approvedAt: "asc" },
     take: limit,
     include: {

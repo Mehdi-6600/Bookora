@@ -100,7 +100,7 @@ export default function LandingPage() {
             href={TELEGRAM_URL}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={() => track("start_click", { locale })}
+            onClick={() => track("signup_cta_click", { locale })}
             className={BTN_TELEGRAM + " mt-5"}
           >
             <Send className="h-5 w-5" />
@@ -224,7 +224,7 @@ export default function LandingPage() {
               href={TELEGRAM_URL}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={() => track("start_click", { locale })}
+              onClick={() => track("signup_cta_click", { locale })}
               className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-[#4F5FE8]"
             >
               {t("getStarted")}
@@ -293,7 +293,7 @@ export default function LandingPage() {
             href={TELEGRAM_URL}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={() => track("start_click", { locale })}
+            onClick={() => track("signup_cta_click", { locale })}
             className={BTN_TELEGRAM + " mt-4"}
           >
             <Send className="h-5 w-5" />

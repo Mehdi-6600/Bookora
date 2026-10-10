@@ -14,16 +14,25 @@ import { getClientIp } from "@/lib/get-client-ip";
  *  - Only the 9 funnnel steps required to measure onboarding are recorded.
  */
 
+/**
+ * The 11 activation milestones tracked by the acquisition campaign.
+ *
+ * Order matters: this is the funnel an owner walks from first hearing about
+ * Bookora through to their first real customer booking and, later, a paid
+ * conversion.
+ */
 export const FUNNEL_EVENTS = [
-  "landing_view",
-  "start_click",
-  "mini_app_launch",
-  "auth_success",
-  "business_created",
-  "service_created",
-  "working_hours_configured",
-  "booking_link_opened",
-  "booking_created",
+  "landing_view", // 1. Landing page visit
+  "campaign_view", // 2. Campaign-specific visit (attributed link)
+  "signup_cta_click", // 3. Signup CTA click
+  "signup_started", // 4. Signup started (bot /start or Mini App open)
+  "registration_completed", // 5. Registration completed
+  "business_created", // 6. Business profile created
+  "service_created", // 7. At least one service configured
+  "working_hours_configured", // 8. At least one available slot configured
+  "booking_link_opened", // 9. Public booking page published / opened
+  "booking_created", // 10. First real customer booking completed
+  "paid_conversion", // 11. Paid conversion (verified only)
 ] as const;
 
 export type FunnelEventName = (typeof FUNNEL_EVENTS)[number];
@@ -40,15 +49,17 @@ export const FUNNEL_STEP_LABELS: Record<
   FunnelEventName,
   { en: string; fa: string }
 > = {
-  landing_view: { en: "Landing view", fa: "بازدید صفحه اصلی" },
-  start_click: { en: "Start button click", fa: "کلیک روی شروع" },
-  mini_app_launch: { en: "Mini App launch", fa: "اجرای مینی‌اپ" },
-  auth_success: { en: "Auth success", fa: "ورود موفق" },
-  business_created: { en: "Business created", fa: "ساخت کسب‌وکار" },
-  service_created: { en: "First service created", fa: "ساخت اولین سرویس" },
-  working_hours_configured: { en: "Working hours configured", fa: "تنظیم ساعات کاری" },
-  booking_link_opened: { en: "Booking link opened", fa: "باز شدن لینک رزرو" },
-  booking_created: { en: "First booking created", fa: "اولین رزرو" },
+  landing_view: { en: "1. Landing page visit", fa: "۱. بازدید صفحه اصلی" },
+  campaign_view: { en: "2. Campaign visit", fa: "۲. بازدید از کمپین" },
+  signup_cta_click: { en: "3. Signup CTA click", fa: "۳. کلیک روی دکمه ثبت‌نام" },
+  signup_started: { en: "4. Signup started", fa: "۴. شروع ثبت‌نام" },
+  registration_completed: { en: "5. Registration completed", fa: "۵. تکمیل ثبت‌نام" },
+  business_created: { en: "6. Business profile created", fa: "۶. ساخت پروفایل کسب‌وکار" },
+  service_created: { en: "7. First service configured", fa: "۷. تعریف اولین سرویس" },
+  working_hours_configured: { en: "8. Available slots configured", fa: "۸. تنظیم زمان‌های آزاد" },
+  booking_link_opened: { en: "9. Booking page published", fa: "۹. انتشار صفحه رزرو" },
+  booking_created: { en: "10. First real booking", fa: "۱۰. اولین رزرو واقعی" },
+  paid_conversion: { en: "11. Paid conversion", fa: "۱۱. تبدیل به پرداخت" },
 };
 
 const SALT_SECRET =
@@ -79,6 +90,8 @@ export type RecordFunnelInput = {
   userAgent: string;
   locale?: string | null;
   ref?: string | null;
+  /** Campaign code, when the visit came from an attributed campaign link. */
+  campaignId?: string | null;
   now?: Date;
 };
 
@@ -101,6 +114,7 @@ export async function recordFunnelEvent(
         anonId,
         locale: input.locale ? input.locale.slice(0, 8) : null,
         ref: input.ref ? input.ref.slice(0, 64) : null,
+        campaignId: input.campaignId ? input.campaignId.slice(0, 64) : null,
       },
     });
   } catch (error) {
@@ -116,7 +130,7 @@ export async function recordFunnelEvent(
 export async function trackFromRequest(
   request: { headers: Headers; url?: string },
   event: FunnelEventName,
-  extra?: { locale?: string | null; ref?: string | null }
+  extra?: { locale?: string | null; ref?: string | null; campaignId?: string | null }
 ): Promise<void> {
   const ip = getClientIp(request as Parameters<typeof getClientIp>[0]);
   const userAgent = request.headers.get("user-agent") ?? "";
@@ -127,6 +141,7 @@ export async function trackFromRequest(
     userAgent,
     locale: extra?.locale ?? null,
     ref: extra?.ref ?? null,
+    campaignId: extra?.campaignId ?? null,
   });
 }
 

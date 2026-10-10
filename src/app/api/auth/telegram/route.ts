@@ -9,6 +9,7 @@ import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
 import { adminTelegramIds, adminTelegramIdsConfigured } from "@/lib/env";
 import { recordFunnelEvent } from "@/lib/funnel";
+import { recordAttributedStart } from "@/lib/outreach/attribution";
 
 const bodySchema = z.object({
   initData: z.string().min(1).max(10_000),
@@ -96,11 +97,25 @@ export async function POST(req: NextRequest) {
     path: "/",
   });
 
-  // Funnel: authentication succeeded. Server-side so it cannot be spoofed.
+  // Attribution: Telegram puts the deep-link `start` parameter inside the
+  // *signed* initData, so reading it here is safe and is what preserves the
+  // campaign / prospect attribution through the authentication redirect.
+  // Without this the parameter was lost as soon as the Mini App authenticated.
+  const startParam = validated.raw.get("start_param") ?? undefined;
+  if (startParam) {
+    await recordAttributedStart({
+      telegramId: String(tg.id),
+      startParam,
+    });
+  }
+
+  // Funnel: registration completed. Server-side so it cannot be spoofed.
   await recordFunnelEvent({
-    event: "auth_success",
+    event: "registration_completed",
     ip: getClientIp(req),
     userAgent: req.headers.get("user-agent") ?? "",
+    ref: startParam ?? null,
+    campaignId: null,
   });
 
   return NextResponse.json({
