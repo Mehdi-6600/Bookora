@@ -590,7 +590,7 @@ describe("campaign message builder", () => {
 
   it("saves the composed message as the campaign's own template", async () => {
     seededApprovedCampaign();
-    db.settings.push({ key: "outreach.channel_url", value: "https://t.me/bookora_channel" });
+    db.settings.push({ key: "outreach.channel_url", value: "https://t.me/spell0000" });
 
     const result = await saveCampaignMessage(
       "cmp-1",
@@ -607,7 +607,7 @@ describe("campaign message builder", () => {
     if (!result.ok) return;
 
     expect(result.body).toContain("{businessName}");
-    expect(result.body).toContain("https://t.me/bookora_channel");
+    expect(result.body).toContain("https://t.me/spell0000");
     expect(result.body).toContain("{link}");
     expect(db.templates).toHaveLength(1);
     // Campaign-scoped template code derived from the campaign code.
@@ -616,7 +616,7 @@ describe("campaign message builder", () => {
     // The preview is rendered from the stored body — it must show the sample
     // business name (campaign name acts as the sample) and both links.
     expect(result.preview).toContain("Tehran barbershops");
-    expect(result.preview).toContain("https://t.me/bookora_channel");
+    expect(result.preview).toContain("https://t.me/spell0000");
     expect(result.preview).toContain("t.me/BookoraBot?start=preview_");
     // The campaign-scoped template must pass the same validation prepare uses.
     expect(validateTemplateBody(db.templates[0].body)).toBeNull();

@@ -291,6 +291,7 @@ export function OutreachPanel() {
   const loadSettings = useCallback(async () => {
     const data = await api<any>("/api/admin/outreach/settings");
     setSettings(data);
+    return data;
   }, []);
 
   const loadCampaigns = useCallback(async () => {
@@ -321,8 +322,18 @@ export function OutreachPanel() {
     if (tab === "templates") void loadTemplates().catch(() => undefined);
     if (tab === "keywords") void loadKeywords().catch(() => undefined);
     if (tab === "discovery") {
-      void loadDiscovery().catch(() => undefined);
-      void loadSettings().catch(() => undefined);
+      void loadDiscovery().catch((error) =>
+        setMessage({
+          kind: "err",
+          text: error instanceof Error ? error.message : "Request failed",
+        })
+      );
+      void loadSettings().catch((error) =>
+        setMessage({
+          kind: "err",
+          text: error instanceof Error ? error.message : "Request failed",
+        })
+      );
     }
     if (tab === "bot") void loadBot().catch(() => undefined);
   }, [
@@ -1593,6 +1604,11 @@ function DiscoveryTab({
   const [selected, setSelected] = useState<string[]>([]);
   const [seedText, setSeedText] = useState("");
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [savingChannelUrl, setSavingChannelUrl] = useState(false);
+  const [channelUrlSaveState, setChannelUrlSaveState] = useState<{
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
 
   const s = settings?.settings ?? {};
 
@@ -1625,6 +1641,54 @@ function DiscoveryTab({
       });
       await refreshSettings();
     });
+  }
+
+  function normalizeChannelUrl(raw: string): string | null {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return "";
+    if (trimmed.length > 500) return null;
+
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol !== "https:" || !url.hostname) return null;
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  async function saveChannelUrl() {
+    const value = normalizeChannelUrl(draft.channelUrl ?? s.channelUrl ?? "");
+    if (value === null) {
+      setChannelUrlSaveState({ kind: "err", text: t("channelUrlValidationError") });
+      return;
+    }
+
+    setSavingChannelUrl(true);
+    setChannelUrlSaveState(null);
+    try {
+      await api("/api/admin/outreach/settings", {
+        method: "PUT",
+        body: JSON.stringify({ "outreach.channel_url": value }),
+      });
+
+      // Do not treat the PUT response as proof of persistence. Re-read through
+      // the authorized settings API and only report success when it matches.
+      const reloaded = await refreshSettings();
+      if (reloaded?.settings?.channelUrl !== value) {
+        throw new Error(t("channelUrlVerificationError"));
+      }
+
+      setDraft((current) => ({ ...current, channelUrl: reloaded.settings.channelUrl }));
+      setChannelUrlSaveState({ kind: "ok", text: t("channelUrlSaved") });
+    } catch (error) {
+      setChannelUrlSaveState({
+        kind: "err",
+        text: error instanceof Error ? error.message : t("channelUrlSaveError"),
+      });
+    } finally {
+      setSavingChannelUrl(false);
+    }
   }
 
   async function saveSeed() {
@@ -1767,6 +1831,54 @@ function DiscoveryTab({
             {t("autoSend")}: {s.autoSendEnabled ? t("on") : t("off")}
           </button>
         </div>
+      </section>
+
+      <section className={CARD_MAIN}>
+        <h2 className="text-base font-bold text-[#1A1F36]">{t("channelUrlTitle")}</h2>
+        <p id="outreach-channel-url-help" className="mt-1 text-xs text-[#1A1F36]/60">
+          {t("channelUrlHelp")}
+        </p>
+        <label className={`${LABEL} mt-4`} htmlFor="outreach-channel-url">
+          {t("channelUrlLabel")}
+        </label>
+        <input
+          id="outreach-channel-url"
+          type="url"
+          inputMode="url"
+          autoComplete="url"
+          spellCheck={false}
+          dir="ltr"
+          maxLength={500}
+          value={draft.channelUrl ?? s.channelUrl ?? ""}
+          onChange={(event) => {
+            setDraft((current) => ({ ...current, channelUrl: event.target.value }));
+            setChannelUrlSaveState(null);
+          }}
+          disabled={savingChannelUrl || !settings?.settings}
+          aria-describedby="outreach-channel-url-help"
+          aria-invalid={channelUrlSaveState?.kind === "err"}
+          className={INPUT}
+        />
+        <button
+          type="button"
+          onClick={() => void saveChannelUrl()}
+          disabled={savingChannelUrl || !settings?.settings}
+          className={BTN_PRIMARY + " mt-3 w-full"}
+        >
+          {savingChannelUrl && <Loader2 className="h-4 w-4 animate-spin" />}
+          {savingChannelUrl ? t("saving") : t("saveChannelUrl")}
+        </button>
+        {channelUrlSaveState && (
+          <p
+            role={channelUrlSaveState.kind === "err" ? "alert" : "status"}
+            className={
+              "mt-3 rounded-2xl p-3 text-sm font-bold text-white " +
+              (channelUrlSaveState.kind === "ok" ? "bg-[#34C759]" : "bg-[#FF4D5E]")
+            }
+          >
+            {channelUrlSaveState.text}
+          </p>
+        )}
       </section>
 
       <section className={CARD_MAIN}>

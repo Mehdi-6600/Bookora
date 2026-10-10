@@ -18,14 +18,14 @@ import { renderTemplate, validateTemplateBody } from "@/lib/outreach/templates";
  *    with the same variables, so they cannot drift apart.
  */
 
-const CHANNEL = "https://t.me/bookora_channel";
+const CHANNEL = "https://t.me/spell0000";
 const OTHER = "https://bookora.example/landing";
 
 describe("destination URL validation", () => {
   it("accepts clean http(s) URLs and normalises them", () => {
-    expect(validateDestinationUrl("https://t.me/bookora_channel")).toEqual({
+    expect(validateDestinationUrl("https://t.me/spell0000")).toEqual({
       ok: true,
-      url: "https://t.me/bookora_channel",
+      url: "https://t.me/spell0000",
     });
     expect(validateDestinationUrl("  http://wa.me/98912  ").ok).toBe(true);
   });

@@ -9,6 +9,7 @@ import {
   coerceSettingValue,
   DEFAULT_DAILY_DISCOVERY_LIMIT,
   DEFAULT_DAILY_INVITATION_LIMIT,
+  DEFAULT_OUTREACH_SETTINGS,
   MAX_DAILY_DISCOVERY_LIMIT,
   MAX_DAILY_INVITATION_LIMIT,
   runDateFor,
@@ -77,6 +78,16 @@ describe("setting coercion", () => {
     expect(coerceSettingValue("outreach.feed_url", "http://example.com/feed.json")).toBeNull();
     expect(coerceSettingValue("outreach.feed_url", "")).toBe("");
     expect(coerceSettingValue("outreach.feed_url", "x".repeat(2001))).toBeNull();
+  });
+
+  it("accepts the owner-confirmed channel URL and refuses non-HTTPS or malformed values", () => {
+    const channelUrl = "https://t.me/spell0000";
+    expect(DEFAULT_OUTREACH_SETTINGS.channelUrl).toBe("");
+    expect(coerceSettingValue("outreach.channel_url", channelUrl)).toBe(channelUrl);
+    expect(coerceSettingValue("outreach.channel_url", "http://t.me/spell0000")).toBeNull();
+    expect(coerceSettingValue("outreach.channel_url", "not a URL")).toBeNull();
+    expect(coerceSettingValue("outreach.channel_url", "https://t.me/" + "x".repeat(500))).toBeNull();
+    expect(coerceSettingValue("outreach.channel_url", "")).toBe("");
   });
 
   it("rejects unknown setting keys", () => {

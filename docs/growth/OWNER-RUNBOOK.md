@@ -87,7 +87,21 @@ Only VERIFIED prospects can ever be included in a campaign. That is deliberate.
 
 ---
 
-## STEP 5 — Dry run, then approve your first campaign
+## STEP 5 — Set the channel link, then dry run your first campaign
+
+Before creating a campaign, open **Admin → Outreach → Discovery → Bookora channel link**.
+The field loads the saved database value. Enter the owner-confirmed URL exactly as
+shown below and save:
+
+```text
+https://t.me/spell0000
+```
+
+Wait for the success notice confirming the value was read back from Outreach
+settings. The campaign preview and prepared invitation use this stored value;
+the system does not invent a fallback. If the save/read-back fails, stop and
+resolve the settings or database issue before selecting the channel in a
+campaign.
 
 1. **Admin → Outreach → Campaigns → New campaign.**
 2. Name: e.g. `تهران آرایشگاه مردانه — پایلوت`.
