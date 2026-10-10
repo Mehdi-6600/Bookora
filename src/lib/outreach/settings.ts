@@ -215,14 +215,7 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
   };
 }
 
-/**
- * City approval overrides stored in `admin_settings`.
- *
- * Fail-soft by contract: if the settings table cannot be read, BOTH lists
- * come back empty, so the effective approved set stays exactly the registry
- * default (the four launch cities). A read error must never widen the
- * outreach scope.
- */
+/** A failed market-approval read must not re-enable a disabled city. */
 export async function getCityApprovalOverrides(): Promise<{
   enabled: string[];
   disabled: string[];
@@ -236,7 +229,7 @@ export async function getCityApprovalOverrides(): Promise<{
       select: { key: true, value: true },
     });
   } catch {
-    return { enabled: [], disabled: [] };
+    throw new Error("Approved markets could not be read. Outreach targeting is paused; check database settings.");
   }
 
   const map = new Map(rows.map((row) => [row.key, row.value]));

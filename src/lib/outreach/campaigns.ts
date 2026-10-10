@@ -228,6 +228,7 @@ export async function planCampaign(
 ): Promise<CampaignPlan> {
   const now = options.now ?? new Date();
   const settings = await getOutreachSettings();
+  if (settings.readError) throw new Error(settings.readError);
   const warnings: string[] = [];
 
   const cities = campaign.cities.filter(isCityCode);

@@ -3334,7 +3334,7 @@ function CampaignsTab({
                 <h3 className="text-xs font-bold">Audit history</h3>
                 {auditByCampaign[campaign.id].length === 0 && <p className="text-xs">No audit events recorded.</p>}
                 {auditByCampaign[campaign.id].map((event: any) => (
-                  <p key={event.id} className="text-xs">{formatDate(event.createdAt)} · {event.action} · {event.actorUserId ?? "system"} · {event.scope}:{event.entityId ?? "—"}</p>
+                  <p key={event.id} className="text-xs">{new Date(event.createdAt).toLocaleString(locale)} · {event.action} · {event.actorUserId ?? "system"} · {event.scope}:{event.entityId ?? "—"}</p>
                 ))}
               </div>
             )}

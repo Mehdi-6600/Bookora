@@ -463,9 +463,8 @@ export function parseCampaignCities(
 /**
  * The effective approved-city list for this deployment: registry defaults
  * merged with the administrator overrides stored in `admin_settings`
- * (`outreach.cities_enabled` / `outreach.cities_disabled`). Fail-soft: a
- * settings read error must fall back to the registry defaults, never widen
- * the approved set.
+ * (`outreach.cities_enabled` / `outreach.cities_disabled`). A read failure
+ * propagates: falling back to defaults could re-enable a disabled market.
  */
 export async function getEffectiveApprovedCities(): Promise<string[]> {
   // Imported lazily so the pure module stays dependency-light for tests.
