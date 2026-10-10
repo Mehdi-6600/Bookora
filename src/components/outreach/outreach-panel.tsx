@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
+  composeCampaignMessage,
+  describeComposeError,
+  messageDirection,
+  previewCampaignMessage,
+} from "@/lib/outreach/message";
+import {
+  FUNNEL_STAGE_LABELS,
+  type FunnelStageKey,
+} from "@/lib/outreach/analytics";
+import {
   Bot,
   Check,
   CheckCircle2,
@@ -82,14 +92,49 @@ const PROSPECT_STATUSES = [
 
 const CATEGORIES = ["BARBER", "BEAUTY", "MEDICAL", "OTHER"];
 
-/** The approved market scope. Karaj is tracked separately from Tehran. */
-const CITY_OPTIONS = ["TEHRAN", "MASHHAD", "SHIRAZ", "KARAJ"];
-const CITY_FA: Record<string, string> = {
-  TEHRAN: "تهران",
-  MASHHAD: "مشهد",
-  SHIRAZ: "شیراز",
-  KARAJ: "کرج",
+/**
+ * The market registry comes from the server (`GET /api/admin/outreach/campaigns`
+ * → `cityRegistry`), never from a hardcoded list here. This fallback only
+ * renders the four launch cities if the request predates the registry or fails,
+ * so the UI degrades to the OLD behaviour rather than a broken page.
+ */
+const FALLBACK_CITY_REGISTRY = [
+  { code: "TEHRAN", fa: "تهران", en: "Tehran", approved: true },
+  { code: "MASHHAD", fa: "مشهد", en: "Mashhad", approved: true },
+  { code: "SHIRAZ", fa: "شیراز", en: "Shiraz", approved: true },
+  { code: "KARAJ", fa: "کرج", en: "Karaj", approved: true },
+];
+
+type CityEntry = {
+  code: string;
+  fa: string;
+  en: string;
+  region?: string;
+  country?: string;
+  approved: boolean;
 };
+
+function cityRegistryOf(cityData: any): CityEntry[] {
+  const registry = Array.isArray(cityData?.registry) ? cityData.registry : null;
+  if (!registry || registry.length === 0) return FALLBACK_CITY_REGISTRY;
+  return registry;
+}
+
+function cityDisplayName(entry: CityEntry | undefined, locale: string): string {
+  if (!entry) return "";
+  return locale === "fa" || locale === "ar" ? entry.fa || entry.code : entry.en || entry.code;
+}
+
+/**
+ * Resolve a stored city code for display. Unknown codes are rendered verbatim —
+ * the UI never substitutes another city's name.
+ */
+function cityLabelFor(code: string | null | undefined, registry: CityEntry[], locale: string): string {
+  if (!code) return "";
+  const entry = registry.find((item) => item.code === code);
+  if (!entry) return code;
+  return cityDisplayName(entry, locale);
+}
 const SEGMENT_OPTIONS = ["MENS_BARBER", "WOMENS_SALON"];
 const SEGMENT_FA: Record<string, string> = {
   MENS_BARBER: "آرایشگاه مردانه",
@@ -188,6 +233,8 @@ export function OutreachPanel() {
   const [runs, setRuns] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(null);
   const [botInfo, setBotInfo] = useState<any>(null);
+  /** Market registry + message defaults, loaded with the campaigns list. */
+  const [cityData, setCityData] = useState<any>(null);
 
   const [prospectFilter, setProspectFilter] = useState("");
   const [prospectQuery, setProspectQuery] = useState("");
@@ -249,6 +296,12 @@ export function OutreachPanel() {
   const loadCampaigns = useCallback(async () => {
     const data = await api<any>("/api/admin/outreach/campaigns");
     setCampaigns(data.campaigns ?? []);
+    setCityData({
+      registry: data.cityRegistry ?? null,
+      approved: data.cities ?? [],
+      maxCampaignCities: data.maxCampaignCities ?? 100,
+      messageDefaults: data.messageDefaults ?? null,
+    });
     const templates = await api<any>("/api/admin/outreach/templates");
     setTemplateOptions(templates.templates ?? []);
   }, []);
@@ -326,6 +379,7 @@ export function OutreachPanel() {
         <CampaignsTab
           campaigns={campaigns}
           templates={templateOptions}
+          cityData={cityData}
           run={run}
           refresh={loadCampaigns}
           setMessage={setMessage}
@@ -334,6 +388,7 @@ export function OutreachPanel() {
 
       {tab === "prospects" && (
         <ProspectsTab
+          cityData={cityData}
           prospects={prospects}
           filter={prospectFilter}
           setFilter={setProspectFilter}
@@ -489,6 +544,83 @@ function Overview({
       </section>
 
       <section className={CARD_MAIN}>
+        <h2 className="text-base font-bold text-[#1A1F36]">{t("acquisitionTitle")}</h2>
+        <p className="mt-0.5 text-xs text-[#1A1F36]/60">{t("acquisitionNote")}</p>
+
+        <div className="mt-3 space-y-2">
+          {(stats.acquisition?.stages ?? []).map((stage: any) => (
+            <div key={stage.key} className={`${CARD_INNER} flex items-start justify-between gap-3 py-2.5`}>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-[#1A1F36]">
+                  {(FUNNEL_STAGE_LABELS[stage.key as FunnelStageKey] ?? { en: stage.key })[
+                    locale === "fa" ? "fa" : "en"
+                  ] ?? stage.key}
+                </p>
+                <p className="mt-0.5 text-[10px] font-medium text-[#1A1F36]/45" dir="ltr">
+                  {stage.source}
+                </p>
+              </div>
+              <div className="shrink-0 text-end">
+                <p className={`text-sm font-extrabold ${stage.measured ? "text-[#4F5FE8]" : "text-[#1A1F36]/30"}`}>
+                  {stage.measured ? stage.count : t("notMeasured")}
+                </p>
+                {stage.conversionFromPrev != null && (
+                  <p className="text-[10px] font-bold text-[#248A3D]">
+                    {t("conversion")} {(stage.conversionFromPrev * 100).toFixed(1)}%
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+          {(stats.acquisition?.stages ?? []).length === 0 && (
+            <p className="text-sm text-[#1A1F36]/60">{t("empty")}</p>
+          )}
+        </div>
+
+        <div className="mt-3 space-y-2">
+          {(stats.acquisition?.byCampaign ?? []).slice(0, 8).map((row: any) => (
+            <div key={row.id} className={`${CARD_INNER} py-2.5`}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-xs font-bold text-[#1A1F36]">{row.name}</p>
+                <span className={`${BADGE} shrink-0 bg-[#1A1F36]/10 text-[#1A1F36]/70`}>{row.status}</span>
+              </div>
+              <p className="mt-1 text-[11px] font-medium text-[#1A1F36]/60" dir="ltr">
+                {row.prospects} {t("pipelineTitle")} · {row.invitationsDrafted} {t("prepared")} ·{" "}
+                {row.invitationsDelivered} {t("delivered")} · {row.botStarts} {t("botStarts")} ·{" "}
+                {row.registrations} {t("registrations")}
+                {row.activationRate != null ? ` · ${(row.activationRate * 100).toFixed(1)}%` : ""}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 overflow-x-auto">
+          {(stats.acquisition?.byCity ?? []).length > 0 && (
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="text-[#1A1F36]/60">
+                  <th className="py-1 text-start">{t("city")}</th>
+                  <th className="py-1 text-end">{t("verified")}</th>
+                  <th className="py-1 text-end">{t("prepared")}</th>
+                  <th className="py-1 text-end">{t("delivered")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.acquisition.byCity.slice(0, 10).map((row: any) => (
+                  <tr key={row.key} className="font-bold text-[#1A1F36]">
+                    <td className="py-1">{row.key}</td>
+                    <td className="py-1 text-end">{row.verified}</td>
+                    <td className="py-1 text-end">{row.drafted}</td>
+                    <td className="py-1 text-end">{row.delivered}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+
+      <section className={CARD_MAIN}>
         <h2 className="text-base font-bold text-[#1A1F36]">{t("pipelineTitle")}</h2>
         <div className="mt-3 grid grid-cols-2 gap-2">
           {PROSPECT_STATUSES.map((status) => (
@@ -547,6 +679,7 @@ function Stat({ label, value }: { label: string; value: unknown }) {
 /* ---------------------------------------------------------------------- */
 
 function ProspectsTab({
+  cityData,
   prospects,
   filter,
   setFilter,
@@ -559,6 +692,10 @@ function ProspectsTab({
   setMessage,
 }: any) {
   const t = useTranslations("outreach");
+  const locale = useLocale();
+  const cityRegistry = cityRegistryOf(cityData);
+  const approvedCities = cityRegistry.filter((entry) => entry.approved);
+  const otherCities = cityRegistry.filter((entry) => !entry.approved);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     publicName: "",
@@ -693,11 +830,22 @@ function ProspectsTab({
                   className={INPUT}
                 >
                   <option value="">{t("cityUnassigned")}</option>
-                  {CITY_OPTIONS.map((city) => (
-                    <option key={city} value={city}>
-                      {CITY_FA[city]}
-                    </option>
-                  ))}
+                  <optgroup label={t("approvedMarkets")}>
+                    {approvedCities.map((entry) => (
+                      <option key={entry.code} value={entry.code}>
+                        {cityDisplayName(entry, locale)}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {otherCities.length > 0 && (
+                    <optgroup label={t("otherMarkets")}>
+                      {otherCities.map((entry) => (
+                        <option key={entry.code} value={entry.code}>
+                          {cityDisplayName(entry, locale)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
               <div>
@@ -883,7 +1031,9 @@ function ProspectsTab({
                     {prospect.publicName}
                   </p>
                   <p className="mt-0.5 text-[11px] font-medium text-[#1A1F36]/60">
-                    {prospect.city ? CITY_FA[prospect.city] ?? prospect.city : t("cityUnassigned")}
+                    {prospect.city
+                      ? cityLabelFor(prospect.city, cityRegistry, locale) || t("cityUnassigned")
+                      : t("cityUnassigned")}
                     {prospect.segment
                       ? ` · ${SEGMENT_FA[prospect.segment] ?? prospect.segment}`
                       : ""}
@@ -1829,7 +1979,7 @@ function BotTab({ info, run, refresh, setMessage }: any) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Campaigns — four-city, two-segment targeting with dry run and approval      */
+/* Campaigns — configurable-market targeting, message builder, dry-run + approval */
 /* -------------------------------------------------------------------------- */
 
 const CAMPAIGN_STATUS_COLORS: Record<string, string> = {
@@ -1841,17 +1991,462 @@ const CAMPAIGN_STATUS_COLORS: Record<string, string> = {
   FAILED: "bg-[#FF4D5E]/15 text-[#C0263A]",
 };
 
+/**
+ * Searchable multi-select over the *approved* market registry.
+ * - Never renders a hardcoded city list.
+ * - Shows the selected count and the per-campaign ceiling.
+ * - Only approved cities are selectable; everything else lives in Markets.
+ */
+function CityPicker({
+  registry,
+  selected,
+  max,
+  onChange,
+}: {
+  registry: CityEntry[];
+  selected: string[];
+  max: number;
+  onChange: (next: string[]) => void;
+}) {
+  const t = useTranslations("outreach");
+  const locale = useLocale();
+  const [query, setQuery] = useState("");
+
+  const approved = registry.filter((entry) => entry.approved);
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? approved.filter(
+        (entry) =>
+          entry.code.toLowerCase().includes(needle) ||
+          entry.fa.includes(query.trim()) ||
+          (entry.en ?? "").toLowerCase().includes(needle)
+      )
+    : approved;
+
+  function toggle(code: string) {
+    if (selected.includes(code)) {
+      onChange(selected.filter((item) => item !== code));
+      return;
+    }
+    if (selected.length >= max) return;
+    onChange([...selected, code]);
+  }
+
+  return (
+    <div>
+      <label className={LABEL} htmlFor="city-search">
+        {t("cities")} ·{" "}
+        <span className={selected.length >= max ? "text-[#B45309]" : ""}>
+          {t("citiesSelected", { count: selected.length, max })}
+        </span>
+      </label>
+      <div className="relative mt-1">
+        <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#1A1F36]/40" />
+        <input
+          id="city-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className={INPUT + " ps-9"}
+          placeholder={t("citiesSearchPlaceholder")}
+          inputMode="search"
+        />
+      </div>
+      <div className="mt-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto" role="group" aria-label={t("cities")}>
+        {visible.map((entry) => {
+          const active = selected.includes(entry.code);
+          const disabled = !active && selected.length >= max;
+          return (
+            <button
+              key={entry.code}
+              type="button"
+              aria-pressed={active}
+              disabled={disabled}
+              onClick={() => toggle(entry.code)}
+              className={`rounded-xl px-3 py-2 text-xs font-bold transition-transform active:scale-95 ${
+                active
+                  ? "bg-[#4F5FE8] text-white"
+                  : disabled
+                    ? "bg-[#1A1F36]/5 text-[#1A1F36]/30"
+                    : "bg-[#1A1F36]/5 text-[#1A1F36]/70"
+              }`}
+            >
+              {cityDisplayName(entry, locale)}
+            </button>
+          );
+        })}
+        {visible.length === 0 && (
+          <p className="text-[11px] font-medium text-[#1A1F36]/50">
+            {needle ? t("noCitiesMatch") : t("noApprovedCities")}
+          </p>
+        )}
+      </div>
+      <p className="mt-1 text-[11px] font-medium text-[#1A1F36]/50">{t("citiesHelp")}</p>
+    </div>
+  );
+}
+
+/**
+ * Market registry management. Every entry the deployment knows, with its
+ * approval state. New cities ship DISABLED: outreach never auto-expands into
+ * them; an explicit admin tap approves or withdraws one market at a time.
+ */
+function MarketsCard({ registry, onSaved }: { registry: CityEntry[]; onSaved: () => Promise<void> | void }) {
+  const t = useTranslations("outreach");
+  const locale = useLocale();
+  const [query, setQuery] = useState("");
+  const [busyCode, setBusyCode] = useState<string | null>(null);
+
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? registry.filter(
+        (entry) =>
+          entry.code.toLowerCase().includes(needle) ||
+          entry.fa.includes(query.trim()) ||
+          (entry.en ?? "").toLowerCase().includes(needle) ||
+          (entry.region ?? "").toLowerCase().includes(needle)
+      )
+    : registry;
+  const approvedCount = registry.filter((entry) => entry.approved).length;
+
+  async function approve(code: string, approved: boolean) {
+    setBusyCode(code);
+    try {
+      await api("/api/admin/outreach/markets", {
+        method: "PUT",
+        body: JSON.stringify({ code, approved }),
+      });
+      await onSaved();
+    } finally {
+      setBusyCode(null);
+    }
+  }
+
+  return (
+    <div className={`${CARD_MAIN} mt-3`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-extrabold text-[#1A1F36]">{t("marketsTitle")}</h3>
+          <p className="mt-1 text-[11px] font-medium text-[#1A1F36]/60">{t("marketsHelp")}</p>
+        </div>
+        <span className={BADGE + " bg-white text-[#1A1F36]/70"}>
+          {t("marketsCount", { count: approvedCount, max: registry.length })}
+        </span>
+      </div>
+
+      <div className="relative mt-3">
+        <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#1A1F36]/40" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className={INPUT + " ps-9"}
+          placeholder={t("marketsSearchPlaceholder")}
+          inputMode="search"
+          aria-label={t("marketsTitle")}
+        />
+      </div>
+
+      <div className="mt-2 max-h-64 space-y-1.5 overflow-y-auto pe-1">
+        {visible.map((entry) => (
+          <div key={entry.code} className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 shadow-soft">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold text-[#1A1F36]">
+                {cityDisplayName(entry, locale)}
+                <span className="ms-2 text-[10px] font-medium text-[#1A1F36]/40" dir="ltr">
+                  {entry.code}
+                  {entry.region ? ` · ${entry.region}` : ""}
+                </span>
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={busyCode === entry.code}
+              onClick={() => void approve(entry.code, !entry.approved)}
+              className={`shrink-0 rounded-lg px-3 py-1.5 text-[10px] font-bold text-white shadow-soft disabled:opacity-50 ${
+                entry.approved ? "bg-[#34C759]" : "bg-[#1A1F36]/30"
+              }`}
+            >
+              {entry.approved ? t("cityApproved") : t("cityApprove")}
+            </button>
+          </div>
+        ))}
+        {visible.length === 0 && (
+          <p className="py-2 text-center text-[11px] font-medium text-[#1A1F36]/50">{t("noCitiesMatch")}</p>
+        )}
+      </div>
+      <p className="mt-2 text-[10px] font-medium text-[#1A1F36]/45">{t("marketsSafety")}</p>
+    </div>
+  );
+}
+
+function MessageBuilder({
+  campaign,
+  registry,
+  messageDefaults,
+  onSaved,
+}: {
+  campaign: any;
+  registry: CityEntry[];
+  messageDefaults: any;
+  onSaved: () => Promise<void> | void;
+}) {
+  const t = useTranslations("outreach");
+  const locale = useLocale();
+  const [form, setForm] = useState({
+    message: campaign.templateBody ?? "",
+    language: campaign.language ?? "fa",
+    cta: campaign.cta ?? "",
+    destinationUrl: campaign.destinationUrl ?? "",
+    bot: true,
+    channel: false,
+    other: false,
+    busy: false,
+    saved: false,
+    error: null as string[] | null,
+  });
+
+  const channelUrl: string = messageDefaults?.channelUrl ?? "";
+  const botUrl: string = messageDefaults?.botUrl ?? "";
+  const locked = campaign.status !== "DRAFT" && campaign.status !== "REVIEW";
+
+  const composed = composeCampaignMessage({
+    message: form.message,
+    cta: form.cta || null,
+    destinations: { bot: form.bot, channel: form.channel, other: form.other },
+    channelUrl,
+    otherUrl: form.destinationUrl || null,
+  });
+  const preview = previewCampaignMessage(
+    {
+      message: form.message,
+      cta: form.cta || null,
+      destinations: { bot: form.bot, channel: form.channel, other: form.other },
+      channelUrl,
+      otherUrl: form.destinationUrl || null,
+    },
+    {
+      businessName: t("sampleBusinessName"),
+      sampleLink: botUrl || "{link}",
+      categoryLabel: t("sampleCategory"),
+    }
+  );
+  const dir = messageDirection(form.language);
+
+  async function save() {
+    if (composed.errors.length > 0) {
+      setForm((current) => ({ ...current, error: composed.errors }));
+      return;
+    }
+    setForm((current) => ({ ...current, busy: true, error: null }));
+    try {
+      await api(`/api/admin/outreach/campaigns/${campaign.id}/message`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          message: form.message,
+          language: form.language,
+          cta: form.cta || null,
+          destinationUrl: form.destinationUrl || null,
+          destinations: { bot: form.bot, channel: form.channel, other: form.other },
+        }),
+      });
+      setForm((current) => ({ ...current, busy: false, saved: true }));
+      await onSaved();
+    } catch (error) {
+      setForm((current) => ({
+        ...current,
+        busy: false,
+        error: [error instanceof Error ? error.message : "save failed"],
+      }));
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-2xl bg-[#B8D4F5]/40 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-xs font-extrabold text-[#1A1F36]">{t("messageBuilderTitle")}</h4>
+        {locked && (
+          <span className={BADGE + " bg-[#FF9F0A]/20 text-[#B45309]"}>{t("messageLocked")}</span>
+        )}
+      </div>
+      <p className="mt-1 text-[11px] font-medium text-[#1A1F36]/60">{t("messageBuilderHelp")}</p>
+
+      <div className="mt-3 space-y-3">
+        <div>
+          <label className={LABEL} htmlFor={`msg-${campaign.id}`}>
+            {t("messageText")}
+          </label>
+          <textarea
+            id={`msg-${campaign.id}`}
+            value={form.message}
+            disabled={locked}
+            onChange={(e) => setForm({ ...form, message: e.target.value, saved: false })}
+            dir={dir}
+            className={INPUT + " min-h-44 text-sm leading-7"}
+            placeholder={t("messageTextPlaceholder")}
+          />
+          <p className="mt-1 text-[10px] font-medium text-[#1A1F36]/50" dir="ltr">
+            {"{businessName} · {link} · {category}"} ·{" "}
+            {t("charactersCount", { count: composed.body.length, max: 1500 })}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={LABEL} htmlFor={`cta-${campaign.id}`}>
+              {t("ctaLabel")}
+            </label>
+            <input
+              id={`cta-${campaign.id}`}
+              value={form.cta}
+              disabled={locked}
+              dir={dir}
+              onChange={(e) => setForm({ ...form, cta: e.target.value, saved: false })}
+              className={INPUT}
+              placeholder={t("ctaPlaceholder")}
+            />
+          </div>
+          <div>
+            <label className={LABEL}>{t("language")}</label>
+            <select
+              value={form.language}
+              disabled={locked}
+              onChange={(e) => setForm({ ...form, language: e.target.value, saved: false })}
+              className={INPUT}
+            >
+              {LANGUAGES.map((language) => (
+                <option key={language} value={language}>
+                  {language}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <fieldset className="rounded-2xl bg-white p-3 shadow-soft">
+          <legend className={LABEL}>{t("destinationsTitle")}</legend>
+          <div className="space-y-2">
+            <label className="flex items-start gap-2 text-xs font-bold text-[#1A1F36]">
+              <input
+                type="checkbox"
+                checked={form.bot}
+                disabled={locked}
+                onChange={(e) => setForm({ ...form, bot: e.target.checked, saved: false })}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span dir="ltr" className="break-all">
+                {t("destBot")}{" "}
+                <span className="font-medium text-[#1A1F36]/50">
+                  {botUrl ? `→ ${botUrl}` : ""}
+                </span>
+              </span>
+            </label>
+
+            <label className="flex items-start gap-2 text-xs font-bold text-[#1A1F36]">
+              <input
+                type="checkbox"
+                checked={form.channel}
+                disabled={locked || channelUrl.length === 0}
+                onChange={(e) => setForm({ ...form, channel: e.target.checked, saved: false })}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span dir="ltr" className="break-all">
+                {t("destChannel")}{" "}
+                {channelUrl ? (
+                  <span className="font-medium text-[#1A1F36]/50">→ {channelUrl}</span>
+                ) : (
+                  <span className="font-medium text-[#B45309]">{t("channelUrlMissing")}</span>
+                )}
+              </span>
+            </label>
+
+            <label className="flex items-start gap-2 text-xs font-bold text-[#1A1F36]">
+              <input
+                type="checkbox"
+                checked={form.other}
+                disabled={locked}
+                onChange={(e) => setForm({ ...form, other: e.target.checked, saved: false })}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span className="break-all">{t("destOther")}</span>
+            </label>
+            {form.other && (
+              <input
+                value={form.destinationUrl}
+                disabled={locked}
+                onChange={(e) => setForm({ ...form, destinationUrl: e.target.value, saved: false })}
+                className={INPUT}
+                dir="ltr"
+                inputMode="url"
+                placeholder="https://… / https://wa.me/…"
+                aria-label={t("destOther")}
+              />
+            )}
+          </div>
+        </fieldset>
+
+        <section className="rounded-2xl bg-white p-3 shadow-soft" aria-live="polite">
+          <h5 className="text-[11px] font-extrabold uppercase tracking-wide text-[#1A1F36]/60">
+            {t("previewFinal")}
+          </h5>
+          <p className="mt-2 whitespace-pre-wrap text-sm font-medium leading-7 text-[#1A1F36]" dir={dir}>
+            {preview.body}
+          </p>
+          {composed.links.length > 0 && (
+            <ul className="mt-2 space-y-1 border-t border-[#1A1F36]/10 pt-2">
+              {composed.links.map((link) => (
+                <li key={link.kind + link.value} className="break-all text-[11px] font-bold text-[#4F5FE8]" dir="ltr">
+                  {link.kind === "bot" ? t("destBotUrl") : link.value}
+                </li>
+              ))}
+            </ul>
+          )}
+          {composed.errors.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {composed.errors.map((code) => (
+                <li key={code} className="text-[11px] font-bold text-[#C0263A]">
+                  ⚠️ {describeComposeError(code)}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-2 text-[10px] font-medium text-[#1A1F36]/45">{t("previewNote")}</p>
+        </section>
+
+        <button
+          type="button"
+          className={BTN_PRIMARY + " w-full"}
+          disabled={locked || form.busy || composed.errors.length > 0}
+          onClick={() => void save()}
+        >
+          {form.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : form.saved ? <Check className="h-4 w-4" /> : null}
+          {form.saved && !form.busy ? t("messageSaved") : t("saveMessage")}
+        </button>
+        {form.error && (
+          <p className="text-[11px] font-bold text-[#C0263A]">{form.error.join(" · ")}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CampaignsTab({
   campaigns,
   templates,
+  cityData,
   run,
   refresh,
   setMessage,
 }: any) {
   const t = useTranslations("outreach");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [plan, setPlan] = useState<any>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [campaignDetails, setCampaignDetails] = useState<Record<string, any>>({});
+  const [showMarkets, setShowMarkets] = useState(false);
+  const registry: CityEntry[] = cityRegistryOf(cityData);
+  const maxCities = cityData?.maxCampaignCities ?? 100;
+  const messageDefaults = cityData?.messageDefaults ?? null;
   const [form, setForm] = useState({
     name: "",
     cities: [] as string[],
@@ -1926,8 +2521,21 @@ function CampaignsTab({
   async function loadPlan(id: string) {
     await run(async () => {
       const data = await api<any>(`/api/admin/outreach/campaigns/${id}`);
+      setCampaignDetails((current) => ({ ...current, [id]: data.campaign }));
       setPlan({ ...data.plan, campaignId: id });
       setExpanded(id);
+    });
+  }
+
+  async function openEditor(id: string) {
+    if (editing === id) {
+      setEditing(null);
+      return;
+    }
+    await run(async () => {
+      const data = await api<any>(`/api/admin/outreach/campaigns/${id}`);
+      setCampaignDetails((current) => ({ ...current, [id]: data.campaign }));
+      setEditing(id);
     });
   }
 
@@ -1942,10 +2550,20 @@ function CampaignsTab({
             {t("campaignsHelp")}
           </p>
         </div>
-        <button className={BTN_PRIMARY} onClick={() => setOpen((v) => !v)}>
-          {t("newCampaign")}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button className={BTN_NEUTRAL} onClick={() => setShowMarkets((v) => !v)}>
+            <Settings2 className="h-3.5 w-3.5" />
+            {t("marketsTitle")}
+          </button>
+          <button className={BTN_PRIMARY} onClick={() => setOpen((v) => !v)}>
+            {t("newCampaign")}
+          </button>
+        </div>
       </div>
+
+      {showMarkets && (
+        <MarketsCard registry={registry} onSaved={refresh} />
+      )}
 
       {open && (
         <div className={`${CARD_INNER} mt-3 space-y-3`}>
@@ -1960,32 +2578,22 @@ function CampaignsTab({
           </div>
 
           <div>
-            <label className={LABEL}>{t("cities")}</label>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {CITY_OPTIONS.map((city) => {
-                const active = form.cities.includes(city);
-                return (
-                  <button
-                    key={city}
-                    type="button"
-                    onClick={() =>
-                      setForm({ ...form, cities: toggle(form.cities, city) })
-                    }
-                    className={`rounded-xl px-3 py-2 text-xs font-bold ${
-                      active
-                        ? "bg-[#4F5FE8] text-white"
-                        : "bg-[#1A1F36]/5 text-[#1A1F36]/70"
-                    }`}
-                  >
-                    {CITY_FA[city]}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-1 text-[11px] font-medium text-[#1A1F36]/50">
-              {t("citiesHelp")}
-            </p>
+            <label className={LABEL}>{t("objective")}</label>
+            <input
+              value={form.objective}
+              onChange={(e) => setForm({ ...form, objective: e.target.value })}
+              dir={messageDirection(form.language)}
+              className={INPUT}
+              placeholder={t("objectivePlaceholder")}
+            />
           </div>
+
+          <CityPicker
+            registry={registry}
+            max={maxCities}
+            selected={form.cities}
+            onChange={(cities) => setForm({ ...form, cities })}
+          />
 
           <div>
             <label className={LABEL}>{t("segments")}</label>
@@ -1996,6 +2604,7 @@ function CampaignsTab({
                   <button
                     key={segment}
                     type="button"
+                    aria-pressed={active}
                     onClick={() =>
                       setForm({
                         ...form,
@@ -2015,7 +2624,23 @@ function CampaignsTab({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className={LABEL}>{t("language")}</label>
+              <select
+                value={form.language}
+                onChange={(e) =>
+                  setForm({ ...form, language: e.target.value })
+                }
+                className={INPUT}
+              >
+                {LANGUAGES.map((language) => (
+                  <option key={language} value={language}>
+                    {language}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className={LABEL}>{t("template")}</label>
               <select
@@ -2074,7 +2699,10 @@ function CampaignsTab({
                 </p>
                 <p className="mt-0.5 text-[11px] font-medium text-[#1A1F36]/60">
                   {campaign.cities.length > 0
-                    ? campaign.cities.map((c: string) => CITY_FA[c] ?? c).join("، ")
+                    ? `${campaign.cities.length} · ${campaign.cities
+                        .slice(0, 4)
+                        .map((c: string) => cityLabelFor(c, registry, locale))
+                        .join("، ")}` + (campaign.cities.length > 4 ? " …" : "")
                     : t("allCities")}
                   {" · "}
                   {campaign.segments.length > 0
@@ -2098,6 +2726,13 @@ function CampaignsTab({
             </p>
 
             <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                className={BTN_NEUTRAL}
+                onClick={() => void run(() => openEditor(campaign.id))}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                {t("editMessage")}
+              </button>
               <button
                 className={BTN_NEUTRAL}
                 onClick={() => void run(() => act(campaign.id, "dry-run"))}
@@ -2126,7 +2761,21 @@ function CampaignsTab({
               </button>
             </div>
 
-            {expanded === campaign.id && plan && (
+            {editing === campaign.id && campaignDetails[campaign.id] && (
+              <MessageBuilder
+                campaign={campaignDetails[campaign.id]}
+                registry={registry}
+                messageDefaults={messageDefaults}
+                onSaved={async () => {
+                  await refresh();
+                  const data = await api<any>(`/api/admin/outreach/campaigns/${campaign.id}`);
+                  setCampaignDetails((current: any) => ({ ...current, [campaign.id]: data.campaign }));
+                  setMessage({ kind: "ok", text: t("messageSaved") });
+                }}
+              />
+            )}
+
+            {expanded === campaign.id && plan && plan.campaignId === campaign.id && (
               <div className="mt-3 rounded-xl bg-[#B8D4F5]/30 p-3">
                 <p className="text-xs font-bold text-[#1A1F36]">
                   {t("eligible")}: {plan.eligible} · {t("manualOnly")}:{" "}
@@ -2151,7 +2800,7 @@ function CampaignsTab({
                             <td className="py-1">
                               {cell.city === "UNASSIGNED"
                                 ? t("cityUnassigned")
-                                : CITY_FA[cell.city] ?? cell.city}
+                                : cityLabelFor(cell.city, registry, locale)}
                             </td>
                             <td className="py-1">
                               {cell.segment === "UNASSIGNED"

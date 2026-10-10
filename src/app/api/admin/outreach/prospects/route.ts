@@ -17,16 +17,15 @@ import {
 } from "@/lib/outreach/types";
 import { isSuppressed } from "@/lib/outreach/eligibility";
 import {
-  APPROVED_CITIES,
   BUSINESS_SEGMENTS,
   VERIFICATION_STATUSES,
   BOOKING_RELEVANCE,
-  isCityCode,
   isBusinessSegment,
   isVerificationStatus,
   isBookingRelevance,
   resolveCity,
   detectSegment,
+  getEffectiveApprovedCities,
 } from "@/lib/outreach/cities";
 
 export async function GET(req: NextRequest) {
@@ -50,8 +49,11 @@ export async function GET(req: NextRequest) {
     where.category = category;
   }
   // City is a stable code, never free text, so city reporting can be trusted.
-  if (city && isCityCode(city.toUpperCase())) {
-    where.city = city.toUpperCase();
+  // Any valid registry code filters (history must stay viewable even for a
+  // city that was later disabled).
+  const codeFromFilter = resolveCity(city ?? "").city;
+  if (codeFromFilter) {
+    where.city = codeFromFilter;
   }
   if (segment && isBusinessSegment(segment.toUpperCase())) {
     where.segment = segment.toUpperCase();
@@ -91,10 +93,12 @@ export async function GET(req: NextRequest) {
     },
   });
 
+  const approvedCities = await getEffectiveApprovedCities();
+
   return NextResponse.json(
     {
       statuses: PROSPECT_STATUSES,
-      cities: APPROVED_CITIES,
+      cities: approvedCities,
       segments: BUSINESS_SEGMENTS,
       verificationStatuses: VERIFICATION_STATUSES,
       bookingRelevanceLevels: BOOKING_RELEVANCE,
@@ -197,9 +201,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Resolve the approved city. A business must be assignable to exactly one of
-  // the four approved cities; an ambiguous or unknown city is stored as null
-  // and reported as UNASSIGNED rather than guessed.
+  // Resolve the city. A business must be assignable to exactly one registry
+  // city; an ambiguous or unknown city is stored as null and reported as
+  // UNASSIGNED rather than guessed. We never substitute another city.
   const cityResolution = resolveCity(data.city);
   const cityCode = cityResolution.city;
 
@@ -279,8 +283,11 @@ export async function POST(req: NextRequest) {
     {
       prospect,
       cityResolved: cityResolution.city
-        ? { city: cityResolution.city, confidence: cityResolution.confidence }
-        : { city: null, reason: cityResolution.reason },
+        ? {
+            city: cityResolution.city,
+            confidence: "reason" in cityResolution ? "HIGH" : cityResolution.confidence,
+          }
+        : { city: null, reason: "reason" in cityResolution ? cityResolution.reason : "NONE" },
     },
     { status: 201 }
   );

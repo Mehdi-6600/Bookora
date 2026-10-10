@@ -8,6 +8,15 @@ import {
   parseSegmentList,
   resolveCity,
 } from "@/lib/outreach/cities";
+import {
+  APPROVED_CITIES,
+  CITY_REGISTRY,
+  KNOWN_CITY_CODES,
+  MAX_CAMPAIGN_CITIES,
+  cityLabel,
+  isCityCode,
+  parseCampaignCities,
+} from "@/lib/outreach/cities";
 
 describe("Persian / Arabic normalisation", () => {
   it("folds Arabic letter forms onto Persian ones", () => {
@@ -121,13 +130,79 @@ describe("segment detection", () => {
 });
 
 describe("list parsing", () => {
-  it("keeps only approved cities and de-duplicates", () => {
+  it("keeps registry-known cities and de-duplicates (approval is separate)", () => {
+    // ISFAHAN is now a REGISTERED market, so the tolerant parser resolves it.
+    // Whether a campaign MAY target it is the approval question — see the
+    // strict `parseCampaignCities` suite below.
     expect(parseCityList(["TEHRAN", "karaj", "isfahan", "KARAJ"])).toEqual([
       "TEHRAN",
       "KARAJ",
+      "ISFAHAN",
     ]);
     expect(parseCityList("کرج")).toEqual(["KARAJ"]);
     expect(parseCityList(null)).toEqual([]);
+  });
+
+  it("keeps the legacy four cities exactly as the default approval", () => {
+    expect([...APPROVED_CITIES].sort()).toEqual(
+      ["KARAJ", "MASHHAD", "SHIRAZ", "TEHRAN"]
+    );
+    // Old campaigns and prospect rows keep working: the codes are unchanged.
+    expect(isCityCode("TEHRAN")).toBe(true);
+    expect(isCityCode("KARAJ")).toBe(true);
+    expect(cityLabel("TEHRAN", "fa")).toBe("تهران");
+    expect(cityLabel("SHIRAZ", "en")).toBe("Shiraz");
+  });
+
+  it("never substitutes another city for an unknown code", () => {
+    // Unknown codes render verbatim (the display layer cannot swap cities).
+    expect(cityLabel("NOWHEREVILLE", "en")).toBe("NOWHEREVILLE");
+    // …and strict parsing reports them instead of silently dropping.
+    const parsed = parseCampaignCities(["TEHRAN", "NOWHEREVILLE"]);
+    expect(parsed.unknown).toEqual(["NOWHEREVILLE"]);
+    expect(parsed.cities).toEqual(["TEHRAN"]);
+  });
+
+  it("rejects unapproved registry cities explicitly, never silently", () => {
+    const parsed = parseCampaignCities(["TEHRAN", "ISFAHAN"]);
+    expect(parsed.cities).toEqual(["TEHRAN"]);
+    expect(parsed.unapproved).toEqual(["ISFAHAN"]);
+    const withApprovals = parseCampaignCities(["TEHRAN", "ISFAHAN"], [
+      "TEHRAN",
+      "ISFAHAN",
+    ]);
+    expect(withApprovals.cities).toEqual(["TEHRAN", "ISFAHAN"]);
+    expect(withApprovals.unapproved).toEqual([]);
+  });
+
+  it("caps a campaign at MAX_CAMPAIGN_CITIES (100) approved cities", () => {
+    const all = CITY_REGISTRY.map((entry) => entry.code);
+    expect(CITY_REGISTRY.length).toBeLessThanOrEqual(MAX_CAMPAIGN_CITIES);
+
+    // With every registered city approved, a full-list campaign is accepted.
+    const full = parseCampaignCities(all, all);
+    expect(full.tooMany).toBe(false);
+    expect(full.cities).toHaveLength(MAX_CAMPAIGN_CITIES);
+
+    // One code over the cap is rejected outright — not truncated silently.
+    const over = parseCampaignCities([...all, "TEHRAN", "MASHHAD", "BAD-CODE"], all);
+    expect(over.tooMany).toBe(true);
+    expect(over.cities.length).toBeLessThanOrEqual(MAX_CAMPAIGN_CITIES);
+  });
+
+  it("resolves any registered city from exact admin input", () => {
+    expect(resolveCity("اصفهان")).toEqual({ city: "ISFAHAN", confidence: "HIGH" });
+    expect(resolveCity("  isfahan ")).toEqual({ city: "ISFAHAN", confidence: "HIGH" });
+    expect(resolveCity("TABRIZ")).toEqual({ city: "TABRIZ", confidence: "HIGH" });
+  });
+
+  it("auto-DETECTION stays limited to the launch cities", () => {
+    // Growing the registry to 100 cities must NOT widen what free-text
+    // directory blobs auto-assign — an unapproved mention stays unassigned.
+    expect(detectCity("اصفهان، خیابان چهارباغ")).toEqual({ city: null, reason: "NONE" });
+    expect(detectCity("Isfahan Naghsh-e Javan")).toEqual({ city: null, reason: "NONE" });
+    expect(detectCity("کرمان، خیابان انقلاب")).toEqual({ city: null, reason: "NONE" });
+    expect(KNOWN_CITY_CODES.length).toBeGreaterThan(50);
   });
 
   it("keeps only known segments", () => {

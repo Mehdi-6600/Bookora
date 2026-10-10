@@ -569,3 +569,25 @@ model FunnelEvent {
   @@index([campaignId])
   @@map("funnel_events")
 }
+
+/// Audit trail of important outreach state changes (approvals, message edits,
+/// pause toggles). Purely additive: until `npm run db:push` (or the equivalent
+/// SQL file) has been applied on production, this table simply does not exist
+/// and every read/write degrades gracefully — see src/lib/outreach/audit.ts.
+model OutreachAuditEvent {
+  id String @id @default(cuid())
+  /// What was changed: "campaign" | "message" | "settings" | "cities" | "invitation"
+  scope       String
+  /// Row id (campaign id, etc.) when applicable.
+  entityId    String?
+  /// Stable, machine-readable action name, e.g. "campaign.approved".
+  action      String
+  actorUserId String?
+  /// Short, safe summary. Never message bodies, contacts, secrets or tokens.
+  detail      String?
+  createdAt   DateTime @default(now())
+
+  @@index([scope, entityId])
+  @@index([createdAt])
+  @@map("outreach_audit_events")
+}

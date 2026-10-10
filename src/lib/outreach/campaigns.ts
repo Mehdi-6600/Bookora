@@ -20,8 +20,8 @@ import {
 } from "@/lib/outreach/types";
 import {
   APPROVED_CITIES,
-  resolveCity,
-  CITY_LABELS,
+  cityLabel,
+  parseCampaignCities,
   SEGMENT_LABELS,
   isCityCode,
   isBusinessSegment,
@@ -30,16 +30,23 @@ import {
 } from "@/lib/outreach/cities";
 import { getOutreachSettings } from "@/lib/outreach/settings";
 import {
+  composeCampaignMessage,
+  validateDestinationUrl,
+  type DestinationSelection,
+} from "@/lib/outreach/message";
+import { recordAuditEvent } from "@/lib/outreach/audit";
+import {
   prepareInvitations,
   sendApprovedInvitations,
 } from "@/lib/outreach/invitations";
 
 /**
- * Campaign management for the four-city acquisition campaign.
+ * Campaign management for the acquisition campaign.
  *
  * Hard rules enforced here, in order:
  *
- *  1. Targeting is limited to the four approved cities and two segments.
+ *  1. Targeting is limited to administrator-approved cities (the registry in
+ *     `city-registry.ts`, up to 100) and to the two segments.
  *  2. Only VERIFIED prospects are ever eligible. A discovery hit is not a
  *     prospect; a verified prospect is not automatically eligible.
  *  3. A dry run validates everything and writes nothing but a timestamp.
@@ -156,24 +163,10 @@ export function normalizeTargeting(input: {
   segments?: unknown;
   language?: unknown;
 }): { cities: CityCode[]; segments: BusinessSegment[]; language: OutreachLanguage } {
-  const rawCities = Array.isArray(input.cities)
-    ? input.cities
-    : typeof input.cities === "string" && input.cities.length > 0
-      ? [input.cities]
-      : [];
-
-  const cities: CityCode[] = [];
-  for (const value of rawCities) {
-    if (typeof value !== "string") continue;
-    const upper = value.trim().toUpperCase();
-    if (isCityCode(upper)) {
-      if (!cities.includes(upper)) cities.push(upper);
-      continue;
-    }
-    // Accept "کرج", "karaj", " مشهد " and fold Persian/Arabic variants.
-    const resolved = resolveCity(value);
-    if (resolved.city && !cities.includes(resolved.city)) cities.push(resolved.city);
-  }
+  // Registry-wide resolution ("کرج", "karaj", " مشهد ", "ISFAHAN") followed by
+  // the approval filter: unapproved or unknown entries are dropped here. The
+  // API layer reports them explicitly through `parseCampaignCities`.
+  const cities = parseCampaignCities(input.cities).cities;
 
   const rawSegments = Array.isArray(input.segments)
     ? input.segments
@@ -212,9 +205,16 @@ export async function planCampaign(
   const cities = campaign.cities.filter(isCityCode);
   const segments = campaign.segments.filter(isBusinessSegment);
 
-  if (cities.length === 0) {
+  if (campaign.cities.length === 0) {
     warnings.push(
-      "No city selected. Targeting defaults to all four approved cities."
+      "No city selected. Targeting defaults to the whole verified prospect pool; " +
+      "reports show the default approved cities. Select explicit cities to narrow both."
+    );
+  }
+  const invalidStoredCities = campaign.cities.filter((code) => !isCityCode(code));
+  if (invalidStoredCities.length > 0) {
+    warnings.push(
+      `Stored cities not present in the registry are ignored: ${invalidStoredCities.join(", ")}.`
     );
   }
   if (segments.length === 0) {
@@ -481,6 +481,14 @@ export async function dryRunCampaign(
     },
   });
 
+  await recordAuditEvent({
+    scope: "campaign",
+    entityId: campaignId,
+    action: "campaign.dry_run",
+    actorUserId,
+    detail: `eligible=${plan.eligible} manualOnly=${plan.manualOnly} blocked=${plan.blocked}`,
+  });
+
   return { ok: true, plan };
 }
 
@@ -530,6 +538,14 @@ export async function approveCampaign(
       approvedAt: new Date(),
       approvedById: actorUserId ?? null,
     },
+  });
+
+  await recordAuditEvent({
+    scope: "campaign",
+    entityId: campaignId,
+    action: "campaign.approved",
+    actorUserId,
+    detail: `eligible=${plan.eligible} manualOnly=${plan.manualOnly}`,
   });
 
   return { ok: true, plan };
@@ -582,6 +598,14 @@ export async function prepareCampaign(
     data: { lastPreparedAt: new Date() },
   });
 
+  await recordAuditEvent({
+    scope: "campaign",
+    entityId: campaignId,
+    action: "campaign.prepared",
+    actorUserId,
+    detail: `prepared=${result.prepared.length} skipped=${result.skipped.length}`,
+  });
+
   return {
     ok: true,
     prepared: result.prepared.length,
@@ -593,7 +617,7 @@ export async function prepareCampaign(
 /** Human-readable targeting summary used by the dashboard and reports. */
 export function describeTargeting(plan: CampaignPlan, lang: "en" | "fa" = "en") {
   const cities = plan.cities
-    .map((c) => CITY_LABELS[c][lang])
+    .map((c) => cityLabel(c, lang))
     .join(lang === "fa" ? "، " : ", ");
   const segments = plan.segments
     .map((s) => SEGMENT_LABELS[s][lang])
@@ -631,6 +655,14 @@ export async function approveCampaignInvitations(
     },
   });
 
+  await recordAuditEvent({
+    scope: "invitation",
+    entityId: campaignId,
+    action: "invitations.approved",
+    actorUserId,
+    detail: `approved=${result.count}`,
+  });
+
   return { ok: true, approved: result.count };
 }
 
@@ -653,6 +685,23 @@ export async function sendCampaignInvitations(options: {
   if (!campaign) return { ok: false, error: "Campaign not found." };
   if (campaign.status !== "APPROVED") {
     return { ok: false, error: "Campaign must be APPROVED before sending." };
+  }
+
+  // Global pause: the same switches the daily job honours must stop a manual
+  // send from the admin dashboard too. Outreach disabled or auto-delivery off
+  // means NOTHING goes out, from any surface.
+  const settings = await getOutreachSettings();
+  if (!settings.enabled) {
+    return {
+      ok: false,
+      error: "Outreach is globally disabled (outreach.enabled = false).",
+    };
+  }
+  if (!settings.autoSendEnabled) {
+    return {
+      ok: false,
+      error: "Automatic delivery is switched off (outreach.auto_send_enabled = false).",
+    };
   }
 
   await prisma.outreachCampaign.update({
@@ -680,15 +729,169 @@ export async function sendCampaignInvitations(options: {
       },
     });
 
+    await recordAuditEvent({
+      scope: "campaign",
+      entityId: options.campaignId,
+      action: "campaign.delivery",
+      detail: `sent=${sent} delivered=${delivered} failed=${failed} skipped=${skipped}`,
+    });
+
     return { ok: true, sent, delivered, failed, skipped };
   } catch (error) {
     await prisma.outreachCampaign.update({
       where: { id: options.campaignId },
       data: { status: "FAILED" },
     });
+    await recordAuditEvent({
+      scope: "campaign",
+      entityId: options.campaignId,
+      action: "campaign.delivery_failed",
+      detail: `error=${error instanceof Error ? error.name : "UnknownError"}`,
+    });
     return {
       ok: false,
       error: error instanceof Error ? error.name : "UnknownError",
     };
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Campaign message builder                                                    */
+/* -------------------------------------------------------------------------- */
+
+export type CampaignMessageInput = {
+  /** Editable invitation text; may use {businessName}, {link}, {category}. */
+  message: string;
+  language?: unknown;
+  cta?: string | null;
+  destinations?: Partial<DestinationSelection> | null;
+  /**
+   * Explicit primary destination (website, wa.me contact link, ...). Validated
+   * as an http(s) URL; stored on `campaign.destinationUrl`.
+   */
+  destinationUrl?: string | null;
+  /** Attach an existing template instead of the campaign-scoped one. */
+  templateId?: string | null;
+};
+
+export type CampaignMessageSaveResult =
+  | {
+      ok: true;
+      campaignId: string;
+      templateId: string;
+      /** The exact body stored for preparation. */
+      body: string;
+      /** Destinations that will appear in the final message. */
+      links: Array<{ kind: string; value: string }>;
+      /** Rendered preview with a sample business name and link. */
+      preview: string;
+    }
+  | { ok: false; errors: string[] };
+
+function campaignTemplateCode(campaignCode: string): string {
+  return `msg_${campaignCode.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase()}`;
+}
+
+/**
+ * Save a campaign's edited message as its own invitation template and point
+ * the campaign at it.
+ *
+ * Deliberately reuses the existing `invitation_templates` table — no schema
+ * change, and preparation stays idempotent because the campaign's `templateId`
+ * is what `prepareInvitations` renders. Allowed ONLY while the campaign is
+ * DRAFT or REVIEW: after approval the message is frozen, exactly like
+ * targeting, so what was approved is what gets prepared.
+ */
+export async function saveCampaignMessage(
+  campaignId: string,
+  input: CampaignMessageInput,
+  actorUserId?: string | null
+): Promise<CampaignMessageSaveResult> {
+  const campaign = await prisma.outreachCampaign.findUnique({
+    where: { id: campaignId },
+  });
+  if (!campaign) return { ok: false, errors: ["campaign.notFound"] };
+  if (campaign.status !== "DRAFT" && campaign.status !== "REVIEW") {
+    return { ok: false, errors: ["campaign.locked"] };
+  }
+
+  const settings = await getOutreachSettings();
+  const language = normalizeLanguage(input.language ?? campaign.language ?? "fa");
+
+  let destinationUrl: string | null = null;
+  if (typeof input.destinationUrl === "string" && input.destinationUrl.trim().length > 0) {
+    const valid = validateDestinationUrl(input.destinationUrl);
+    if (!valid.ok) return { ok: false, errors: [`destinationUrl.${valid.reason}`] };
+    destinationUrl = valid.url;
+  }
+
+  const composed = composeCampaignMessage({
+    message: input.message,
+    cta: input.cta ?? null,
+    destinations: input.destinations ?? null,
+    channelUrl: settings.channelUrl,
+    otherUrl: destinationUrl ?? campaign.destinationUrl ?? null,
+  });
+
+  if (composed.errors.length > 0) return { ok: false, errors: composed.errors };
+
+  const bodyError = validateTemplateBody(composed.body);
+  if (bodyError) return { ok: false, errors: [bodyError] };
+
+  const templateCode = campaignTemplateCode(campaign.code);
+  const existing = await prisma.invitationTemplate.findUnique({
+    where: { code: templateCode },
+    select: { id: true },
+  });
+
+  const template = existing
+    ? await prisma.invitationTemplate.update({
+        where: { id: existing.id },
+        data: { body: composed.body, language, active: true },
+      })
+    : await prisma.invitationTemplate.create({
+        data: {
+          code: templateCode,
+          language,
+          category: "ALL",
+          body: composed.body,
+          active: true,
+        },
+      });
+
+  await prisma.outreachCampaign.update({
+    where: { id: campaignId },
+    data: {
+      language,
+      templateId: template.id,
+      cta:
+        typeof input.cta === "string" && input.cta.trim().length > 0
+          ? input.cta.trim().slice(0, 120)
+          : null,
+      destinationUrl,
+    },
+  });
+
+  await recordAuditEvent({
+    scope: "message",
+    entityId: campaignId,
+    action: "campaign.message_saved",
+    actorUserId,
+    detail: `language=${language} destinations=${composed.links.map((l) => l.kind).join("+") || "none"} length=${composed.body.length}`,
+  });
+
+  const preview = renderTemplate(composed.body, {
+    businessName: campaign.name,
+    link: buildBotDeepLink(`preview_${campaign.code.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40)}`),
+    categoryLabel: categoryLabel("BARBER", language),
+  });
+
+  return {
+    ok: true,
+    campaignId,
+    templateId: template.id,
+    body: composed.body,
+    links: composed.links,
+    preview,
+  };
 }

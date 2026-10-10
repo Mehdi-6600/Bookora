@@ -159,3 +159,27 @@ For each prepared invitation:
 - It will not exceed 10 invitations prepared per day, and never raises that limit by itself.
 - It will not report a message as "delivered" unless the channel confirmed it.
 - It will not invent prospects. Every record keeps the source URL it came from.
+
+---
+
+## Expansion: 100-city registry, message builder, audit (new)
+
+A follow-up branch grew the outreach system without changing anything above:
+
+- **New cities are opt-in.** Up to 100 markets can be registered; only the
+  four launch cities are approved. Approve one new city at a time in
+  *Admin → Outreach → Campaigns tab → Markets*. Approving unlocks targeting
+  only — it never imports prospects and never sends anything.
+- **Per-campaign message builder.** Write the invitation, tick which links to
+  include (bot link, channel, your own URL), see the exact final preview, save
+  while the campaign is DRAFT/REVIEW. After approval it freezes like
+  targeting. To use the channel link, set `outreach.channel_url` in Outreach
+  settings first — the builder refuses to guess it.
+- **Audit trail.** Approvals, pauses, message saves, city approvals and safety
+  settings are recorded in `outreach_audit_events`. Apply it with
+  `npm run db:push` (or `prisma/sql/0003_outreach_audit.sql`). If you skip it,
+  everything keeps working — audit is fail-soft, never blocking.
+- **Honest funnel.** The Overview tab now separates *prepared* from
+  *delivered* and shows `no source` instead of fake zeros, per campaign/city.
+
+Details: [GROWTH-EXPANSION.md](./GROWTH-EXPANSION.md).
