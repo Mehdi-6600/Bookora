@@ -115,6 +115,7 @@ vi.mock("@/lib/prisma", () => {
         );
       },
     },
+    outreachAuditEvent: { create: async ({ data }: any) => data },
     adminSetting: {
       findUnique: async ({ where }: any) =>
         where.key === "outreach.manual_seed"

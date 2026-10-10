@@ -26,6 +26,7 @@ vi.mock("@/lib/prisma", () => {
     outreachSuppression: {
       findFirst: async () => null,
     },
+    telegramBotOptIn: { findFirst: async () => null },
     user: {
       findUnique: async () => null,
       findFirst: async () => null,
