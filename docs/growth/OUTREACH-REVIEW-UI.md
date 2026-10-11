@@ -90,8 +90,8 @@ validation was relaxed anywhere.**
 | --- | --- |
 | `npx vitest run` | 40 files / **447 tests passing** (was 36/369). New suites: `outreach-recipient-review-ui` (22), `outreach-operator-controls` (24), `outreach-review-ui-render` (24), `outreach-manual-send-ui-contract` (8). |
 | `npx tsc --noEmit` | **0 errors** (branch) vs **0 errors** on `main`, both measured with a real generated Prisma Client — see the note below. |
-| `npm run build` | Compile + type-check stage succeeds locally; the sandbox cannot download the native Prisma engine, so `prisma generate` (and therefore the full build) must be confirmed by CI. |
-| Prisma query correctness | Not asserted from a hand-written stub. CI runs the real `prisma generate`; locally the client was generated from `prisma/schema.prisma` by the Prisma CLI using its bundled WASM schema engine and query compiler. |
+| `npm run build` | **PASS on CI** (`Generate Prisma Client` → `Typecheck` → `Run tests` → `Build`, all steps success). Locally the full build also completes — page-data collection and prerendering included — through an uncommitted harness, because this sandbox cannot download the native engine. |
+| Prisma query correctness | Not asserted from a hand-written stub. CI runs the standard `prisma generate` with the real engine; locally the client used for the type-check and the build was generated from `prisma/schema.prisma` by the Prisma CLI (bundled WASM schema engine and query compiler), which is a real client with real model types. |
 
 ### Why the type-check numbers differ from PR #14
 
