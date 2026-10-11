@@ -46,6 +46,12 @@ export const POLICY_REASONS = {
   NOT_STARTED_BOT: "not_started_bot",
   CONSENT_REVOKED: "consent_revoked",
   CONSENT_EXPIRED: "consent_expired",
+  /**
+   * The stored consent could not be read at the moment of sending. The
+   * recipient is skipped: an unverifiable consent is never treated as a
+   * consent (same fail-closed contract as `SUPPRESSION_UNAVAILABLE`).
+   */
+  CONSENT_UNAVAILABLE: "consent_unavailable",
   OPTED_OUT: "opted_out",
   SUPPRESSED: "suppressed",
   SUPPRESSION_UNAVAILABLE: "suppression_unavailable",
@@ -54,6 +60,18 @@ export const POLICY_REASONS = {
   OUTREACH_PAUSED: "outreach_paused",
   INVALID_INVITATION_STATE: "invalid_invitation_state",
   CAMPAIGN_NOT_APPROVED: "campaign_not_approved",
+  /**
+   * The campaign row could not be read at the moment of sending. The
+   * invitation is not delivered: a campaign state we cannot verify is never
+   * treated as a sendable one — the same fail-closed contract as
+   * `CONSENT_UNAVAILABLE` and `SUPPRESSION_UNAVAILABLE`.
+   *
+   * Distinct from `CAMPAIGN_NOT_APPROVED`, which means the row *was* read and
+   * really is missing or in a state that forbids delivery. Keeping the two
+   * apart is what stops a database outage from being recorded as a decision
+   * about the campaign.
+   */
+  CAMPAIGN_UNAVAILABLE: "campaign_unavailable",
   DAILY_LIMIT: "daily_limit",
   /**
    * The prospect already has a pending invitation, so planning skips it. It is
@@ -95,6 +113,11 @@ export const POLICY_REASON_LABELS: Record<
     en: "Blocked: the recipient withdrew bot permission.",
     fa: "مسدود: گیرنده اجازه ارسال پیام را پس گرفته است.",
     ar: "محظور: سحب المستلم إذن المراسلة.",
+  },
+  [POLICY_REASONS.CONSENT_UNAVAILABLE]: {
+    en: "Blocked: the stored bot consent could not be read, so nothing is sent.",
+    fa: "مسدود: رضایت ثبت‌شده قابل خواندن نیست؛ ارسالی انجام نمی‌شود.",
+    ar: "محظور: تعذّر قراءة الموافقة المسجلة، لذلك لن يتم الإرسال.",
   },
   [POLICY_REASONS.CONSENT_EXPIRED]: {
     en: "Manual only: the stored bot consent is older than 90 days.",
@@ -140,6 +163,11 @@ export const POLICY_REASON_LABELS: Record<
     en: "Blocked: the campaign is not approved.",
     fa: "مسدود: کمپین تأیید نشده است.",
     ar: "محظور: الحملة غير معتمدة.",
+  },
+  [POLICY_REASONS.CAMPAIGN_UNAVAILABLE]: {
+    en: "Blocked: the campaign could not be read, so nothing is sent.",
+    fa: "مسدود: وضعیت کمپین قابل خواندن نیست؛ ارسالی انجام نمی‌شود.",
+    ar: "محظور: تعذّر قراءة حالة الحملة، لذلك لن يتم الإرسال.",
   },
   [POLICY_REASONS.DAILY_LIMIT]: {
     en: "Held back: the daily sending limit is already reached.",
@@ -331,11 +359,39 @@ export async function evaluateOutreachPolicy(
   }
 
   // 5. Consent: a current, unrevoked private bot /start bound to this prospect.
-  const consent = await db.telegramBotOptIn.findFirst({
-    where: { prospectId: prospect.id },
-    orderBy: { startedAt: "desc" },
-    select: { telegramId: true, startedAt: true, revokedAt: true },
-  });
+  let consent: {
+    telegramId: string;
+    startedAt: Date | null;
+    revokedAt: Date | null;
+  } | null;
+  try {
+    consent = await db.telegramBotOptIn.findFirst({
+      where: { prospectId: prospect.id },
+      orderBy: { startedAt: "desc" },
+      select: { telegramId: true, startedAt: true, revokedAt: true },
+    });
+  } catch {
+    // Fail-closed, with a reason of its own.
+    //
+    // The error must not be reported as `NOT_STARTED_BOT`: that reason means
+    // "this person never started the bot", which is a fact about the recipient
+    // and here is simply unknown. Reporting it would send an administrator
+    // looking for a consent that does exist. It must not fall through either —
+    // an unreadable consent never reaches step 6, so it can never become
+    // `ELIGIBLE` and can never arm automated delivery.
+    //
+    // The safe outcome is preserved: nothing is sent. What changes is the
+    // granularity — the recipient is skipped with a stated reason instead of
+    // the read error aborting the whole run. Every other recipient is still
+    // evaluated on its own, including its own consent read, so a consent table
+    // that is down skips everyone rather than sending to anyone.
+    return result(
+      "BLOCKED",
+      POLICY_REASONS.CONSENT_UNAVAILABLE,
+      { verificationStatus },
+      checkedAt
+    );
+  }
 
   const buildSuppressed = () =>
     result("BLOCKED", POLICY_REASONS.SUPPRESSED, { verificationStatus }, checkedAt);
@@ -413,6 +469,169 @@ export async function evaluateOutreachPolicy(
     telegramUserId: consent.telegramId,
     botConsent: true,
   }, checkedAt);
+}
+
+export type FinalDeliveryGate =
+  | { ok: true; telegramUserId: string }
+  | { ok: false; reason: PolicyReason | string };
+
+/**
+ * The last gate before the outbound Telegram call.
+ *
+ * `evaluateOutreachPolicy` runs earlier, in its own transaction. Between that
+ * check and the HTTP call a recipient can press /stop, and the delivery would
+ * then go out to someone who just withdrew permission. This function is run
+ * **inside the transaction that claims the invitation**, so the claim and the
+ * consent/suppression re-read share one database snapshot.
+ *
+ * What it deliberately does NOT claim: atomicity across the external call. A
+ * database transaction cannot cover an HTTP request to Telegram, so the
+ * guarantee is "re-read as late as a transaction allows", not "guaranteed
+ * until the message lands". The remaining window is the gap between this
+ * transaction committing and `sendMessage` returning — in
+ * `sendApprovedInvitations` that is the distance between the end of the claim
+ * transaction and the `deliverTelegramMessage` call immediately after it. No
+ * I/O happens in between, so the window is very small, but it is not zero: a
+ * /stop that commits inside it would still be followed by one outbound message.
+ * Closing it needs a conditional pre-send write or an outbox, not another
+ * transaction. No test covers this window: the test double has no real
+ * transaction boundary to commit across, so a green suite says nothing about it.
+ *
+ * Campaign state is re-read here too, from the database, when the caller passes
+ * `options.campaign`. The status the caller loaded before opening the
+ * transaction is treated as a hint only: between that read and this claim the
+ * campaign can be completed, paused or deleted, and the row on disk is the only
+ * answer that matters at this point.
+ *
+ * Fail-closed by construction: every read failure (consent, do-not-contact,
+ * campaign, settings) resolves to "do not send".
+ *
+ * The consent lookup intentionally does NOT filter `revokedAt`: it mirrors
+ * `evaluateOutreachPolicy` and picks the newest row for the prospect, so a
+ * freshly revoked row is seen and rejected instead of being skipped in favour
+ * of an older, still-valid one.
+ */
+export async function finalDeliveryGate(
+  prospect: PolicyProspect & {
+    /** The id `evaluateOutreachPolicy` resolved, when the caller has one. */
+    knownTelegramUserId?: string | null;
+  },
+  options: {
+    db?: DbClient;
+    settings?: OutreachSettings;
+    /**
+     * The invitation's campaign, when it has one. The row is re-read inside the
+     * transaction this gate runs in, so a campaign stopped after the caller's
+     * earlier eligibility check still blocks the delivery.
+     */
+    campaign?: { id: string; allowedStatuses?: string[] } | null;
+  } = {}
+): Promise<FinalDeliveryGate> {
+  const db = options.db ?? prisma;
+
+  // 1. Kill switch, re-read here rather than trusting an earlier read.
+  const settings = options.settings ?? (await getOutreachSettings());
+  if (settings.readError) {
+    return { ok: false, reason: POLICY_REASONS.SETTINGS_UNAVAILABLE };
+  }
+  const gate = outreachDeliveryGate(settings);
+  if (!gate.ok) return { ok: false, reason: POLICY_REASONS.OUTREACH_PAUSED };
+
+  // 2. A status that must never be contacted again.
+  if (isClosedStatus(prospect.status)) {
+    return { ok: false, reason: POLICY_REASONS.CLOSED_STATUS };
+  }
+  if (prospect.optedOutAt) {
+    return { ok: false, reason: POLICY_REASONS.OPTED_OUT };
+  }
+
+  const known =
+    typeof prospect.knownTelegramUserId === "string" &&
+    /^\d+$/.test(prospect.knownTelegramUserId)
+      ? prospect.knownTelegramUserId
+      : null;
+
+  // 3. Do-not-contact first, so a /stop entry always wins.
+  let suppressed: boolean;
+  try {
+    suppressed = await isSuppressed(
+      [
+        known ? `user:${known}` : null,
+        buildSuppressionIdentifier({
+          telegramUsername: prospect.telegramUsername ?? null,
+          publicUrl: prospect.publicUrl ?? null,
+          telegramId: known,
+        }),
+      ],
+      db
+    );
+  } catch {
+    return { ok: false, reason: POLICY_REASONS.SUPPRESSION_UNAVAILABLE };
+  }
+  if (suppressed) return { ok: false, reason: POLICY_REASONS.SUPPRESSED };
+
+  // 4. Current, unrevoked, unexpired consent for THIS prospect.
+  let consent: { telegramId: string; startedAt: Date | null; revokedAt: Date | null } | null;
+  try {
+    consent = await db.telegramBotOptIn.findFirst({
+      where: { prospectId: prospect.id },
+      orderBy: { startedAt: "desc" },
+      select: { telegramId: true, startedAt: true, revokedAt: true },
+    });
+  } catch {
+    return { ok: false, reason: POLICY_REASONS.CONSENT_UNAVAILABLE };
+  }
+
+  if (!consent || !consent.telegramId) {
+    return { ok: false, reason: POLICY_REASONS.NOT_STARTED_BOT };
+  }
+  if (!/^\d+$/.test(consent.telegramId)) {
+    return { ok: false, reason: POLICY_REASONS.NO_TELEGRAM_ID };
+  }
+  if (consent.revokedAt) {
+    return { ok: false, reason: POLICY_REASONS.CONSENT_REVOKED };
+  }
+  if (
+    !consent.startedAt ||
+    Date.now() - consent.startedAt.getTime() > BOT_CONSENT_MAX_AGE_MS
+  ) {
+    return { ok: false, reason: POLICY_REASONS.CONSENT_EXPIRED };
+  }
+  if (known && known !== consent.telegramId) {
+    // The consent row no longer points at the id that was cleared to send.
+    return { ok: false, reason: POLICY_REASONS.NOT_STARTED_BOT };
+  }
+
+  // 5. Campaign state, read now rather than trusted from before the
+  //    transaction. Last on purpose: the recipient-level checks above all
+  //    refuse too, and reporting the most specific reason for the recipient is
+  //    more useful to an operator than reporting the campaign first.
+  if (options.campaign?.id) {
+    let campaign: { status: string } | null;
+    try {
+      campaign = await db.outreachCampaign.findUnique({
+        where: { id: options.campaign.id },
+        select: { status: true },
+      });
+    } catch {
+      return { ok: false, reason: POLICY_REASONS.CAMPAIGN_UNAVAILABLE };
+    }
+
+    // A deleted campaign reads back as null, which is not a sendable state.
+    // Reported with the same reason as a stopped one: from the recipient's
+    // point of view both mean "this campaign may no longer be delivered", and
+    // only the read failure gets its own code.
+    if (!campaign) {
+      return { ok: false, reason: POLICY_REASONS.CAMPAIGN_NOT_APPROVED };
+    }
+
+    const allowed = options.campaign.allowedStatuses ?? ["APPROVED", "SENDING"];
+    if (!allowed.includes(campaign.status)) {
+      return { ok: false, reason: POLICY_REASONS.CAMPAIGN_NOT_APPROVED };
+    }
+  }
+
+  return { ok: true, telegramUserId: consent.telegramId };
 }
 
 /**

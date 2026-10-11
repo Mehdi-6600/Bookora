@@ -9,6 +9,21 @@ import { parseStartPayload } from "@/lib/outreach/deeplink";
  * is best-effort: attribution must never break the booking flow.
  */
 
+/**
+ * True for Prisma's unique-constraint error (P2002).
+ *
+ * Used to turn a concurrent duplicate insert into the idempotent outcome. Any
+ * other error is re-thrown so a real database failure is never swallowed.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}
+
 async function latestProspectForUser(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -137,14 +152,29 @@ export async function getConversionCounts(since: Date): Promise<{
  * The second path is what preserves attribution through the auth redirect —
  * previously the parameter was dropped as soon as the web app authenticated.
  *
- * Idempotent: at most one attributed start per (telegramId, startParam), so a
- * user who triggers both paths is counted once, not twice.
+ * Idempotent on two independent keys, so a replayed webhook delivery can never
+ * inflate the "Bot starts" figure:
+ *
+ *   - (telegramId, updateId) — one row per Telegram update. This is the only
+ *     key that also covers a /start sent *without* a deep-link parameter,
+ *     because such a start has no startParam to de-duplicate on. Two genuinely
+ *     separate /start commands carry different update ids and are both counted,
+ *     so real activity is never collapsed into one row.
+ *   - (telegramId, startParam) — one row per deep link, which is what the Mini
+ *     App authentication callback relies on: it has no update id, only the
+ *     signed `start_param`.
  *
  * Stores no message content and no personal profile data.
  */
 export async function recordAttributedStart(input: {
   telegramId: string;
   startParam: string | undefined;
+  /**
+   * Telegram `update_id` of the update being processed. Present on the
+   * webhook/`/start` path, absent on the Mini App auth callback, which has no
+   * Telegram update at all.
+   */
+  updateId?: number | null;
 }): Promise<void> {
   try {
     const raw = input.startParam?.trim() || undefined;
@@ -190,25 +220,54 @@ export async function recordAttributedStart(input: {
       campaignId = campaign?.id ?? null;
     }
 
-    // Idempotency guard: one attributed start per (telegramId, startParam).
-    if (raw) {
-      const existing = await prisma.botStart.findFirst({
-        where: { telegramId: input.telegramId, startParam: raw },
-        select: { id: true },
-      });
-      if (existing) return;
-    }
+  const updateId = typeof input.updateId === "number" ? input.updateId : null;
 
-    await prisma.botStart.create({
-      data: {
-        telegramId: input.telegramId,
-        userId: user?.id ?? null,
-        startParam: raw ?? null,
-        prospectId,
-        campaignId,
-        wasExistingUser: Boolean(user),
-      },
+  const data = {
+    telegramId: input.telegramId,
+    userId: user?.id ?? null,
+    startParam: raw ?? null,
+    updateId,
+    prospectId,
+    campaignId,
+    wasExistingUser: Boolean(user),
+  };
+
+  // Idempotency guards: one row per (telegramId, updateId), and one per
+  // (telegramId, startParam).
+  //
+  // Each read is only a fast path; the authoritative guards are the two unique
+  // indexes added in `prisma/sql/0006_bot_starts_unique.sql`. Two concurrent
+  // deliveries of the same update can both pass a read, so the insert itself
+  // has to be the arbiter: a duplicate raises P2002 and is the outcome we
+  // want, while every other error is a genuine failure and is reported as one.
+  //
+  // The update-id guard runs first because it is the only one that protects a
+  // /start without a startParam. It is skipped when the caller has no update
+  // id (the Mini App auth callback), which then falls back to the deep-link
+  // guard. A caller with neither — no update id and no startParam — records a
+  // row per call, which is unavoidable: there is nothing to de-duplicate on.
+  if (updateId !== null) {
+    const duplicate = await prisma.botStart.findFirst({
+      where: { telegramId: input.telegramId, updateId },
+      select: { id: true },
     });
+    if (duplicate) return;
+  }
+
+  if (raw) {
+    const existing = await prisma.botStart.findFirst({
+      where: { telegramId: input.telegramId, startParam: raw },
+      select: { id: true },
+    });
+    if (existing) return;
+  }
+
+  try {
+    await prisma.botStart.create({ data });
+  } catch (error) {
+    if (isUniqueViolation(error)) return;
+    throw error;
+  }
   } catch (error) {
     // Attribution must never break the /start or auth response.
     console.error(

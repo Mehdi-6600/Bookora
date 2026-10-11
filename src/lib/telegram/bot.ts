@@ -38,6 +38,10 @@ function registerOnboardingHandlers(instance: Bot) {
       });
       await recordAttributedStart({
         telegramId: String(ctx.from.id), startParam,
+        // Makes the attribution write idempotent per Telegram update. This is
+        // the only dedupe key available for a /start without a startParam,
+        // which `bot_starts_telegramId_startParam_key` cannot cover.
+        updateId: ctx.update.update_id,
       });
       // Consent is durable in `telegram_bot_opt_ins`; the audit line is the
       // operator-facing evidence and is best-effort only. A failure here is

@@ -455,6 +455,11 @@ model BotStart {
   telegramId       String
   userId           String?
   startParam       String?
+  /// Telegram `update_id` of the update that produced this row. Nullable and
+  /// never backfilled: rows written before it existed keep NULL, which leaves
+  /// them unconstrained by the unique index below. Added by
+  /// prisma/sql/0006_bot_starts_unique.sql.
+  updateId         Int?
   prospectId       String?
   campaignId       String?
   wasExistingUser  Boolean  @default(false)
@@ -463,6 +468,17 @@ model BotStart {
   prospect OutreachProspect?  @relation(fields: [prospectId], references: [id], onDelete: SetNull)
   campaign OutreachCampaign?  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
+  /// One attributed start per (telegramId, startParam). Rows with a NULL
+  /// startParam stay unconstrained, exactly like the guard in
+  /// `recordAttributedStart`. Applied by prisma/sql/0006_bot_starts_unique.sql.
+  @@unique([telegramId, startParam])
+  /// One attributed start per (telegramId, updateId), which is what makes a
+  /// replayed /start *without* a deep-link parameter idempotent too.
+  /// PostgreSQL treats NULLs as distinct, so rows with a NULL updateId — every
+  /// pre-migration row, and every start recorded without an update id — are
+  /// intentionally unconstrained and remain countable.
+  /// Applied by prisma/sql/0006_bot_starts_unique.sql.
+  @@unique([telegramId, updateId])
   @@index([telegramId])
   @@index([startParam])
   @@index([createdAt])
