@@ -17,7 +17,16 @@ export class BotUpdateRejected extends Error {
   }
 }
 
-/** Called only from the authenticated Telegram webhook's private /start handler. */
+/**
+ * Called only from the authenticated Telegram webhook's private /start handler.
+ *
+ * Ordering invariant: every write is conditional on
+ * `lastUpdateId < input.updateId`, so a duplicate delivery (equal id) and an
+ * out-of-order retry (lower id) are both no-ops. That is what stops a replayed
+ * /start from resurrecting a consent a newer /stop withdrew. The primary key on
+ * `telegramId` arbitrates two concurrent first deliveries, and the loser falls
+ * back to the same conditional update.
+ */
 export async function recordBotStartConsent(input: {
   telegramId: string;
   chatId: string;

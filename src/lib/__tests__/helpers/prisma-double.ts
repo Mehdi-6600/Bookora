@@ -47,6 +47,10 @@ const DEFAULTS: Record<string, Row> = {
 
 const UNIQUE_KEYS: Record<string, string[][]> = {
   telegramBotOptIn: [["telegramId"]],
+  // Mirrors the two `@@unique` entries on BotStart in prisma/schema.prisma,
+  // applied by prisma/sql/0006_bot_starts_unique.sql. `outreach-bot-starts-
+  // migration.test.ts` fails if this list and the schema ever diverge.
+  botStart: [["telegramId", "startParam"], ["telegramId", "updateId"]],
   outreachProspect: [["dedupeKey"]],
   discoveryCandidate: [["dedupeKey"]],
   discoveryRun: [["runDate"]],
@@ -301,8 +305,9 @@ function sortRows(rows: Row[], orderBy: unknown): Row[] {
 
 function uniqueConflict(db: DoubleState, model: string, data: Row, ignore?: Row): string[] | null {
   for (const fields of UNIQUE_KEYS[model] ?? []) {
+    // PostgreSQL treats NULLs as distinct, so a NULL field never conflicts.
     const hit = (db.tables[model] ?? []).some(
-      (row) => row !== ignore && fields.every((field) => row[field] === data[field] && data[field] !== undefined)
+      (row) => row !== ignore && fields.every((field) => data[field] != null && row[field] === data[field])
     );
     if (hit) return fields;
   }

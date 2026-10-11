@@ -49,3 +49,30 @@ is for.
 
 No. `0001–0004` are sufficient for the current code, and the UI work in this
 branch adds no schema requirement.
+
+## `0006_bot_starts_unique.sql` — separate change, same rules
+
+A second hand-written migration exists next to this one. It is independent of
+the drift above and does not depend on `0005`:
+
+`prisma/sql/0006_bot_starts_unique.sql` adds `bot_starts."updateId"` (nullable,
+never backfilled) and two unique indexes, `("telegramId", "startParam")` and
+`("telegramId", "updateId")`. Without them nothing in the database stops a
+replayed or concurrent Telegram webhook delivery from recording the same
+attributed start twice, which inflates the "Bot starts" figure and every
+conversion rate derived from it.
+
+It follows the same rules as `0005`: not applied, one transaction, no row
+inserted, updated, deleted or reclassified, and every statement guarded so a
+re-run is a no-op. If duplicate rows exist it aborts before creating anything,
+so the clean-up stays a separate, explicitly approved action. Apply it with
+`psql "$DIRECT_URL" -f ...`, not with `npm run db:push`.
+
+Both unique indexes are plain, not partial. PostgreSQL treats NULLs as distinct
+in a unique index, so rows with a NULL `startParam` or `updateId` stay
+unconstrained — the same semantics a `WHERE ... IS NOT NULL` index would give,
+with the advantage that both are expressible in `prisma/schema.prisma` and
+therefore cannot drift away from it.
+
+Numbering matters here: `0005` is taken by the drift file above, which is why
+this one is `0006`.

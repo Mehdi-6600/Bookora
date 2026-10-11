@@ -19,13 +19,22 @@ import {
   type ProspectCategory,
 } from "@/lib/outreach/types";
 import { deliverTelegramMessage } from "@/lib/telegram/notify";
-import { evaluateOutreachPolicy } from "@/lib/outreach/policy";
+import { evaluateOutreachPolicy, finalDeliveryGate } from "@/lib/outreach/policy";
 import {
   currentOutreachDeliveryGate,
   getOutreachSettings,
   outreachDeliveryGate,
 } from "@/lib/outreach/settings";
 import { recordAuditEvent } from "@/lib/outreach/audit";
+
+/**
+ * Campaign states in which an approved invitation may still be delivered.
+ *
+ * Used twice on purpose — once for the eligibility check and once for the final
+ * gate — so the two can never drift apart and disagree about what "sendable"
+ * means.
+ */
+const SENDABLE_CAMPAIGN_STATUSES = ["APPROVED", "SENDING"];
 
 /**
  * Invitation lifecycle:
@@ -259,6 +268,45 @@ export type SendOutcome = {
 };
 
 /**
+ * Record a recipient that must not receive this message.
+ *
+ * A paused or unreadable kill switch is a configuration state, not a fact
+ * about the recipient: the invitation stays APPROVED so an authorized run can
+ * still deliver it. Anything else (opt-out, suppression, revoked or expired
+ * consent, lost verification) is terminal for automated delivery and is marked
+ * SKIPPED with the reason, for a human to follow up through their own channel.
+ */
+async function recordSkippedDelivery(
+  tx: Prisma.TransactionClient,
+  invitationId: string,
+  reason: string
+): Promise<void> {
+  const paused =
+    reason === "outreach_paused" || reason === "settings_unavailable";
+
+  if (!paused) {
+    await tx.outreachInvitation.update({
+      where: { id: invitationId },
+      data: {
+        status: "SKIPPED",
+        failureReason: reason,
+        reviewedAt: new Date(),
+      },
+    });
+  }
+
+  await recordAuditEvent(
+    {
+      scope: "invitation",
+      entityId: invitationId,
+      action: paused ? "invitation.delivery_paused" : "invitation.skipped",
+      detail: `reason=${reason}`,
+    },
+    tx
+  );
+}
+
+/**
  * Deliver APPROVED invitations.
  *
  * A message is only sent to a VERIFIED prospect we can prove started the bot.
@@ -327,41 +375,13 @@ export async function sendApprovedInvitations(options: {
           allowedInvitationStatuses: ["APPROVED"],
           // A campaign invitation is only delivered while its campaign is
           // approved or actively sending.
-          requireApprovedCampaign: Boolean(invitation.campaignId),
-          allowedCampaignStatuses: ["APPROVED", "SENDING"],
+        requireApprovedCampaign: Boolean(invitation.campaignId),
+        allowedCampaignStatuses: SENDABLE_CAMPAIGN_STATUSES,
         }
       );
 
       if (!policy.canAutoSend) {
-        // A paused or unreadable kill switch is a configuration state, not a
-        // fact about the recipient: the invitation stays APPROVED so an
-        // authorized run can still deliver it. Anything else (opt-out,
-        // suppression, revoked consent, lost verification) is terminal for
-        // automated delivery and is marked SKIPPED with the reason.
-        const paused =
-          policy.reason === "outreach_paused" ||
-          policy.reason === "settings_unavailable";
-
-        if (!paused) {
-          await tx.outreachInvitation.update({
-            where: { id: invitation.id },
-            data: {
-              status: "SKIPPED",
-              failureReason: policy.reason,
-              reviewedAt: new Date(),
-            },
-          });
-        }
-
-        await recordAuditEvent(
-          {
-            scope: "invitation",
-            entityId: invitation.id,
-            action: paused ? "invitation.delivery_paused" : "invitation.skipped",
-            detail: `reason=${policy.reason}`,
-          },
-          tx
-        );
+        await recordSkippedDelivery(tx, invitation.id, policy.reason);
         return { ok: false as const, reason: policy.reason };
       }
 
@@ -381,7 +401,10 @@ export async function sendApprovedInvitations(options: {
 
     // Final server-side kill-switch read, immediately before the claim and the
     // outbound call: a settings change mid-run stops the remaining recipients.
-    const gate = await currentOutreachDeliveryGate();
+    // The same read is handed to the final gate below, so adding that gate
+    // does not add another round-trip to the settings table.
+    const settings = await getOutreachSettings();
+    const gate = outreachDeliveryGate(settings);
     if (!gate.ok) {
       outcomes.push({
         invitationId: invitation.id,
@@ -391,8 +414,22 @@ export async function sendApprovedInvitations(options: {
       continue;
     }
 
-    // Claim the invitation with a conditional update so two concurrent workers
-    // can never send the same message twice.
+// Claim the invitation with a conditional update so two concurrent workers
+// can never send the same message twice — and re-read consent, the
+// do-not-contact list and the campaign state in the SAME transaction as that
+// claim, so a /stop or a paused campaign landing after the eligibility check
+// above cannot be missed.
+    //
+    // The claim is undone explicitly when the final gate refuses, so the
+    // invitation never stays stuck in SENDING even if the surrounding code is
+    // later run outside a real transaction.
+    //
+// This narrows the race to the gap between this transaction committing and
+// the outbound HTTP call. It deliberately does not claim atomicity across
+// that boundary: no database transaction can cover a request to Telegram.
+// Concretely, the window that remains is the distance from `return { ok: true }`
+// below (which commits the claim) to `deliverTelegramMessage(...)` — there is
+// no await in between, but the gap is real and is documented, not eliminated.
     const reserved = await prisma.$transaction(async (tx) => {
       const claimed = await tx.outreachInvitation.updateMany({
         where: {
@@ -402,7 +439,41 @@ export async function sendApprovedInvitations(options: {
         },
         data: { status: "SENDING" },
       });
-      if (!claimed.count) return false;
+      if (!claimed.count) return { ok: false as const, reason: "state_changed" };
+
+      const finalGate = await finalDeliveryGate(
+        {
+          id: invitation.prospect.id,
+          status: invitation.prospect.status,
+          verificationStatus: invitation.prospect.verificationStatus,
+          telegramUsername: invitation.prospect.telegramUsername,
+          publicUrl: invitation.prospect.publicUrl,
+          optedOutAt: invitation.prospect.optedOutAt,
+          knownTelegramUserId: telegramUserId,
+        },
+        {
+          db: tx,
+          settings,
+          // Re-read inside this transaction. `invitation.campaign.status` was
+          // loaded by the query above, before the transaction opened, so a
+          // campaign completed or paused since then would still look sendable.
+          campaign: invitation.campaignId
+            ? {
+                id: invitation.campaignId,
+                allowedStatuses: SENDABLE_CAMPAIGN_STATUSES,
+              }
+            : null,
+        }
+      );
+
+      if (!finalGate.ok) {
+        await tx.outreachInvitation.updateMany({
+          where: { id: invitation.id, status: "SENDING" },
+          data: { status: "APPROVED" },
+        });
+        return { ok: false as const, reason: finalGate.reason };
+      }
+
       await recordAuditEvent(
         {
           scope: "invitation",
@@ -412,20 +483,34 @@ export async function sendApprovedInvitations(options: {
         },
         tx
       );
-      return true;
+      return { ok: true as const, telegramUserId: finalGate.telegramUserId };
     });
-    if (!reserved) {
+
+    if (!reserved.ok) {
+      if (reserved.reason !== "state_changed") {
+        // The claim was undone above, so this runs in its own transaction.
+        await prisma.$transaction((tx: Prisma.TransactionClient) =>
+          recordSkippedDelivery(tx, invitation.id, reserved.reason)
+        );
+      }
       outcomes.push({
         invitationId: invitation.id,
         status: "SKIPPED",
-        reason: "state_changed",
+        reason: reserved.reason,
       });
       continue;
     }
 
     // An audit failure before this point prevents the external send entirely.
     // SENDING is never retried automatically if the result write fails.
-    const result = await deliverTelegramMessage(telegramUserId, invitation.body);
+    //
+    // `reserved.telegramUserId` — not the id resolved by the earlier
+    // eligibility check — is the address the message goes to, because it is
+    // the one the final gate re-read inside the claim transaction.
+    const result = await deliverTelegramMessage(
+      reserved.telegramUserId,
+      invitation.body
+    );
     const now = new Date();
 
     if (!result.ok) {
