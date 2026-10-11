@@ -492,6 +492,10 @@ export async function POST(
       transactionResult.business &&
       transactionResult.service
     ) {
+      // A test booking is never presented to the owner as a new customer
+      // booking: the message says so, so a pilot conversion can never be
+      // mistaken for one. (The notification path itself is still exercised.)
+      const isTestBooking = transactionResult.booking.isTestBooking === true;
       const businessTimezone = transactionResult.business.timezone;
       const dateLabel = formatInTimeZone(
         startAt,
@@ -509,7 +513,7 @@ export async function POST(
       );
 
       const lines = [
-        "🎉 <b>رزرو جدید</b>",
+        isTestBooking ? "🧪 <b>رزرو آزمایشی (TEST)</b>" : "🎉 <b>رزرو جدید</b>",
         "",
         `🏪 <b>${escapeHtml(transactionResult.business.name)}</b>`,
         "",

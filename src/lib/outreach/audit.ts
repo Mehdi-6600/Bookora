@@ -20,7 +20,13 @@ export type AuditScope = (typeof AUDIT_SCOPES)[number];
 
 const DETAIL_MAX_LENGTH = 300;
 
-/** Collapse control characters, truncate, and redact credentials in URLs. */
+/** `key=value` pairs whose key names a credential of some kind. */
+const SECRET_KEY_VALUE =
+  /\b([a-z0-9_.-]*(?:token|secret|password|passwd|passphrase|api[-_]?key|credential|authorization|cookie)[a-z0-9_.-]*)\s*=\s*("[^"]*"|'[^']*'|[^\s,;]+)/gi;
+/** International-format phone numbers, which are personal data with no audit value. */
+const PHONE_NUMBER = /\+\d{7,}\b/g;
+
+/** Collapse control characters, truncate, and redact credentials and phone numbers. */
 export function sanitizeAuditDetail(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const flat = value
@@ -28,10 +34,13 @@ export function sanitizeAuditDetail(value: unknown): string | null {
     .trim()
     .slice(0, DETAIL_MAX_LENGTH);
   if (flat.length === 0) return null;
-  return flat.replace(
-    /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+:[^\s/@]*@/gi,
-    "$1[redacted]@"
-  );
+  return flat
+    .replace(
+      /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+:[^\s/@]*@/gi,
+      "$1[redacted]@"
+    )
+    .replace(SECRET_KEY_VALUE, "$1=[REDACTED]")
+    .replace(PHONE_NUMBER, "[REDACTED]");
 }
 
 export async function recordAuditEvent(event: {

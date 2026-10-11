@@ -115,11 +115,20 @@ vi.mock("@/lib/prisma", () => {
         return row;
       },
     },
-    adminSetting: { findMany: async () => [] },
+    adminSetting: { findMany: async () => outreachSettingsRows() },
     outreachAuditEvent: { create: async ({ data }: any) => data },
     telegramBotOptIn: {
-      findFirst: async ({ where }: any) => db.consents.find((row: Row) => row.prospectId === where.prospectId &&
-        row.revokedAt === null && row.startedAt >= where.startedAt.gte) ?? null,
+      // Supports both the "current consent" query (with a freshness bound) and
+      // the policy's "latest row for this prospect" query.
+      findFirst: async ({ where }: any) => {
+        const rows = db.consents.filter((row: Row) => {
+          if (where?.prospectId !== undefined && row.prospectId !== where.prospectId) return false;
+          if (where?.revokedAt === null && row.revokedAt !== null && row.revokedAt !== undefined) return false;
+          if (where?.startedAt?.gte && !(row.startedAt && row.startedAt >= where.startedAt.gte)) return false;
+          return true;
+        });
+        return rows[0] ?? null;
+      },
       updateMany: async ({ where, data }: any) => {
         const rows = db.consents.filter((row: Row) => row.telegramId === where.telegramId);
         rows.forEach((row: Row) => Object.assign(row, data));
@@ -161,6 +170,7 @@ const { prepareInvitations, sendApprovedInvitations, recordOptOut } = await impo
 const { checkEligibility, ELIGIBILITY_REASONS } = await import(
   "@/lib/outreach/eligibility"
 );
+const { outreachSettingsRows } = await import("./helpers/outreach-settings");
 
 const TEMPLATE = {
   id: "tpl-en",
@@ -324,6 +334,7 @@ describe("delivery eligibility", () => {
     const result = await checkEligibility({
       id: "p1",
       status: "NEW",
+      verificationStatus: "VERIFIED",
       telegramUsername: "mehdi_barber",
       publicUrl: null,
       telegramUserId: null,
@@ -331,13 +342,16 @@ describe("delivery eligibility", () => {
     });
 
     expect(result.canAutoSend).toBe(false);
-    expect(result.reason).toBe(ELIGIBILITY_REASONS.NO_TELEGRAM_ID);
+    // No opt-in row means no proven messaging relationship: manual outreach
+    // only, never an automatic bot message.
+    expect(result.reason).toBe(ELIGIBILITY_REASONS.NOT_STARTED_BOT);
   });
 
   it("refuses to message a numeric ID with no Bot API consent", async () => {
     const result = await checkEligibility({
       id: "p1",
       status: "NEW",
+      verificationStatus: "VERIFIED",
       telegramUsername: "mehdi_barber",
       publicUrl: null,
       telegramUserId: "555001",
@@ -354,6 +368,7 @@ describe("delivery eligibility", () => {
     const result = await checkEligibility({
       id: "p1",
       status: "NEW",
+      verificationStatus: "VERIFIED",
       telegramUsername: "mehdi_barber",
       publicUrl: null,
       telegramUserId: "555001",
@@ -370,6 +385,7 @@ describe("delivery eligibility", () => {
     const optedOut = await checkEligibility({
       id: "p1",
       status: "NEW",
+      verificationStatus: "VERIFIED",
       telegramUsername: "mehdi_barber",
       publicUrl: null,
       telegramUserId: "555001",
@@ -380,6 +396,7 @@ describe("delivery eligibility", () => {
     const closed = await checkEligibility({
       id: "p1",
       status: "DO_NOT_CONTACT",
+      verificationStatus: "VERIFIED",
       telegramUsername: "mehdi_barber",
       publicUrl: null,
       telegramUserId: "555001",
@@ -395,6 +412,7 @@ describe("delivery eligibility", () => {
     const result = await checkEligibility({
       id: "p1",
       status: "NEW",
+      verificationStatus: "VERIFIED",
       telegramUsername: "mehdi_barber",
       publicUrl: null,
       telegramUserId: "555001",

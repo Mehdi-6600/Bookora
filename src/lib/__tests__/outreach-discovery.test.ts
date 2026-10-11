@@ -129,12 +129,14 @@ vi.mock("@/lib/prisma", () => {
 
 const { runDailyDiscovery, promoteCandidates } = await import("@/lib/outreach/discovery");
 const { DEFAULT_OUTREACH_SETTINGS } = await import("@/lib/outreach/settings");
+const { ENABLED_OUTREACH_SETTINGS } = await import("./helpers/outreach-settings");
 type OutreachSettings = import("@/lib/outreach/settings").OutreachSettings;
 
 const NOW = new Date("2026-10-10T06:00:00.000Z");
 
 function settings(overrides: Partial<OutreachSettings> = {}): OutreachSettings {
-  return { ...DEFAULT_OUTREACH_SETTINGS, timezone: "UTC", ...overrides };
+  // Outreach is explicitly enabled: production defaults are fail-closed.
+  return { ...ENABLED_OUTREACH_SETTINGS, timezone: "UTC", ...overrides };
 }
 
 function seedKeywords() {

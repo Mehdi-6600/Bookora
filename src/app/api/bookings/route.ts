@@ -68,6 +68,8 @@ export async function GET(req: NextRequest) {
           customerPhone: b.customerPhone,
           startAt: b.startAt,
           status: b.status,
+          /** Test bookings are labelled so they are never read as real demand. */
+          isTestBooking: b.isTestBooking,
           paymentStatus: b.paymentStatus,
           depositDue: b.depositDue.toString(),
           currency: b.currency,

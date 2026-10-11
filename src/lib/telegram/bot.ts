@@ -15,6 +15,7 @@ import {
 } from "@/lib/telegram/onboarding";
 import { recordOptOut } from "@/lib/outreach/invitations";
 import { recordBotStartConsent, revokeBotConsent } from "@/lib/outreach/bot-consent";
+import { recordAuditEvent } from "@/lib/outreach/audit";
 
 let bot: Bot | null = null;
 
@@ -28,14 +29,32 @@ function registerOnboardingHandlers(instance: Bot) {
     if (ctx.from) {
       // Awaited: on serverless the invocation can end as soon as the response
       // is returned, which would drop the attribution write.
+      // Only a private 1:1 chat proves a messaging relationship: a group
+      // /start or a mismatched chat id never records outreach consent.
       if (String(ctx.chat.id) !== String(ctx.from.id)) return;
-      await recordBotStartConsent({
+      const consent = await recordBotStartConsent({
         telegramId: String(ctx.from.id), chatId: String(ctx.chat.id),
         updateId: ctx.update.update_id, startParam,
       });
       await recordAttributedStart({
         telegramId: String(ctx.from.id), startParam,
       });
+      // Consent is durable in `telegram_bot_opt_ins`; the audit line is the
+      // operator-facing evidence and is best-effort only. A failure here is
+      // logged, never silently dropped.
+      try {
+        await recordAuditEvent({
+          scope: "prospect",
+          entityId: consent.prospectId,
+          action: "prospect.bot_consent_recorded",
+          detail: `source=telegram_webhook update=${ctx.update.update_id}`,
+        });
+      } catch (error) {
+        console.error(
+          "bot consent audit failed:",
+          error instanceof Error ? error.name : "UnknownError"
+        );
+      }
     }
 
     await ctx.reply(WELCOME[language], {
@@ -66,11 +85,22 @@ function registerOnboardingHandlers(instance: Bot) {
 
     if (ctx.from) {
       await revokeBotConsent(String(ctx.from.id), ctx.update.update_id);
-      await recordOptOut({
-        telegramId: String(ctx.from.id),
-        telegramUsername: ctx.from.username ?? null,
-        note: "Opted out via /stop",
-      });
+      try {
+        await recordOptOut({
+          telegramId: String(ctx.from.id),
+          telegramUsername: ctx.from.username ?? null,
+          note: "Opted out via /stop",
+          source: "telegram_stop",
+        });
+      } catch (error) {
+        // The withdrawal itself is already persisted by `recordOptOut`; only a
+        // failure to *audit* it lands here. Never swallow it silently — the
+        // operator must know the audit trail is incomplete.
+        console.error(
+          "recordOptOut audit failed:",
+          error instanceof Error ? error.name : "UnknownError"
+        );
+      }
     }
 
     await ctx.reply(STOPPED[language]);

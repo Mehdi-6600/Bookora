@@ -5,16 +5,28 @@ import { parseStartPayload } from "@/lib/outreach/deeplink";
 // Consent expires unless a genuine private Bot API /start is seen again.
 export const BOT_CONSENT_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
+/**
+ * Thrown for an update that will never become valid (wrong chat type, missing
+ * or malformed ids). The webhook answers 200 for these so Telegram stops
+ * retrying, while genuine transient failures still return 5xx and are retried.
+ */
+export class BotUpdateRejected extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BotUpdateRejected";
+  }
+}
+
 /** Called only from the authenticated Telegram webhook's private /start handler. */
 export async function recordBotStartConsent(input: {
   telegramId: string;
   chatId: string;
   updateId: number;
   startParam?: string;
-}): Promise<void> {
+}): Promise<{ telegramId: string; prospectId: string | null }> {
   if (!/^\d+$/.test(input.telegramId) || input.chatId !== input.telegramId ||
       !Number.isSafeInteger(input.updateId) || input.updateId < 0) {
-    throw new Error("Invalid private Bot API start update");
+    throw new BotUpdateRejected("Invalid private Bot API start update");
   }
   const payload = parseStartPayload(input.startParam);
   const invitation = payload.kind === "prospect" && input.startParam
@@ -29,7 +41,7 @@ export async function recordBotStartConsent(input: {
     where: { telegramId: input.telegramId, lastUpdateId: { lt: input.updateId } },
     data,
   });
-  if (updated.count) return;
+  if (updated.count) return { telegramId: input.telegramId, prospectId };
   try {
     await prisma.telegramBotOptIn.create({ data: { telegramId: input.telegramId, ...data } });
   } catch (error) {
@@ -39,12 +51,13 @@ export async function recordBotStartConsent(input: {
       where: { telegramId: input.telegramId, lastUpdateId: { lt: input.updateId } }, data,
     });
   }
+  return { telegramId: input.telegramId, prospectId };
 }
 
 /** A stop update wins over duplicate/older starts, including out-of-order retries. */
 export async function revokeBotConsent(telegramId: string, updateId: number): Promise<void> {
   if (!/^\d+$/.test(telegramId) || !Number.isSafeInteger(updateId) || updateId < 0) {
-    throw new Error("Invalid Bot API stop update");
+    throw new BotUpdateRejected("Invalid Bot API stop update");
   }
   const data = { revokedAt: new Date(), lastUpdateId: updateId };
   const updated = await prisma.telegramBotOptIn.updateMany({

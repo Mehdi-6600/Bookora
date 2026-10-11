@@ -11,7 +11,6 @@ import {
   checkEligibility,
   isClosedStatus,
   isSuppressed,
-  resolveTelegramUserId,
 } from "@/lib/outreach/eligibility";
 import {
   isProspectCategory,
@@ -28,14 +27,19 @@ import {
   type CityCode,
   type BusinessSegment,
 } from "@/lib/outreach/cities";
-import { getOutreachSettings } from "@/lib/outreach/settings";
+import {
+  currentOutreachDeliveryGate,
+  getOutreachSettings,
+  outreachDeliveryGate,
+} from "@/lib/outreach/settings";
+import { policyReasonLabel } from "@/lib/outreach/policy";
 import {
   composeCampaignMessage,
   validateDestinationUrl,
   type DestinationSelection,
 } from "@/lib/outreach/message";
 import { recordAuditEvent } from "@/lib/outreach/audit";
-import { approvalBlocker } from "@/lib/outreach/approval-eligibility";
+import { approvalPolicy } from "@/lib/outreach/approval-eligibility";
 import {
   prepareInvitations,
   sendApprovedInvitations,
@@ -119,9 +123,20 @@ export type CampaignRecipient = {
   botConsent: boolean;
   suppressed: boolean;
   reason: string;
+  /** Plain-language explanation of `reason`, for the reviewer. */
+  reasonLabel: string | null;
+  /** When this recipient's eligibility was evaluated by the server. */
+  checkedAt: Date;
   channel: "TELEGRAM_BOT" | "MANUAL";
   destination: string;
+  /** The exact body that would be prepared for this recipient. */
   previewBody: string | null;
+  /** Call-to-action shown with the message, when the campaign defines one. */
+  cta: string | null;
+  /** True when this recipient is inside the remaining send quota. */
+  withinQuota: boolean;
+  /** True when the recipient is sendable but held back by the quota. */
+  heldOver: boolean;
 };
 
 export type CampaignPlan = {
@@ -139,7 +154,16 @@ export type CampaignPlan = {
   eligible: number;
   manualOnly: number;
   blocked: number;
+  /** Recipients that could be approved right now: eligible and inside the quota. */
+  approvable: number;
+  /** Recipients held back only because the send quota is full. */
+  heldOver: number;
   blockedBreakdown: Record<string, number>;
+  /**
+   * Every matched recipient, blocked ones included, so the reviewer can see
+   * and judge each one instead of only the first few. Kept for compatibility
+   * with earlier responses: `excluded` is the blocked subset of `recipients`.
+   */
   excluded: Array<{
     prospectId: string;
     publicName: string;
@@ -156,6 +180,18 @@ export type CampaignPlan = {
   }>;
   recipients: CampaignRecipient[];
   warnings: string[];
+  /** Server time of this evaluation. Approval must not use an older plan. */
+  generatedAt: Date;
+  /** True when the outreach kill switch currently blocks sending. */
+  settingsPaused: boolean;
+  /** Kill-switch provenance, so the UI can show "not configured" vs "off". */
+  settings: {
+    enabled: boolean;
+    autoSendEnabled: boolean;
+    enabledSource: string;
+    autoSendEnabledSource: string;
+    warnings: string[];
+  };
 };
 
 function uniqueStartParam(): string {
@@ -270,11 +306,13 @@ export async function planCampaign(
 
   // Follow-up policy: only re-approach a contacted prospect once its follow-up
   // date has actually arrived.
-  const inWindow = prospects.filter((prospect) => {
+  const inWindow = prospects.filter(
+    (prospect: { status: string; nextFollowUpAt: Date | null }) => {
     if (CONTACTABLE_STATUSES.includes(prospect.status)) return true;
-    if (!prospect.nextFollowUpAt) return false;
-    return prospect.nextFollowUpAt.getTime() <= now.getTime();
-  });
+      if (!prospect.nextFollowUpAt) return false;
+      return prospect.nextFollowUpAt.getTime() <= now.getTime();
+    }
+  );
 
   const template = campaign.templateId
     ? await prisma.invitationTemplate.findUnique({
@@ -300,7 +338,7 @@ export async function planCampaign(
         where: { status: { in: ["DRAFT", "APPROVED"] } },
         select: { prospectId: true },
       })
-    ).map((row) => row.prospectId)
+    ).map((row: { prospectId: string }) => row.prospectId)
   );
 
   const limit =
@@ -339,6 +377,7 @@ export async function planCampaign(
 
     let disposition: RecipientDisposition = "BLOCKED";
     let reason = "unknown";
+    let eligibilityReasonLabel: string | null = null;
 
     if (isClosedStatus(prospect.status)) {
       reason = "closed_status";
@@ -356,41 +395,32 @@ export async function planCampaign(
     } else if (pendingProspectIds.has(prospect.id)) {
       reason = "already_pending";
     } else {
-      const telegramUserId = await resolveTelegramUserId(prospect);
+      // The one policy, evaluated per recipient with the live settings. The
+      // kill switch is reported (not enforced) here so a dry run can still show
+      // the plan; approval and delivery enforce it.
       const eligibility = await checkEligibility({
         id: prospect.id,
         status: prospect.status,
+        verificationStatus: prospect.verificationStatus,
         telegramUsername: prospect.telegramUsername,
         publicUrl: prospect.publicUrl,
-        telegramUserId,
         optedOutAt: prospect.optedOutAt,
-      });
+      }, { settings, enforceSettings: false });
 
-      if (eligibility.canAutoSend) {
-        disposition = "ELIGIBLE";
-        reason = eligibility.reason;
-      } else if (
-        ["no_telegram_id", "not_started_bot"].includes(eligibility.reason)
-      ) {
-        // Not blocked — just not reachable by the bot. Prepare it for a human.
-        disposition = "MANUAL_ONLY";
-        reason = eligibility.reason;
-      } else {
-        disposition = "BLOCKED";
-        reason = eligibility.reason;
-      }
+      disposition =
+        eligibility.decision === "ELIGIBLE"
+          ? "ELIGIBLE"
+          : eligibility.decision === "MANUAL_ONLY"
+            ? "MANUAL_ONLY"
+            : "BLOCKED";
+      reason = eligibility.reason;
+      eligibilityReasonLabel = eligibility.policy?.message ?? null;
     }
 
     if (disposition === "BLOCKED") {
       blockedBreakdown[reason] = (blockedBreakdown[reason] ?? 0) + 1;
       cell.blocked += 1;
-      excluded.push({
-        prospectId: prospect.id,
-        publicName: prospect.publicName,
-        city,
-        segment,
-        reason,
-      });
+      // Recorded in `excluded` by the quota pass below, once, in a stable order.
     } else if (disposition === "MANUAL_ONLY") {
       cell.manualOnly += 1;
     } else {
@@ -411,6 +441,8 @@ export async function planCampaign(
     }
 
     recipients.push({
+      withinQuota: false,
+      heldOver: false,
       prospectId: prospect.id,
       publicName: prospect.publicName,
       city,
@@ -422,36 +454,61 @@ export async function planCampaign(
       botConsent: disposition === "ELIGIBLE",
       suppressed: reason === "suppressed",
       reason,
+      reasonLabel: eligibilityReasonLabel ?? policyReasonLabel(reason).en,
+      checkedAt: now,
       channel: disposition === "ELIGIBLE" ? "TELEGRAM_BOT" : "MANUAL",
       destination:
         disposition === "ELIGIBLE"
           ? "Telegram (bot, recipient already started it)"
           : (prospect.publicUrl ?? "No public channel recorded"),
       previewBody,
+      cta: campaign.cta ?? null,
     });
   }
 
-  // Quota: the plan reports what would actually be prepared under the limit.
-  const actionable = recipients.filter((r) => r.disposition !== "BLOCKED");
-  const withinLimit = actionable.slice(0, limit);
-  const heldBack = actionable.slice(limit);
-  if (heldBack.length > 0) {
-    warnings.push(
-      `${heldBack.length} recipient(s) exceed the send limit (${limit}) and will be held for a later run.`
-    );
-    for (const held of heldBack) {
+  // Quota: every matched recipient stays visible to the reviewer; the quota
+  // only decides which ones this run would actually prepare. Sorting puts the
+  // actionable ones first so a long list stays reviewable.
+  const DISPOSITION_RANK: Record<RecipientDisposition, number> = {
+    ELIGIBLE: 0,
+    MANUAL_ONLY: 1,
+    BLOCKED: 2,
+  };
+  const ordered = [...recipients].sort(
+    (a, b) =>
+      DISPOSITION_RANK[a.disposition] - DISPOSITION_RANK[b.disposition] ||
+      String(a.city ?? "").localeCompare(String(b.city ?? "")) ||
+      String(a.segment ?? "").localeCompare(String(b.segment ?? "")) ||
+      a.publicName.localeCompare(b.publicName)
+  );
+
+  let quotaUsed = 0;
+  for (const recipient of ordered) {
+    if (recipient.disposition !== "BLOCKED" && quotaUsed < limit) {
+      recipient.withinQuota = true;
+      quotaUsed += 1;
+    } else if (recipient.disposition !== "BLOCKED") {
+      recipient.heldOver = true;
+    } else {
       excluded.push({
-        prospectId: held.prospectId,
-        publicName: held.publicName,
-        city: held.city,
-        segment: held.segment,
-        reason: "over_send_limit",
+        prospectId: recipient.prospectId,
+        publicName: recipient.publicName,
+        city: recipient.city,
+        segment: recipient.segment,
+        reason: recipient.reason,
       });
     }
   }
 
+  const heldCount = ordered.filter((r) => r.heldOver).length;
+  if (heldCount > 0) {
+    warnings.push(
+      `${heldCount} recipient(s) exceed the send limit (${limit}) and will be held for a later run.`
+    );
+  }
+
   const countBy = (d: RecipientDisposition) =>
-    withinLimit.filter((r) => r.disposition === d).length;
+    ordered.filter((r) => r.disposition === d).length;
 
   return {
     code: campaign.code,
@@ -468,7 +525,9 @@ export async function planCampaign(
     matched: inWindow.length,
     eligible: countBy("ELIGIBLE"),
     manualOnly: countBy("MANUAL_ONLY"),
-    blocked: recipients.filter((r) => r.disposition === "BLOCKED").length,
+    blocked: countBy("BLOCKED"),
+    approvable: ordered.filter((r) => r.disposition === "ELIGIBLE" && r.withinQuota).length,
+    heldOver: heldCount,
     blockedBreakdown,
     excluded,
     byCitySegment: [...matrix.values()].sort(
@@ -476,8 +535,17 @@ export async function planCampaign(
         String(a.city).localeCompare(String(b.city)) ||
         String(a.segment).localeCompare(String(b.segment))
     ),
-    recipients: withinLimit,
+    recipients: ordered,
     warnings,
+    generatedAt: now,
+    settingsPaused: !outreachDeliveryGate(settings).ok,
+    settings: {
+      enabled: settings.enabled,
+      autoSendEnabled: settings.autoSendEnabled,
+      enabledSource: settings.sources.enabled,
+      autoSendEnabledSource: settings.sources.autoSendEnabled,
+      warnings: settings.warnings,
+    },
   };
 }
 
@@ -538,20 +606,50 @@ export async function approveCampaign(
   if (campaign.status === "APPROVED") {
     return { ok: false, error: "Campaign is already approved." };
   }
-  const settings = await getOutreachSettings();
-  if (settings.readError || !settings.enabled || !settings.autoSendEnabled) {
-    return { ok: false, error: settings.readError ?? "Outreach approval is paused in settings." };
+  if (!["DRAFT", "REVIEW"].includes(campaign.status)) {
+    return {
+      ok: false,
+      error: `A campaign in status ${campaign.status} cannot be approved again.`,
+    };
   }
+  const settings = await getOutreachSettings();
+  const gate = outreachDeliveryGate(settings);
+  if (!gate.ok) return { ok: false, error: gate.reason };
   if (!campaign.lastDryRunAt) {
     return { ok: false, error: "Run a dry run before approving." };
   }
 
+  // The plan is recomputed here, so approval can never act on a stale or
+  // client-supplied eligibility result.
   const plan = await planCampaign(campaign);
-  if (plan.manualOnly > 0 || plan.recipients.some((r) => r.disposition !== "ELIGIBLE")) {
-    return { ok: false, error: "Every planned recipient must have current bot consent and eligibility before campaign approval." };
+  if (!plan.generatedAt || plan.recipients.some((r) => !r.checkedAt)) {
+    return {
+      ok: false,
+      error:
+        "Eligibility could not be computed for every recipient. Refresh the plan and retry.",
+    };
+  }
+  if (plan.settingsPaused) {
+    return { ok: false, error: "Outreach is paused in settings; approval is blocked." };
+  }
+  // Every recipient this run would actually prepare has to be ELIGIBLE.
+  // Blocked and quota-held-over recipients stay visible for review but do not
+  // have to be fixed before the campaign can go ahead.
+  const actionable = plan.recipients.filter(
+    (r) => r.disposition !== "BLOCKED" && r.withinQuota
+  );
+  const ineligible = actionable.filter((r) => r.disposition !== "ELIGIBLE");
+  if (ineligible.length > 0) {
+    const first = ineligible[0];
+    return {
+      ok: false,
+      error:
+        `Every recipient inside the send quota must have current bot consent and eligibility before campaign approval. ` +
+        `Blocked: ${first.publicName} — ${first.reasonLabel ?? first.reason}.`,
+    };
   }
 
-  if (plan.eligible === 0) {
+  if (actionable.length === 0) {
     return {
       ok: false,
       error:
@@ -610,7 +708,14 @@ export async function prepareCampaign(
   }
 
   const plan = await planCampaign(campaign);
-  const prospectIds = plan.recipients.map((r) => r.prospectId);
+  // Only recipients that are not blocked AND inside the send quota are drafted.
+  // The plan lists every matched recipient for review, blocked ones included,
+  // so preparation has to filter rather than trust the list as-is. Recipients
+  // without bot consent stay MANUAL_ONLY and are still drafted for a human to
+  // review; `prepareInvitations` re-checks the policy per recipient anyway.
+  const prospectIds = plan.recipients
+    .filter((r) => r.disposition !== "BLOCKED" && r.withinQuota)
+    .map((r) => r.prospectId);
 
   if (prospectIds.length === 0) {
     return { ok: false, error: "No recipients to prepare." };
@@ -674,34 +779,105 @@ export async function approveCampaignInvitations(
   }
 
   const settings = await getOutreachSettings();
-  if (settings.readError || !settings.enabled || !settings.autoSendEnabled) {
-    return { ok: false, error: settings.readError ?? "Outreach approval is paused in settings." };
-  }
-  // Reject the entire batch if even one draft cannot pass the exact delivery
-  // gates. Never silently approve a subset or rely on a stale campaign preview.
-  const drafts = await prisma.outreachInvitation.findMany({
-    where: { campaignId, status: "DRAFT" }, include: { prospect: true },
-  });
-  for (const draft of drafts) {
-    const reason = await approvalBlocker(draft.prospect);
-    if (reason) return { ok: false, error: `Invitation ${draft.id}: ${reason}` };
-  }
-  if (drafts.length === 0) return { ok: true, approved: 0 };
-  const result = await prisma.$transaction(async (tx) => {
-    const updated = await tx.outreachInvitation.updateMany({
-      where: { campaignId, status: "DRAFT", id: { in: drafts.map((d) => d.id) } },
-      data: { status: "APPROVED", approvedAt: new Date(),
-        approvedByUserId: actorUserId ?? null, reviewedAt: new Date() },
-    });
-    if (updated.count !== drafts.length) throw new Error("Invitation list changed; refresh and retry approval.");
-    await recordAuditEvent({ scope: "invitation", entityId: campaignId,
-      action: "invitations.approved", actorUserId,
-      detail: `approved=${updated.count}` }, tx);
-    return updated;
-  });
+  const gate = outreachDeliveryGate(settings);
+  if (!gate.ok) return { ok: false, error: gate.reason };
 
-  return { ok: true, approved: result.count };
+  // Bulk approval is all-or-nothing inside ONE transaction:
+  //   1. every DRAFT is re-validated against the live policy (verification,
+  //      suppression, opt-out, bot consent, kill switch, invitation state),
+  //   2. any ineligible recipient aborts the whole batch by throwing, which
+  //      rolls back every approval already applied in this transaction,
+  //   3. the guarded conditional update makes the approval concurrency-safe:
+  //      a concurrent status change makes the count mismatch and rolls back.
+  // No partial, "approved what happened to be eligible" batch is ever left
+  // behind — the administrator reviews and fixes the blocked recipients.
+  try {
+    const approved = await prisma.$transaction(async (tx) => {
+      const drafts = await tx.outreachInvitation.findMany({
+        where: { campaignId, status: "DRAFT" },
+        include: { prospect: true },
+      });
+
+      if (drafts.length === 0) return 0;
+
+      for (const draft of drafts) {
+        const policy = await approvalPolicy(draft.prospect, {
+          db: tx,
+          settings,
+          invitation: {
+            id: draft.id,
+            status: draft.status,
+            campaignId: draft.campaignId,
+          },
+          campaignStatus: campaign.status,
+          allowedInvitationStatuses: ["DRAFT"],
+          requireApprovedCampaign: true,
+        });
+        if (!policy.canApprove) {
+          throw new BulkApprovalBlocked(
+            `${draft.prospect.publicName}: ${policy.message}`
+          );
+        }
+      }
+
+      const now = new Date();
+      let count = 0;
+      for (const draft of drafts) {
+        // Conditional on the state we just validated: a concurrent change
+        // (un-verified, opted out, deleted, already approved elsewhere) makes
+        // this update a no-op and the batch is rolled back.
+        const updated = await tx.outreachInvitation.updateMany({
+          where: {
+            id: draft.id,
+            status: "DRAFT",
+            prospect: { verificationStatus: "VERIFIED", optedOutAt: null },
+          },
+          data: {
+            status: "APPROVED",
+            approvedAt: now,
+            approvedByUserId: actorUserId ?? null,
+            reviewedAt: now,
+          },
+        });
+        if (updated.count !== 1) {
+          throw new BulkApprovalBlocked(
+            `${draft.prospect.publicName}: state changed during approval; nothing was approved. Refresh and retry.`
+          );
+        }
+        count += 1;
+      }
+
+      if (count !== drafts.length) {
+        throw new BulkApprovalBlocked(
+          "Invitation list changed; refresh and retry approval."
+        );
+      }
+
+      await recordAuditEvent(
+        {
+          scope: "invitation",
+          entityId: campaignId,
+          action: "invitations.approved",
+          actorUserId,
+          detail: `approved=${count}`,
+        },
+        tx
+      );
+
+      return count;
+    });
+
+    return { ok: true, approved };
+  } catch (error) {
+    if (error instanceof BulkApprovalBlocked) {
+      return { ok: false, error: error.message };
+    }
+    throw error;
+  }
 }
+
+/** Aborts (and rolls back) a bulk approval without approving the eligible subset. */
+class BulkApprovalBlocked extends Error {}
 
 /**
  * Deliver an approved campaign's invitations.
@@ -727,19 +903,8 @@ export async function sendCampaignInvitations(options: {
   // Global pause: the same switches the daily job honours must stop a manual
   // send from the admin dashboard too. Outreach disabled or auto-delivery off
   // means NOTHING goes out, from any surface.
-  const settings = await getOutreachSettings();
-  if (!settings.enabled) {
-    return {
-      ok: false,
-      error: "Outreach is globally disabled (outreach.enabled = false).",
-    };
-  }
-  if (!settings.autoSendEnabled) {
-    return {
-      ok: false,
-      error: "Automatic delivery is switched off (outreach.auto_send_enabled = false).",
-    };
-  }
+  const gate = await currentOutreachDeliveryGate();
+  if (!gate.ok) return { ok: false, error: gate.reason };
 
   await prisma.$transaction(async (tx) => {
     await tx.outreachCampaign.update({ where: { id: options.campaignId }, data: { status: "SENDING" } });

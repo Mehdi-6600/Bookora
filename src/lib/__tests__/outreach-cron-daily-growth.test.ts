@@ -35,6 +35,7 @@ vi.mock("@/lib/outreach/report", () => ({
 }));
 
 import { GET as dailyGrowth } from "@/app/api/cron/daily-growth/route";
+const { outreachSettingsRows } = await import("./helpers/outreach-settings");
 
 const SECRET = "s".repeat(40);
 
@@ -46,6 +47,9 @@ function cronRequest(authorization?: string): NextRequest {
 
 beforeEach(() => {
   for (const key of Object.keys(state.tables)) delete state.tables[key];
+  // The kill switch is fail-closed, so the run only happens when an
+  // administrator explicitly switched outreach on.
+  state.tables.adminSetting = outreachSettingsRows();
   state.reports.length = 0;
   vi.stubEnv("CRON_SECRET", SECRET);
 });

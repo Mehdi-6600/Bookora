@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { buildSuppressionIdentifier, normalizeTelegramUsername } from "@/lib/outreach/normalize";
+import { recordAuditEvent } from "@/lib/outreach/audit";
 
 export async function GET() {
   const guard = await requireAdmin();
@@ -65,10 +66,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const row = await prisma.outreachSuppression.upsert({
-    where: { identifier },
-    update: { note: parsed.data.note ?? null, reason: "MANUAL" },
-    create: { identifier, reason: "MANUAL", note: parsed.data.note ?? null },
+  const row = await prisma.$transaction(async (tx) => {
+    const suppression = await tx.outreachSuppression.upsert({
+      where: { identifier },
+      update: { note: parsed.data.note ?? null, reason: "MANUAL" },
+      create: { identifier, reason: "MANUAL", note: parsed.data.note ?? null },
+    });
+    await recordAuditEvent(
+      {
+        scope: "prospect",
+        action: "suppression.added",
+        actorUserId: guard.user.id,
+        detail: `reason=MANUAL`,
+      },
+      tx
+    );
+    return suppression;
   });
 
   return NextResponse.json({ suppression: row }, { status: 201 });
@@ -83,6 +96,16 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
   }
 
-  await prisma.outreachSuppression.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await tx.outreachSuppression.delete({ where: { id } });
+    await recordAuditEvent(
+      {
+        scope: "prospect",
+        action: "suppression.removed",
+        actorUserId: guard.user.id,
+      },
+      tx
+    );
+  });
   return NextResponse.json({ deleted: true });
 }

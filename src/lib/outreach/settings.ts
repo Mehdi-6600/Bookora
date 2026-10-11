@@ -48,6 +48,13 @@ export const DEFAULT_MIN_SCORE = 30;
 export const MAX_DAILY_DISCOVERY_LIMIT = 500;
 export const MAX_DAILY_INVITATION_LIMIT = 100;
 
+/**
+ * Where a value came from. Only `"configured"` may ever authorise outreach:
+ * `"default"` (row missing or value invalid) and `"error"` (storage unreadable)
+ * are fail-closed states, never permission.
+ */
+export type OutreachSettingSource = "configured" | "default" | "error";
+
 export type OutreachSettings = {
   enabled: boolean;
   readError?: string;
@@ -63,11 +70,31 @@ export type OutreachSettings = {
   /// means "not configured yet"; the builder then refuses to enable the
   /// channel destination instead of fabricating a link.
   channelUrl: string;
+  /**
+   * Provenance of the two kill switches, so the UI and the API can tell a
+   * genuine administrator decision apart from a fallback.
+   */
+  sources: {
+    enabled: OutreachSettingSource;
+    autoSendEnabled: OutreachSettingSource;
+  };
+  /// Admin-facing explanation of every value that was not genuinely configured.
+  warnings: string[];
 };
 
-export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
-  enabled: true,
-  autoSendEnabled: true,
+/**
+ * Fallback values for non-safety settings only.
+ *
+ * The two kill switches are NOT defaulted to "on": a missing or unreadable
+ * `outreach.enabled` / `outreach.auto_send_enabled` means disabled, so a broken
+ * or incomplete settings store can never authorise an outbound message.
+ */
+export const DEFAULT_OUTREACH_SETTINGS: Omit<
+  OutreachSettings,
+  "sources" | "warnings"
+> = {
+  enabled: false,
+  autoSendEnabled: false,
   dailyDiscoveryLimit: DEFAULT_DAILY_DISCOVERY_LIMIT,
   dailyInvitationLimit: DEFAULT_DAILY_INVITATION_LIMIT,
   timezone: "UTC",
@@ -81,6 +108,37 @@ export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
   return value === "true" || value === "1";
+}
+
+/**
+ * Read a kill switch fail-closed.
+ *
+ * Anything other than an explicitly stored "true"/"1" means NO: a missing row,
+ * an empty value, a typo ("yes", "TRUE") or a corrupted row all resolve to
+ * `false` and are reported as an unconfigured fallback, never as permission.
+ */
+function readKillSwitch(
+  key: OutreachSettingKey,
+  value: string | undefined
+): { value: boolean; source: OutreachSettingSource; warning: string | null } {
+  if (value === undefined) {
+    return {
+      value: false,
+      source: "default",
+      warning: `${key} is not configured. Outreach stays switched off until an administrator sets it explicitly.`,
+    };
+  }
+  if (value === "true" || value === "1") {
+    return { value: true, source: "configured", warning: null };
+  }
+  if (value === "false" || value === "0") {
+    return { value: false, source: "configured", warning: null };
+  }
+  return {
+    value: false,
+    source: "default",
+    warning: `${key} holds an unrecognised value. Treating outreach as switched off; store "true" or "false".`,
+  };
 }
 
 function readInt(
@@ -172,6 +230,9 @@ export function coerceSettingValue(
   }
 }
 
+const SETTINGS_READ_ERROR =
+  "Outreach settings could not be read. Check the database and retry; approval and delivery are paused.";
+
 export async function getOutreachSettings(): Promise<OutreachSettings> {
   let rows: Array<{ key: string; value: string }> = [];
 
@@ -182,18 +243,27 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
     });
   } catch {
     // Permission to send must never be inferred from a failed settings read.
-    return { ...DEFAULT_OUTREACH_SETTINGS, enabled: false, autoSendEnabled: false,
-      readError: "Outreach settings could not be read. Check the database and retry; approval and delivery are paused." };
+    return {
+      ...DEFAULT_OUTREACH_SETTINGS,
+      enabled: false,
+      autoSendEnabled: false,
+      sources: { enabled: "error", autoSendEnabled: "error" },
+      warnings: [SETTINGS_READ_ERROR],
+      readError: SETTINGS_READ_ERROR,
+    };
   }
 
   const map = new Map(rows.map((row) => [row.key, row.value]));
 
+  const enabledSwitch = readKillSwitch("outreach.enabled", map.get("outreach.enabled"));
+  const autoSendSwitch = readKillSwitch(
+    "outreach.auto_send_enabled",
+    map.get("outreach.auto_send_enabled")
+  );
+
   return {
-    enabled: readBoolean(map.get("outreach.enabled"), DEFAULT_OUTREACH_SETTINGS.enabled),
-    autoSendEnabled: readBoolean(
-      map.get("outreach.auto_send_enabled"),
-      DEFAULT_OUTREACH_SETTINGS.autoSendEnabled
-    ),
+    enabled: enabledSwitch.value,
+    autoSendEnabled: autoSendSwitch.value,
     dailyDiscoveryLimit: readInt(
       map.get("outreach.daily_discovery_limit"),
       DEFAULT_OUTREACH_SETTINGS.dailyDiscoveryLimit,
@@ -212,7 +282,49 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
     feedEnabled: readBoolean(map.get("outreach.feed_enabled"), false),
     minScore: readInt(map.get("outreach.min_score"), DEFAULT_OUTREACH_SETTINGS.minScore, 0, 100),
     channelUrl: map.get("outreach.channel_url") ?? "",
+    sources: {
+      enabled: enabledSwitch.source,
+      autoSendEnabled: autoSendSwitch.source,
+    },
+    warnings: [enabledSwitch.warning, autoSendSwitch.warning].filter(
+      (value): value is string => typeof value === "string"
+    ),
   };
+}
+
+export type OutreachDeliveryGate =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+/**
+ * The single kill-switch check used before anything that can leave the
+ * platform. Re-read at the server-side boundary, immediately before the
+ * operation — never cached from an earlier step in the same request.
+ */
+export function outreachDeliveryGate(
+  settings: OutreachSettings
+): OutreachDeliveryGate {
+  if (settings.readError) return { ok: false, reason: settings.readError };
+  if (!settings.enabled) {
+    return {
+      ok: false,
+      reason:
+        "Outreach is globally disabled (outreach.enabled is not set to true). Approval and delivery are paused.",
+    };
+  }
+  if (!settings.autoSendEnabled) {
+    return {
+      ok: false,
+      reason:
+        "Automatic delivery is off (outreach.auto_send_enabled is not set to true). Nothing is sent.",
+    };
+  }
+  return { ok: true };
+}
+
+/** Read the effective settings and evaluate the kill switch in one step. */
+export async function currentOutreachDeliveryGate(): Promise<OutreachDeliveryGate> {
+  return outreachDeliveryGate(await getOutreachSettings());
 }
 
 /** A failed market-approval read must not re-enable a disabled city. */

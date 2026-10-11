@@ -99,12 +99,20 @@ function storedSeed(): any[] {
 
 const SEED_BARBER = { publicName: "Mehdi Barber", publicUrl: "https://instagram.com/mehdi_barber", city: "Tehran" };
 
+function enableOutreach() {
+  // The kill switch is fail-closed, so tests that exercise the pipeline state
+  // explicitly that an administrator switched outreach on.
+  setSetting("outreach.enabled", "true");
+  setSetting("outreach.auto_send_enabled", "true");
+}
+
 beforeEach(() => {
   for (const key of Object.keys(state.tables)) delete state.tables[key];
   state.audit.length = 0;
   state.deliveries.length = 0;
   state.seq = 0;
   vi.unstubAllGlobals();
+  enableOutreach();
 });
 
 describe("on-demand discovery diagnostics", () => {

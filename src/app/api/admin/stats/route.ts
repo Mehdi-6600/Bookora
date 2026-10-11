@@ -35,9 +35,15 @@ export async function GET() {
       prisma.business.count(),
       prisma.business.count({ where: { status: "ACTIVE" } }),
       prisma.business.count({ where: { status: "ARCHIVED" } }),
-      prisma.booking.count(),
-      prisma.booking.count({ where: { createdAt: { gte: since7d } } }),
-      prisma.booking.count({ where: { status: "PENDING_PAYMENT" } }),
+      // Test bookings are verification traffic, not customer demand, so they
+      // are excluded from the booking totals the team reads as demand.
+      prisma.booking.count({ where: { isTestBooking: false } }),
+      prisma.booking.count({
+        where: { createdAt: { gte: since7d }, isTestBooking: false },
+      }),
+      prisma.booking.count({
+        where: { status: "PENDING_PAYMENT", isTestBooking: false },
+      }),
       prisma.subscription.count({ where: { status: "ACTIVE" } }),
       prisma.subscription.count({ where: { status: "PENDING" } }),
       prisma.payment.count({ where: { status: "PENDING" } }),

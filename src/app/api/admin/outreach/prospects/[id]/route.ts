@@ -10,6 +10,7 @@ import {
   normalizeLanguage,
 } from "@/lib/outreach/types";
 import { recordOptOut } from "@/lib/outreach/invitations";
+import { recordAuditEvent } from "@/lib/outreach/audit";
 import {
   buildSuppressionIdentifier,
   publicUrlReasonText,
@@ -180,6 +181,8 @@ export async function PATCH(
       publicUrl: existing.publicUrl,
       prospectId: id,
       note: "Marked Do Not Contact in the admin dashboard",
+      actorUserId: guard.user.id,
+      source: "admin_dashboard",
     });
     delete data.status; // recordOptOut already sets it
   }
@@ -189,9 +192,66 @@ export async function PATCH(
     data.verificationDate = new Date();
   }
 
-  const prospect = await prisma.outreachProspect.update({
-    where: { id },
-    data,
+  /**
+   * Why this prospect can no longer be contacted, if that is the result of the
+   * edit. A manual status change must never leave an approved invitation armed
+   * for automated delivery, so pending invitations are withdrawn in the same
+   * transaction as the change.
+   */
+  const effectiveVerification =
+    parsed.data.verificationStatus ?? existing.verificationStatus;
+  const withdrawReason =
+    parsed.data.status === "DO_NOT_CONTACT"
+      ? "opted_out"
+      : parsed.data.status === "NOT_INTERESTED"
+        ? "closed_status"
+        : effectiveVerification !== "VERIFIED"
+          ? "not_verified"
+          : null;
+
+  const prospect = await prisma.$transaction(async (tx) => {
+    const row = await tx.outreachProspect.update({ where: { id }, data });
+
+    await recordAuditEvent(
+      {
+        scope: "prospect",
+        entityId: id,
+        action: "prospect.updated",
+        actorUserId: guard.user.id,
+        detail: `keys=${Object.keys(data).join(",") || "none"}`,
+      },
+      tx
+    );
+
+    if (withdrawReason) {
+      const pending: Array<{ id: string }> = await tx.outreachInvitation.findMany({
+        where: { prospectId: id, status: { in: ["DRAFT", "APPROVED"] } },
+        select: { id: true },
+      });
+
+      if (pending.length > 0) {
+        await tx.outreachInvitation.updateMany({
+          where: { id: { in: pending.map((row) => row.id) } },
+          data: {
+            status: "SKIPPED",
+            failureReason: withdrawReason,
+            reviewedAt: new Date(),
+          },
+        });
+        await recordAuditEvent(
+          {
+            scope: "invitation",
+            entityId: id,
+            action: "invitations.withdrawn",
+            actorUserId: guard.user.id,
+            detail: `reason=${withdrawReason} count=${pending.length}`,
+          },
+          tx
+        );
+      }
+    }
+
+    return row;
   });
 
   return NextResponse.json({ prospect });
