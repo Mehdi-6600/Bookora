@@ -16,6 +16,7 @@ type DoubleState = { tables: Record<string, Row[]>; seq: number };
 const RELATIONS: Record<string, Record<string, { table: string; fk: string; many: boolean; localKey?: string }>> = {
   outreachInvitation: {
     prospect: { table: "outreachProspect", fk: "id", many: false, localKey: "prospectId" },
+    campaign: { table: "outreachCampaign", fk: "id", many: false, localKey: "campaignId" },
   },
   outreachProspect: {
     botStarts: { table: "botStart", fk: "prospectId", many: true },
@@ -45,6 +46,7 @@ const DEFAULTS: Record<string, Row> = {
 };
 
 const UNIQUE_KEYS: Record<string, string[][]> = {
+  telegramBotOptIn: [["telegramId"]],
   outreachProspect: [["dedupeKey"]],
   discoveryCandidate: [["dedupeKey"]],
   discoveryRun: [["runDate"]],
@@ -52,6 +54,91 @@ const UNIQUE_KEYS: Record<string, string[][]> = {
   outreachSuppression: [["identifier"]],
   discoveryKeyword: [["group", "language", "term"]],
 };
+
+/**
+ * Mirrors the Prisma client's P2002 error shape so production code paths that
+ * catch `error.code === "P2002"` (idempotent consent writes, for example)
+ * behave exactly as they do against PostgreSQL.
+ */
+function uniqueViolation(model: string, fields: string[]): Error {
+  const error = new Error(
+    `prisma-double: unique constraint failed on ${model} (${fields.join(", ")})`
+  ) as Error & { code: string; meta: { target: string[] } };
+  error.code = "P2002";
+  error.meta = { target: fields };
+  return error;
+}
+
+/**
+ * Decimal columns: real Prisma hands back a `Decimal` instance, so code that
+ * calls `price.mul(100)` has to receive one here too. This shim covers the
+ * arithmetic the repository actually performs.
+ */
+const DECIMAL_FIELDS: Record<string, string[]> = {
+  service: ["price", "depositValue"],
+  booking: ["servicePrice", "finalPrice", "depositValue", "depositDue", "remainingAmount"],
+  payment: ["amount", "refundedAmount"],
+  subscription: ["amount"],
+};
+
+class DoubleDecimal {
+  private readonly value: number;
+
+  constructor(value: number | string | DoubleDecimal) {
+    this.value = typeof value === "number" ? value : Number(String(value));
+  }
+
+  static isDecimal(value: unknown): boolean {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as Record<string, unknown>).mul === "function"
+    );
+  }
+
+  plus(other: number | string | DoubleDecimal) {
+    return new DoubleDecimal(this.value + new DoubleDecimal(other).value);
+  }
+
+  minus(other: number | string | DoubleDecimal) {
+    return new DoubleDecimal(this.value - new DoubleDecimal(other).value);
+  }
+
+  mul(other: number | string | DoubleDecimal) {
+    return new DoubleDecimal(this.value * new DoubleDecimal(other).value);
+  }
+
+  div(other: number | string | DoubleDecimal) {
+    return new DoubleDecimal(this.value / new DoubleDecimal(other).value);
+  }
+
+  toNumber() {
+    return this.value;
+  }
+
+  toString() {
+    return String(this.value);
+  }
+
+  toJSON() {
+    return this.value;
+  }
+
+  valueOf() {
+    return this.value;
+  }
+}
+
+function hydrateDecimals(model: string, row: Row): Row {
+  const fields = DECIMAL_FIELDS[model];
+  if (!fields) return row;
+  for (const field of fields) {
+    const value = row[field];
+    if (value === null || value === undefined) continue;
+    if (!DoubleDecimal.isDecimal(value)) row[field] = new DoubleDecimal(value as number | string);
+  }
+  return row;
+}
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
@@ -124,6 +211,20 @@ function matchesWhere(db: DoubleState, model: string, row: Row, where: Where): b
     if (relation) {
       const related = relatedRows(db, model, row, key);
       if (!isPlainObject(condition)) throw new Error(`prisma-double: bad relation filter ${key}`);
+      // A to-one relation can be filtered on its scalar fields directly
+      // (`prospect: { verificationStatus: "VERIFIED" }`), which Prisma treats
+      // as an implicit `is` filter: the row only matches when its related row
+      // matches every condition.
+      if (!relation.many) {
+        const matching = related.filter((item) =>
+          Object.entries(condition as Record<string, unknown>).every(([op, nested]) => {
+            if (op === "is") return matchesWhere(db, relation.table, item, nested as Where);
+            if (op === "isNot") return !matchesWhere(db, relation.table, item, nested as Where);
+            return matchesWhere(db, relation.table, item, { [op]: nested } as Where);
+          })
+        );
+        return matching.length > 0;
+      }
       for (const [op, nested] of Object.entries(condition)) {
         const matching = related.filter((item) => matchesWhere(db, relation.table, item, nested as Where));
         if (op === "some" && matching.length === 0) return false;
@@ -146,6 +247,7 @@ function relatedRows(db: DoubleState, model: string, row: Row, key: string): Row
 }
 
 function project(db: DoubleState, model: string, row: Row, args: Record<string, any> | undefined): Row {
+  hydrateDecimals(model, row);
   const include = args?.include as Record<string, any> | undefined;
   const select = args?.select as Record<string, any> | undefined;
   const out: Row = {};
@@ -197,14 +299,14 @@ function sortRows(rows: Row[], orderBy: unknown): Row[] {
   });
 }
 
-function uniqueConflict(db: DoubleState, model: string, data: Row, ignore?: Row): boolean {
+function uniqueConflict(db: DoubleState, model: string, data: Row, ignore?: Row): string[] | null {
   for (const fields of UNIQUE_KEYS[model] ?? []) {
     const hit = (db.tables[model] ?? []).some(
       (row) => row !== ignore && fields.every((field) => row[field] === data[field] && data[field] !== undefined)
     );
-    if (hit) return true;
+    if (hit) return fields;
   }
-  return false;
+  return null;
 }
 
 function findUniqueRow(db: DoubleState, model: string, where: Record<string, any>): Row | undefined {
@@ -224,9 +326,8 @@ function createDelegate(db: DoubleState, model: string) {
   };
 
   const insert = (data: Row): Row => {
-    if (uniqueConflict(db, model, data)) {
-      throw new Error(`prisma-double: unique constraint failed on ${model}`);
-    }
+    const conflict = uniqueConflict(db, model, data);
+    if (conflict) throw uniqueViolation(model, conflict);
     db.seq += 1;
     const now = new Date(Date.UTC(2026, 0, 1) + db.seq * 1000);
     const row: Row = {
@@ -241,9 +342,8 @@ function createDelegate(db: DoubleState, model: string) {
   };
 
   const applyUpdate = (row: Row, data: Row): Row => {
-    if (uniqueConflict(db, model, { ...row, ...data }, row)) {
-      throw new Error(`prisma-double: unique constraint failed on ${model}`);
-    }
+    const conflict = uniqueConflict(db, model, { ...row, ...data }, row);
+    if (conflict) throw uniqueViolation(model, conflict);
     for (const [key, value] of Object.entries(data)) {
       if (isPlainObject(value) && ("increment" in value || "set" in value)) {
         row[key] = "increment" in value ? (row[key] ?? 0) + value.increment : value.set;
@@ -347,8 +447,13 @@ export function createPrismaDouble(state: DoubleState) {
     "outreachInvitation",
     "outreachProspect",
     "outreachSuppression",
+    "payment",
+    "paymentMethod",
+    "service",
     "subscription",
+    "timeOff",
     "user",
+    "workingHour",
   ];
 
   const prisma: Record<string, unknown> = {};

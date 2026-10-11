@@ -1,30 +1,32 @@
 import { prisma } from "@/lib/prisma";
-import { currentBotConsent } from "@/lib/outreach/bot-consent";
 import {
-  CLOSED_PROSPECT_STATUSES,
-  type ProspectStatus,
-} from "@/lib/outreach/types";
-import {
-  buildSuppressionIdentifier,
-} from "@/lib/outreach/normalize";
+  evaluateOutreachPolicy,
+  isClosedStatus as policyIsClosedStatus,
+  isSuppressed as policyIsSuppressed,
+  resolveTelegramUserId as policyResolveTelegramUserId,
+  type DbClient,
+  type OutreachDecision,
+  type PolicyResult,
+} from "@/lib/outreach/policy";
+import type { OutreachSettings } from "@/lib/outreach/settings";
+import { CLOSED_PROSPECT_STATUSES } from "@/lib/outreach/types";
 
 /**
- * Delivery eligibility.
+ * Delivery eligibility — a thin compatibility layer over the single policy in
+ * `policy.ts`.
  *
- * Telegram does not allow a bot to open a private conversation with an
- * arbitrary user. A bot may only send a private message to someone who has
- * already started it (or who otherwise has an established messaging
- * relationship). This module is the single place where that rule is enforced:
- *
- *   - An authenticated private /start binds a numeric chat id to the
- *     invitation prospect in `telegram_bot_opt_ins`.
- *   - Mini App sessions and usernames never confer sending permission.
- *   - Expired, revoked or missing evidence blocks automated delivery.
+ * Nothing in this file implements its own rules any more: every call site
+ * (campaign planning, preparation, approval, manual transitions, delivery)
+ * resolves to `evaluateOutreachPolicy`, so there is no second, weaker check to
+ * route around.
  */
 
 export type EligibilityResult = {
   canAutoSend: boolean;
   reason: string;
+  /** Full policy result for callers that need the plain-language explanation. */
+  policy?: PolicyResult;
+  decision?: OutreachDecision;
 };
 
 export const ELIGIBILITY_REASONS = {
@@ -34,79 +36,86 @@ export const ELIGIBILITY_REASONS = {
   OPTED_OUT: "opted_out",
   SUPPRESSED: "suppressed",
   CLOSED_STATUS: "closed_status",
+  NOT_VERIFIED: "not_verified",
+  CONSENT_REVOKED: "consent_revoked",
+  CONSENT_EXPIRED: "consent_expired",
+  SETTINGS_UNAVAILABLE: "settings_unavailable",
+  OUTREACH_PAUSED: "outreach_paused",
+  SUPPRESSION_UNAVAILABLE: "suppression_unavailable",
   DAILY_LIMIT: "daily_limit",
 } as const;
 
-export function isClosedStatus(status: ProspectStatus | string): boolean {
-  return CLOSED_PROSPECT_STATUSES.includes(status as ProspectStatus);
+export function isClosedStatus(status: string): boolean {
+  return policyIsClosedStatus(status) || CLOSED_PROSPECT_STATUSES.includes(status as never);
 }
 
 /**
  * Check whether a prospect is on the do-not-contact list.
  * `identifiers` should already be normalized (`buildSuppressionIdentifier`).
+ * Fails closed: an unreadable suppression list is treated as "do not contact".
  */
 export async function isSuppressed(
-  identifiers: Array<string | null | undefined>
+  identifiers: Array<string | null | undefined>,
+  db: DbClient = prisma
 ): Promise<boolean> {
-  const clean = identifiers.filter(
-    (value): value is string => typeof value === "string" && value.length > 0
-  );
-
-  if (clean.length === 0) return false;
-
   try {
-    const found = await prisma.outreachSuppression.findFirst({
-      where: { identifier: { in: clean } },
-      select: { id: true },
-    });
-    return Boolean(found);
+    return await policyIsSuppressed(identifiers, db);
   } catch {
     // Fail closed: if the suppression list cannot be read, do not send.
     return true;
   }
 }
 
-export async function checkEligibility(prospect: {
+export type EligibilityProspect = {
   id: string;
   status: string;
   telegramUsername: string | null;
   publicUrl: string | null;
-  telegramUserId: string | null | undefined;
-  optedOutAt: Date | null;
-}): Promise<EligibilityResult> {
-  if (isClosedStatus(prospect.status)) {
-    return { canAutoSend: false, reason: ELIGIBILITY_REASONS.CLOSED_STATUS };
-  }
+  /**
+   * A numeric Telegram id the caller already resolved, if any. Used only to
+   * widen the do-not-contact lookup; consent still comes from the opt-in row.
+   */
+  telegramUserId?: string | null;
+  optedOutAt?: Date | null;
+  /** Required by the policy: an absent verification status is not verification. */
+  verificationStatus?: string | null;
+};
 
-  if (prospect.optedOutAt) {
-    return { canAutoSend: false, reason: ELIGIBILITY_REASONS.OPTED_OUT };
-  }
-
-  const suppressed = await isSuppressed([
-    buildSuppressionIdentifier({
+export async function checkEligibility(
+  prospect: EligibilityProspect,
+  options: {
+    db?: DbClient;
+    settings?: OutreachSettings;
+    /** Enforce the outreach kill switch (default true). */
+    enforceSettings?: boolean;
+    /** Require an administrator verification (default true). */
+    requireVerification?: boolean;
+  } = {}
+): Promise<EligibilityResult> {
+  const policy = await evaluateOutreachPolicy(
+    {
+      id: prospect.id,
+      status: prospect.status,
+      verificationStatus: prospect.verificationStatus ?? null,
       telegramUsername: prospect.telegramUsername,
       publicUrl: prospect.publicUrl,
-      telegramId: prospect.telegramUserId ?? null,
-    }),
-    prospect.telegramUserId ? `user:${prospect.telegramUserId}` : null,
-  ]);
+      optedOutAt: prospect.optedOutAt ?? null,
+    },
+    {
+      db: options.db,
+      settings: options.settings,
+      enforceSettings: options.enforceSettings,
+      requireVerification: options.requireVerification,
+      knownTelegramUserId: prospect.telegramUserId ?? null,
+    }
+  );
 
-  if (suppressed) {
-    return { canAutoSend: false, reason: ELIGIBILITY_REASONS.SUPPRESSED };
-  }
-
-  if (!prospect.telegramUserId) {
-    return { canAutoSend: false, reason: ELIGIBILITY_REASONS.NO_TELEGRAM_ID };
-  }
-
-  // Mini App authentication also creates User rows; only an authenticated
-  // private Bot API /start with an attributed invitation proves consent.
-  const consent = await currentBotConsent(prospect.id);
-  if (!consent || consent.telegramId !== prospect.telegramUserId) {
-    return { canAutoSend: false, reason: ELIGIBILITY_REASONS.NOT_STARTED_BOT };
-  }
-
-  return { canAutoSend: true, reason: ELIGIBILITY_REASONS.OK };
+  return {
+    canAutoSend: policy.canAutoSend,
+    reason: policy.reason,
+    policy,
+    decision: policy.decision,
+  };
 }
 
 /**
@@ -116,7 +125,9 @@ export async function checkEligibility(prospect: {
  * username into a user id. It is only filled in once the person actually starts
  * the bot through the attributed deep link.
  */
-export async function resolveTelegramUserId(prospect: { id: string }): Promise<string | null> {
-  const consent = await currentBotConsent(prospect.id);
-  return consent?.telegramId ?? null;
+export async function resolveTelegramUserId(
+  prospect: { id: string },
+  db: DbClient = prisma
+): Promise<string | null> {
+  return policyResolveTelegramUserId(prospect, db);
 }

@@ -81,7 +81,24 @@ vi.mock("@/lib/prisma", () => {
     },
     outreachInvitation: {
       updateMany: async ({ where, data }: any) => {
-        const rows = db.invitations.filter((row: Row) => row.campaignId === where.campaignId && row.status === where.status && (!where.id?.in || where.id.in.includes(row.id)));
+        // Mirrors the guarded conditional updates used by approval: campaign,
+        // id and (optionally) live prospect predicates must all match.
+        const matches = (row: Row) => {
+          if (where?.id && row.id !== where.id) return false;
+          if (where?.id?.in && !where.id.in.includes(row.id)) return false;
+          if (where?.campaignId !== undefined && row.campaignId !== where.campaignId) return false;
+          if (where?.status !== undefined && row.status !== where.status) return false;
+          if (where?.prospect) {
+            const prospect = db.prospects.find((item: Row) => item.id === row.prospectId);
+            if (!prospect) return false;
+            for (const [key, condition] of Object.entries(where.prospect)) {
+              const actual = prospect[key];
+              if (condition === null ? actual !== null : actual !== condition) return false;
+            }
+          }
+          return true;
+        };
+        const rows = db.invitations.filter(matches);
         rows.forEach((row: Row) => Object.assign(row, data));
         return { count: rows.length };
       },
@@ -156,8 +173,15 @@ vi.mock("@/lib/prisma", () => {
         return created;
       },
     },
-    telegramBotOptIn: { findFirst: async ({ where }: any) =>
-      db.consents.find((row: Row) => row.prospectId === where.prospectId && row.revokedAt === null && row.startedAt >= where.startedAt.gte) ?? null },
+    telegramBotOptIn: { findFirst: async ({ where }: any) => {
+      const rows = db.consents.filter((row: Row) => {
+        if (where?.prospectId !== undefined && row.prospectId !== where.prospectId) return false;
+        if (where?.revokedAt === null && row.revokedAt !== null && row.revokedAt !== undefined) return false;
+        if (where?.startedAt?.gte && !(row.startedAt && row.startedAt >= where.startedAt.gte)) return false;
+        return true;
+      });
+      return rows[0] ?? null;
+    } },
     outreachAuditEvent: { create: async ({ data }: any) => {
       if (db.auditFail) throw new Error("audit unavailable");
       db.audit.push(data); return data;
@@ -195,6 +219,7 @@ import {
   type CampaignLike,
 } from "@/lib/outreach/campaigns";
 import { CITY_REGISTRY } from "@/lib/outreach/city-registry";
+const { outreachSettingsRows } = await import("./helpers/outreach-settings");
 import { renderTemplate, validateTemplateBody } from "@/lib/outreach/templates";
 
 function baseCampaign(overrides: Partial<CampaignLike> = {}): CampaignLike {
@@ -244,7 +269,9 @@ beforeEach(() => {
   db.suppressions = [];
   db.users = [];
   db.botStarts = [];
-  db.settings = [];
+  // Fail-closed defaults: outreach only runs where these tests explicitly
+  // switch it on.
+  db.settings = outreachSettingsRows();
   db.consents = [];
   db.audit = [];
   db.auditFail = false;
@@ -387,19 +414,25 @@ describe("campaign planning", () => {
       "suppressed",
       "suppressed",
     ]);
-    expect(plan.recipients).toHaveLength(0);
+    // Blocked recipients stay visible to the reviewer, with their reason.
+    expect(plan.recipients.filter((r) => r.disposition === "ELIGIBLE")).toHaveLength(0);
+    expect(plan.recipients.filter((r) => r.reason === "suppressed")).toHaveLength(2);
+    expect(plan.recipients.every((r) => r.withinQuota === false)).toBe(true);
+    expect(plan.approvable).toBe(0);
   });
 
   it("holds back recipients beyond the daily quota", async () => {
-    db.settings = [{ key: "outreach.daily_invitation_limit", value: "2" }];
+    db.settings = outreachSettingsRows({ "outreach.daily_invitation_limit": "2" });
 
     const plan = await planCampaign(baseCampaign());
 
-    expect(plan.recipients).toHaveLength(2);
+    // Every matched recipient is listed; the quota only marks who is held over.
+    expect(plan.recipients).toHaveLength(3);
     expect(plan.sendLimit).toBe(2);
+    expect(plan.recipients.filter((r) => r.withinQuota)).toHaveLength(2);
+    expect(plan.recipients.filter((r) => r.heldOver)).toHaveLength(1);
+    expect(plan.heldOver).toBe(1);
     expect(plan.warnings.some((w) => w.includes("exceed the send limit"))).toBe(true);
-    // The held-back prospect is reported, not silently dropped.
-    expect(plan.excluded.map((r) => r.reason)).toEqual(["over_send_limit"]);
   });
 
   it("warns when no template exists for the campaign language", async () => {
@@ -421,7 +454,11 @@ describe("campaign planning", () => {
 
     const plan = await planCampaign(baseCampaign());
 
-    expect(plan.recipients.map((r) => r.prospectId)).not.toContain("p-1");
+    // Still listed, but blocked with the reason, and never prepared.
+    const pending = plan.recipients.find((r) => r.prospectId === "p-1");
+    expect(pending?.disposition).toBe("BLOCKED");
+    expect(pending?.reason).toBe("already_pending");
+    expect(pending?.withinQuota).toBe(false);
     expect(
       plan.excluded.find((r) => r.prospectId === "p-1")?.reason
     ).toBe("already_pending");
@@ -546,7 +583,7 @@ describe("preparation", () => {
   });
 
   it("creates one draft per recipient, under the quota", async () => {
-    db.settings = [{ key: "outreach.daily_invitation_limit", value: "2" }];
+    db.settings = outreachSettingsRows({ "outreach.daily_invitation_limit": "2" });
     db.campaigns.push(baseCampaign({ status: "APPROVED", lastDryRunAt: new Date() } as any) as Row);
 
     const result = await prepareCampaign("cmp-1", "admin-1");
@@ -770,8 +807,7 @@ describe("delivery safety switches", () => {
     db.prospects = [];
     db.invitations = [];
     db.templates = [];
-    db.settings = [];
-    db.settings.push({ key: "outreach.daily_invitation_limit", value: "10" });
+    db.settings = outreachSettingsRows({ "outreach.daily_invitation_limit": "10" });
     db.campaigns.push(
       baseCampaign({ status: "APPROVED", lastDryRunAt: new Date() } as any) as Row
     );
@@ -793,7 +829,7 @@ describe("delivery safety switches", () => {
 
   it("refuses to send while outreach is globally disabled", async () => {
     const campaign = await approvedReadyToDeliver();
-    db.settings.push({ key: "outreach.enabled", value: "false" });
+    db.settings.find((row: Row) => row.key === "outreach.enabled")!.value = "false";
 
     const result = await sendCampaignInvitations({ campaignId: campaign.id, limit: 5 });
 
@@ -806,7 +842,7 @@ describe("delivery safety switches", () => {
 
   it("refuses automatic delivery when auto-send is off", async () => {
     const campaign = await approvedReadyToDeliver();
-    db.settings.push({ key: "outreach.auto_send_enabled", value: "false" });
+    db.settings.find((row: Row) => row.key === "outreach.auto_send_enabled")!.value = "false";
 
     const result = await sendCampaignInvitations({ campaignId: campaign.id, limit: 5 });
 

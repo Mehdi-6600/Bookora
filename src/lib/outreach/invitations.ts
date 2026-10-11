@@ -11,13 +11,7 @@ import {
   buildSuppressionIdentifier,
   normalizeTelegramUsername,
 } from "@/lib/outreach/normalize";
-import {
-  checkEligibility,
-  ELIGIBILITY_REASONS,
-  isClosedStatus,
-  isSuppressed,
-  resolveTelegramUserId,
-} from "@/lib/outreach/eligibility";
+import { ELIGIBILITY_REASONS, isClosedStatus } from "@/lib/outreach/eligibility";
 import {
   isProspectCategory,
   normalizeLanguage,
@@ -25,8 +19,12 @@ import {
   type ProspectCategory,
 } from "@/lib/outreach/types";
 import { deliverTelegramMessage } from "@/lib/telegram/notify";
-import { currentBotConsent } from "@/lib/outreach/bot-consent";
-import { getOutreachSettings } from "@/lib/outreach/settings";
+import { evaluateOutreachPolicy } from "@/lib/outreach/policy";
+import {
+  currentOutreachDeliveryGate,
+  getOutreachSettings,
+  outreachDeliveryGate,
+} from "@/lib/outreach/settings";
 import { recordAuditEvent } from "@/lib/outreach/audit";
 
 /**
@@ -83,8 +81,8 @@ async function pickTemplate(
   if (candidates.length === 0) return null;
 
   return (
-    candidates.find((template) => template.category === category) ??
-    candidates.find((template) => template.category === "ALL") ??
+    candidates.find((template: { category: string }) => template.category === category) ??
+    candidates.find((template: { category: string }) => template.category === "ALL") ??
     candidates[0]
   );
 }
@@ -134,13 +132,23 @@ export async function prepareInvitations(options: {
     take: Math.max(limit * 3, 30),
   });
 
+  // The kill switch is read once per preparation run and re-applied per
+  // recipient through the shared policy: preparation is the first step towards
+  // an outbound message, so it must never run while outreach is switched off
+  // or the settings cannot be read.
+  const settings = await getOutreachSettings();
+  const gate = outreachDeliveryGate(settings);
+  if (!gate.ok) {
+    throw new Error(gate.reason);
+  }
+
   const alreadyPending = new Set(
     (
       await db.outreachInvitation.findMany({
         where: { status: { in: ["DRAFT", "APPROVED"] } },
         select: { prospectId: true },
       })
-    ).map((row) => row.prospectId)
+    ).map((row: { prospectId: string }) => row.prospectId)
   );
 
   const prepared: PreparedInvitation[] = [];
@@ -159,13 +167,23 @@ export async function prepareInvitations(options: {
       continue;
     }
 
-    const identifier = buildSuppressionIdentifier({
-      telegramUsername: prospect.telegramUsername,
-      publicUrl: prospect.publicUrl,
-    });
+    // The same policy approval and delivery use. BLOCKED recipients
+    // (unverified, opted out, suppressed, closed, outreach paused) are never
+    // drafted; MANUAL_ONLY ones are drafted for a human reviewer.
+    const policy = await evaluateOutreachPolicy(
+      {
+        id: prospect.id,
+        status: prospect.status,
+        verificationStatus: prospect.verificationStatus,
+        telegramUsername: prospect.telegramUsername,
+        publicUrl: prospect.publicUrl,
+        optedOutAt: prospect.optedOutAt,
+      },
+      { db, settings }
+    );
 
-    if (await isSuppressed([identifier])) {
-      skipped.push({ prospectId: prospect.id, reason: "suppressed" });
+    if (policy.decision === "BLOCKED") {
+      skipped.push({ prospectId: prospect.id, reason: policy.reason });
       continue;
     }
 
@@ -256,10 +274,10 @@ export async function sendApprovedInvitations(options: {
 }): Promise<SendOutcome[]> {
   const limit = Math.max(0, Math.min(100, Math.round(options.limit)));
 
-  const settings = await getOutreachSettings();
-  if (!settings.enabled || !settings.autoSendEnabled || settings.readError) {
-    throw new Error(settings.readError ?? "Outreach delivery is paused.");
-  }
+  // Kill switch, checked before the batch starts…
+  const startGate = await currentOutreachDeliveryGate();
+  if (!startGate.ok) throw new Error(startGate.reason);
+
   const pending = await prisma.outreachInvitation.findMany({
     where: {
       status: "APPROVED",
@@ -278,117 +296,181 @@ export async function sendApprovedInvitations(options: {
           optedOutAt: true,
         },
       },
+      campaign: { select: { status: true } },
     },
   });
 
   const outcomes: SendOutcome[] = [];
 
   for (const invitation of pending) {
-    // Last line of defence: a prospect unverified (or rejected) after its
-    // invitation was approved must never be messaged. Skipped, never sent.
-    if (invitation.prospect.verificationStatus !== "VERIFIED") {
-      await prisma.$transaction(async (tx) => {
-      await tx.outreachInvitation.update({
-        where: { id: invitation.id },
-        data: {
-          status: "SKIPPED",
-          failureReason: "not_verified",
-          reviewedAt: new Date(),
+    // …and re-checked, together with every other gate, inside the same
+    // transaction that clears (or skips) this specific invitation. Nothing is
+    // delivered on the strength of an earlier check in this loop.
+    const decision = await prisma.$transaction(async (tx) => {
+      const policy = await evaluateOutreachPolicy(
+        {
+          id: invitation.prospect.id,
+          status: invitation.prospect.status,
+          verificationStatus: invitation.prospect.verificationStatus,
+          telegramUsername: invitation.prospect.telegramUsername,
+          publicUrl: invitation.prospect.publicUrl,
+          optedOutAt: invitation.prospect.optedOutAt,
         },
-      });
+        {
+          db: tx,
+          invitation: {
+            id: invitation.id,
+            status: invitation.status,
+            campaignId: invitation.campaignId,
+          },
+          campaignStatus: invitation.campaign?.status ?? null,
+          allowedInvitationStatuses: ["APPROVED"],
+          // A campaign invitation is only delivered while its campaign is
+          // approved or actively sending.
+          requireApprovedCampaign: Boolean(invitation.campaignId),
+          allowedCampaignStatuses: ["APPROVED", "SENDING"],
+        }
+      );
 
-      await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
-        action: "invitation.skipped", detail: "reason=not_verified" }, tx);
-      });
+      if (!policy.canAutoSend) {
+        // A paused or unreadable kill switch is a configuration state, not a
+        // fact about the recipient: the invitation stays APPROVED so an
+        // authorized run can still deliver it. Anything else (opt-out,
+        // suppression, revoked consent, lost verification) is terminal for
+        // automated delivery and is marked SKIPPED with the reason.
+        const paused =
+          policy.reason === "outreach_paused" ||
+          policy.reason === "settings_unavailable";
 
-      outcomes.push({
-        invitationId: invitation.id,
-        status: "SKIPPED",
-        reason: "not_verified",
-      });
-      continue;
-    }
+        if (!paused) {
+          await tx.outreachInvitation.update({
+            where: { id: invitation.id },
+            data: {
+              status: "SKIPPED",
+              failureReason: policy.reason,
+              reviewedAt: new Date(),
+            },
+          });
+        }
 
-    const telegramUserId = await resolveTelegramUserId(invitation.prospect);
+        await recordAuditEvent(
+          {
+            scope: "invitation",
+            entityId: invitation.id,
+            action: paused ? "invitation.delivery_paused" : "invitation.skipped",
+            detail: `reason=${policy.reason}`,
+          },
+          tx
+        );
+        return { ok: false as const, reason: policy.reason };
+      }
 
-    const eligibility = await checkEligibility({
-      id: invitation.prospect.id,
-      status: invitation.prospect.status,
-      telegramUsername: invitation.prospect.telegramUsername,
-      publicUrl: invitation.prospect.publicUrl,
-      telegramUserId,
-      optedOutAt: invitation.prospect.optedOutAt,
+      return { ok: true as const, telegramUserId: policy.telegramUserId as string };
     });
 
-    if (!eligibility.canAutoSend) {
-      await prisma.$transaction(async (tx) => {
-      await tx.outreachInvitation.update({
-        where: { id: invitation.id },
-        data: {
-          status: "SKIPPED",
-          failureReason: eligibility.reason,
-          reviewedAt: new Date(),
-        },
-      });
-
-      await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
-        action: "invitation.skipped", detail: `reason=${eligibility.reason}` }, tx);
-      });
-
+    if (!decision.ok) {
       outcomes.push({
         invitationId: invitation.id,
         status: "SKIPPED",
-        reason: eligibility.reason,
+        reason: decision.reason,
       });
       continue;
     }
 
+    const telegramUserId = decision.telegramUserId;
+
+    // Final server-side kill-switch read, immediately before the claim and the
+    // outbound call: a settings change mid-run stops the remaining recipients.
+    const gate = await currentOutreachDeliveryGate();
+    if (!gate.ok) {
+      outcomes.push({
+        invitationId: invitation.id,
+        status: "SKIPPED",
+        reason: "outreach_paused",
+      });
+      continue;
+    }
+
+    // Claim the invitation with a conditional update so two concurrent workers
+    // can never send the same message twice.
     const reserved = await prisma.$transaction(async (tx) => {
-      const consent = await currentBotConsent(invitation.prospect.id, tx);
-      if (!consent || consent.telegramId !== telegramUserId) return false;
       const claimed = await tx.outreachInvitation.updateMany({
-        where: { id: invitation.id, status: "APPROVED",
-          prospect: { verificationStatus: "VERIFIED", optedOutAt: null } },
+        where: {
+          id: invitation.id,
+          status: "APPROVED",
+          prospect: { verificationStatus: "VERIFIED", optedOutAt: null },
+        },
         data: { status: "SENDING" },
       });
       if (!claimed.count) return false;
-      await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
-        action: "invitation.delivery_started", detail: `prospect=${invitation.prospect.id}` }, tx);
+      await recordAuditEvent(
+        {
+          scope: "invitation",
+          entityId: invitation.id,
+          action: "invitation.delivery_started",
+          detail: `prospect=${invitation.prospect.id}`,
+        },
+        tx
+      );
       return true;
     });
-    if (!reserved) continue;
+    if (!reserved) {
+      outcomes.push({
+        invitationId: invitation.id,
+        status: "SKIPPED",
+        reason: "state_changed",
+      });
+      continue;
+    }
+
     // An audit failure before this point prevents the external send entirely.
     // SENDING is never retried automatically if the result write fails.
-    const result = await deliverTelegramMessage(telegramUserId as string, invitation.body);
+    const result = await deliverTelegramMessage(telegramUserId, invitation.body);
     const now = new Date();
 
     if (!result.ok) {
-      await prisma.$transaction(async (tx) => {
-      await tx.outreachInvitation.update({
-        where: { id: invitation.id },
-        data: {
-          status: "FAILED",
-          failureReason: result.error,
-          sentAt: now,
-        },
-      });
-
-      if (result.blocked) {
-        await tx.telegramBotOptIn.updateMany({ where: { telegramId: telegramUserId as string },
-          data: { revokedAt: now } });
-        await tx.outreachProspect.update({
-          where: { id: invitation.prospect.id },
+      const failure = await prisma.$transaction(async (tx) => {
+        await tx.outreachInvitation.update({
+          where: { id: invitation.id },
           data: {
-            status: "DO_NOT_CONTACT",
-            optedOutAt: now,
-            notes: "Blocked or unreachable in Telegram (403).",
+            status: "FAILED",
+            failureReason: result.error,
+            sentAt: now,
           },
         });
-      }
 
-      await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
-        action: "invitation.delivery_failed", detail: `code=${result.errorCode ?? "unknown"}` }, tx);
-      });
+        if (result.blocked) {
+          await tx.telegramBotOptIn.updateMany({
+            where: { telegramId: telegramUserId },
+            data: { revokedAt: now },
+          });
+          await tx.outreachProspect.update({
+            where: { id: invitation.prospect.id },
+            data: {
+              status: "DO_NOT_CONTACT",
+              optedOutAt: now,
+              notes: "Blocked or unreachable in Telegram (403).",
+            },
+          });
+        }
+
+        await recordAuditEvent(
+          {
+            scope: "invitation",
+            entityId: invitation.id,
+            action: "invitation.delivery_failed",
+            detail: `code=${result.errorCode ?? "unknown"}`,
+          },
+          tx
+        );
+      }).then(
+        () => null,
+        (error: unknown) => error
+      );
+
+      // A failed result write must be surfaced, never reported as success.
+      if (failure) throw failure;
+
       outcomes.push({
         invitationId: invitation.id,
         status: "FAILED",
@@ -398,28 +480,38 @@ export async function sendApprovedInvitations(options: {
     }
 
     await prisma.$transaction(async (tx) => {
-    await tx.outreachInvitation.update({
-      where: { id: invitation.id },
-      data: {
-        status: "DELIVERED",
-        sentAt: now,
-        deliveredAt: now,
-        failureReason: null,
-      },
-    });
+      await tx.outreachInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          status: "DELIVERED",
+          sentAt: now,
+          deliveredAt: now,
+          failureReason: null,
+        },
+      });
 
-    await tx.outreachProspect.update({
-      where: { id: invitation.prospect.id },
-      data: {
-        status: invitation.prospect.status === "NEW" ? "CONTACTED" : invitation.prospect.status,
-        lastContactedAt: now,
-        contactedCount: { increment: 1 },
-        nextFollowUpAt: new Date(now.getTime() + FOLLOW_UP_DAYS * 24 * 60 * 60 * 1000),
-      },
-    });
+      await tx.outreachProspect.update({
+        where: { id: invitation.prospect.id },
+        data: {
+          status:
+            invitation.prospect.status === "NEW"
+              ? "CONTACTED"
+              : invitation.prospect.status,
+          lastContactedAt: now,
+          contactedCount: { increment: 1 },
+          nextFollowUpAt: new Date(now.getTime() + FOLLOW_UP_DAYS * 24 * 60 * 60 * 1000),
+        },
+      });
 
-    await recordAuditEvent({ scope: "invitation", entityId: invitation.id,
-      action: "invitation.delivered", detail: `prospect=${invitation.prospect.id}` }, tx);
+      await recordAuditEvent(
+        {
+          scope: "invitation",
+          entityId: invitation.id,
+          action: "invitation.delivered",
+          detail: `prospect=${invitation.prospect.id}`,
+        },
+        tx
+      );
     });
     outcomes.push({
       invitationId: invitation.id,
@@ -431,13 +523,25 @@ export async function sendApprovedInvitations(options: {
   return outcomes;
 }
 
-/** Mark a prospect opted out and add every known identifier to the suppression list. */
+/**
+ * Mark a prospect opted out and add every known identifier to the suppression
+ * list.
+ *
+ * Withdrawing consent is never blocked by an unavailable audit store: the
+ * suppression rows and the prospect state are committed first, and an audit
+ * failure is then re-thrown so the caller surfaces it (log / admin error)
+ * instead of reporting a clean success.
+ */
 export async function recordOptOut(input: {
   telegramId?: string | null;
   telegramUsername?: string | null;
   publicUrl?: string | null;
   prospectId?: string | null;
   note?: string | null;
+  /** Who performed the opt-out, when a human did it from the dashboard. */
+  actorUserId?: string | null;
+  /** Short, safe provenance tag, e.g. "telegram_stop" or "admin_dashboard". */
+  source?: string;
 }): Promise<void> {
   const now = new Date();
 
@@ -449,34 +553,45 @@ export async function recordOptOut(input: {
     }),
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
-  for (const identifier of identifiers) {
-    await prisma.outreachSuppression.upsert({
-      where: { identifier },
-      update: { reason: "OPT_OUT", note: input.note ?? null },
-      create: { identifier, reason: "OPT_OUT", note: input.note ?? null },
-    });
-  }
-
-  // Also suppress the username form when only a numeric id was supplied.
-  if (input.telegramId) {
-    const user = await prisma.user.findUnique({
-      where: { telegramId: input.telegramId },
-      select: { telegramUsername: true },
-    });
-    const username = normalizeTelegramUsername(user?.telegramUsername ?? null);
-    if (username) {
-      await prisma.outreachSuppression.upsert({
-        where: { identifier: `tg:${username}` },
+  await prisma.$transaction(async (tx) => {
+    for (const identifier of identifiers) {
+      await tx.outreachSuppression.upsert({
+        where: { identifier },
         update: { reason: "OPT_OUT", note: input.note ?? null },
-        create: { identifier: `tg:${username}`, reason: "OPT_OUT", note: input.note ?? null },
+        create: { identifier, reason: "OPT_OUT", note: input.note ?? null },
       });
     }
-  }
 
-  if (input.prospectId) {
-    await prisma.outreachProspect.update({
-      where: { id: input.prospectId },
-      data: { status: "DO_NOT_CONTACT", optedOutAt: now },
-    });
-  }
+    // Also suppress the username form when only a numeric id was supplied.
+    if (input.telegramId) {
+      const user = await tx.user.findUnique({
+        where: { telegramId: input.telegramId },
+        select: { telegramUsername: true },
+      });
+      const username = normalizeTelegramUsername(user?.telegramUsername ?? null);
+      if (username) {
+        await tx.outreachSuppression.upsert({
+          where: { identifier: `tg:${username}` },
+          update: { reason: "OPT_OUT", note: input.note ?? null },
+          create: { identifier: `tg:${username}`, reason: "OPT_OUT", note: input.note ?? null },
+        });
+      }
+    }
+
+    if (input.prospectId) {
+      await tx.outreachProspect.update({
+        where: { id: input.prospectId },
+        data: { status: "DO_NOT_CONTACT", optedOutAt: now },
+      });
+    }
+  });
+
+  // Audit after the fact: the withdrawal itself is already durable.
+  await recordAuditEvent({
+    scope: "prospect",
+    entityId: input.prospectId ?? null,
+    action: "prospect.opted_out",
+    actorUserId: input.actorUserId ?? null,
+    detail: `source=${input.source ?? "unknown"} identifiers=${identifiers.length}`,
+  });
 }

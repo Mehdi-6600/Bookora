@@ -4,7 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-api";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { prepareInvitations } from "@/lib/outreach/invitations";
-import { getOutreachSettings } from "@/lib/outreach/settings";
+import {
+  getOutreachSettings,
+  outreachDeliveryGate,
+} from "@/lib/outreach/settings";
 import type { InvitationStatus } from "@/lib/outreach/types";
 
 const STATUSES: InvitationStatus[] = [
@@ -91,6 +94,13 @@ export async function POST(req: NextRequest) {
   }
 
   const settings = await getOutreachSettings();
+  // Preparation is the first step towards an outbound message, so it honours
+  // the same kill switch as approval and delivery. Nothing is drafted while
+  // outreach is switched off or the settings cannot be read.
+  const gate = outreachDeliveryGate(settings);
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.reason }, { status: 409 });
+  }
 
   const result = await prepareInvitations({
     limit: parsed.data.count ?? settings.dailyInvitationLimit,
