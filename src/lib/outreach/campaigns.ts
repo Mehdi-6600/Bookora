@@ -125,6 +125,12 @@ export type CampaignRecipient = {
   reason: string;
   /** Plain-language explanation of `reason`, for the reviewer. */
   reasonLabel: string | null;
+  /**
+   * The same explanation in every supported language. The reviewer UI is
+   * Persian/Arabic first, so a bare English sentence is not enough to explain a
+   * block to the operator who has to act on it.
+   */
+  reasonLabels: { en: string; fa: string; ar: string };
   /** When this recipient's eligibility was evaluated by the server. */
   checkedAt: Date;
   channel: "TELEGRAM_BOT" | "MANUAL";
@@ -455,6 +461,7 @@ export async function planCampaign(
       suppressed: reason === "suppressed",
       reason,
       reasonLabel: eligibilityReasonLabel ?? policyReasonLabel(reason).en,
+      reasonLabels: policyReasonLabel(reason),
       checkedAt: now,
       channel: disposition === "ELIGIBLE" ? "TELEGRAM_BOT" : "MANUAL",
       destination:

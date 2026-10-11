@@ -101,3 +101,52 @@ All 73 are `Prisma.PrismaClientKnownRequestError` / `Prisma.Decimal` / `Prisma.*
 3. **Set `TELEGRAM_WEBHOOK_SECRET`** (≥32 chars) and press **Configure webhook, commands and Mini App button**, then send `/start` to the bot to confirm.
 
 **Not ready — one merge:** the four-city campaign work (this branch) is not merged, so the OG image and the campaign dashboard are not live yet.
+
+---
+
+## Update — 2026-10-11 (after PR #14 merged, branch `arena/7f510cdd-bookora`)
+
+Re-measured today. This section is appended, not a rewrite: the tables above
+describe the state on 2026-10-10 and stay as the record of that check.
+
+### Checks actually run
+
+| Check | Result |
+| --- | --- |
+| `npx vitest run` | **PASS — 40 files / 447 tests** (baseline after PR #14: 36 files / 369 tests) |
+| `npx tsc --noEmit` with a real generated Prisma Client (branch) | **PASS — 0 errors.** For comparison, `main` at `8dbd668` also type-checks with **0 errors** in the same setup. The 73/127 error counts seen earlier were entirely the missing-client artifact, including the placeholder `@prisma/client` ships when generation has never run. |
+| `npx tsc --noEmit` with the placeholder client | 127 errors, all of them "type X does not exist on the generated client" — not a code signal |
+| `npm run build` | **Compile + type-check stage PASSES locally** ("Compiled successfully", no type errors). Page-data collection then stops on `P2038: Missing configured driver adapter` because this sandbox cannot reach `binaries.prisma.sh` and the only offline path to a generated client is the WASM query compiler (`engineType = "client"`), which needs a driver adapter this repository does not use. The authoritative build is CI, which runs the real `prisma generate` first. |
+| `prisma generate` (native engine) | **Still blocked in this sandbox**: `binaries.prisma.sh` is unreachable (TLS reset). Registry access works, the Prisma CLI's bundled WASM engines work — see the note below. |
+
+### GitHub Actions and deployment status (task 8)
+
+| Item | Status |
+| --- | --- |
+| CI on `main` after the PR #14 merge | **PASS** — run `38097970151`, 54 s |
+| CI on the PR #14 branch | **PASS** — run `38097825506`, 1 m 34 s (`test` check: pass, 1 m 31 s) |
+| Vercel preview (PR #14) | **PASS** — Vercel check + Vercel Preview Comments both pass |
+| Netlify checks on PR #14 | **FAIL — pre-existing and unrelated**: `Header rules`, `Pages changed`, `Redirect rules`, `deploy-preview` all fail on a stray Netlify site attached to this Vercel-deployed project. The same failures appear on earlier PRs. |
+| Production deployment | A **Production** deployment for the merge commit `8dbd6683` exists (`gh api …/deployments`, created 2026-10-11T00:19:10Z). Its final state was not asserted here, so treat "production is serving this commit" as **VERIFIED only for the deployment record**, not for the HTTP response. |
+| Ready preview vs production | A green CI run and a ready preview are **not** a production deployment. Nothing in this follow-up branch is deployed; the PR is not merged. |
+
+### Local generation without the native engine
+
+`prisma generate` cannot download a native engine here, but the Prisma CLI
+(v6.19.3) bundles WASM engines (`schema_engine_bg.wasm`, `query_compiler_bg.*.wasm`)
+inside `node_modules/prisma/build/`. Generating from the real
+`prisma/schema.prisma` with the CLI's WASM path produces a genuine client whose
+types come from the real schema, which is what the 0-error type-check above was
+measured against. The generated client uses the query compiler and therefore
+requires a driver adapter at runtime, so it is a **type-check and build-compile
+harness only** — the committed code keeps the ordinary library-engine client that
+CI generates.
+
+### Still owner-gated
+
+1. Apply `prisma/sql/0001–0004` (unchanged from the list above).
+2. `CRON_SECRET` (≥32 chars) — both cron endpoints still answer `503`.
+3. `TELEGRAM_WEBHOOK_SECRET` (≥32 chars) + the one-shot admin button.
+4. **New, optional:** `prisma/sql/0005_outreach_schema_drift.sql` — see
+   `docs/growth/SCHEMA-DRIFT.md`. Owner approval required; it is not needed for
+   the pilot to work and was not executed.

@@ -12,6 +12,28 @@ import {
   FUNNEL_STAGE_LABELS,
   type FunnelStageKey,
 } from "@/lib/outreach/analytics";
+import { RecipientReview } from "@/components/outreach/recipient-review";
+import {
+  DisabledReasonHint,
+  EmptyStateNotice,
+  LoadFailureNotice,
+  LoadingNotice,
+  SettingsPausedNotice,
+} from "@/components/outreach/operator-notices";
+import { ManualSendPrompt } from "@/components/outreach/manual-send-prompt";
+import {
+  campaignActionAvailability,
+  failedLoadState,
+  initialLoadState,
+  invitationActionAvailability,
+  isUnresolved,
+  loadView,
+  loadingLoadState,
+  planIsStale,
+  readyLoadState,
+  settingsGate,
+  type LoadState,
+} from "@/lib/outreach/operator-controls";
 import {
   Bot,
   Check,
@@ -172,6 +194,14 @@ function formatDate(value: string | null | undefined): string {
   }
 }
 
+/**
+ * `GET /api/admin/outreach/settings` — only what the kill-switch gate reads.
+ */
+type OutreachSettingsPayload = {
+  settings?: { enabled?: boolean; autoSendEnabled?: boolean } | null;
+  readError?: string;
+} | null;
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -225,17 +255,27 @@ export function OutreachPanel() {
   );
 
   const [stats, setStats] = useState<any>(null);
-  const [campaigns, setCampaigns] = useState<any[]>([]);
+  /**
+   * Load state, not just data. A failed read must stay visible as a failure:
+   * an empty array is "nothing here", not "we could not ask the server".
+   */
+  const [campaignsState, setCampaignsState] = useState<LoadState<any[]>>(
+    initialLoadState()
+  );
   const [templateOptions, setTemplateOptions] = useState<any[]>([]);
   const [prospects, setProspects] = useState<any[]>([]);
   /** Database-wide prospect counts, independent of the loaded/filtered page. */
   const [prospectCounts, setProspectCounts] = useState<any>(null);
-  const [invitations, setInvitations] = useState<any[]>([]);
+  const [invitationsState, setInvitationsState] = useState<LoadState<any[]>>(
+    initialLoadState()
+  );
   const [templates, setTemplates] = useState<any[]>([]);
   const [keywords, setKeywords] = useState<any[]>([]);
   const [candidates, setCandidates] = useState<any[]>([]);
   const [runs, setRuns] = useState<any[]>([]);
-  const [settings, setSettings] = useState<any>(null);
+  const [settingsState, setSettingsState] = useState<LoadState<any>>(
+    initialLoadState()
+  );
   const [botInfo, setBotInfo] = useState<any>(null);
   /** Market registry + message defaults, loaded with the campaigns list. */
   const [cityData, setCityData] = useState<any>(null);
@@ -274,8 +314,14 @@ export function OutreachPanel() {
   }, [prospectFilter, prospectQuery]);
 
   const loadInvitations = useCallback(async () => {
-    const data = await api<any>("/api/admin/outreach/invitations");
-    setInvitations(data.invitations ?? []);
+    setInvitationsState((current) => loadingLoadState(current));
+    try {
+      const data = await api<any>("/api/admin/outreach/invitations");
+      setInvitationsState(readyLoadState<any[]>(data.invitations ?? []));
+    } catch (error) {
+      setInvitationsState((current) => failedLoadState<any[]>(error, current));
+      throw error;
+    }
   }, []);
 
   const loadTemplates = useCallback(async () => {
@@ -295,14 +341,31 @@ export function OutreachPanel() {
   }, []);
 
   const loadSettings = useCallback(async () => {
-    const data = await api<any>("/api/admin/outreach/settings");
-    setSettings(data);
-    return data;
+    setSettingsState((current) => loadingLoadState(current));
+    try {
+      const data: OutreachSettingsPayload = await api<any>(
+        "/api/admin/outreach/settings"
+      );
+      setSettingsState(readyLoadState<any>(data));
+      return data;
+    } catch (error) {
+      // A 503 here means the kill switch could not be read. Keep the failure in
+      // the state so every sending control stays disabled instead of guessing.
+      setSettingsState((current) => failedLoadState<any>(error, current));
+      throw error;
+    }
   }, []);
 
   const loadCampaigns = useCallback(async () => {
-    const data = await api<any>("/api/admin/outreach/campaigns");
-    setCampaigns(data.campaigns ?? []);
+    setCampaignsState((current) => loadingLoadState(current));
+    let data: any;
+    try {
+      data = await api<any>("/api/admin/outreach/campaigns");
+    } catch (error) {
+      setCampaignsState((current) => failedLoadState<any[]>(error, current));
+      throw error;
+    }
+    setCampaignsState(readyLoadState<any[]>(data.campaigns ?? []));
     setCityData({
       registry: data.cityRegistry ?? null,
       approved: data.cities ?? [],
@@ -326,9 +389,17 @@ export function OutreachPanel() {
   }, [loadStats, showLoadError]);
 
   useEffect(() => {
-    if (tab === "campaigns") void loadCampaigns().catch(showLoadError);
+    if (tab === "campaigns") {
+      void loadCampaigns().catch(showLoadError);
+      // The kill switch decides whether any sending control may be enabled, so
+      // it is read before the operator can press anything.
+      void loadSettings().catch(() => undefined);
+    }
     if (tab === "prospects") void loadProspects().catch(showLoadError);
-    if (tab === "invitations") void loadInvitations().catch(showLoadError);
+    if (tab === "invitations") {
+      void loadInvitations().catch(showLoadError);
+      void loadSettings().catch(() => undefined);
+    }
     if (tab === "templates") void loadTemplates().catch(() => undefined);
     if (tab === "keywords") void loadKeywords().catch(() => undefined);
     if (tab === "discovery") {
@@ -365,8 +436,16 @@ export function OutreachPanel() {
 
   /* ------------------------------------------------------------------ */
 
+  const isRtl = locale === "fa" || locale === "ar";
+  const gate = settingsGate(settingsState.data);
+
   return (
-    <div className="space-y-4">
+    <div
+      dir={isRtl ? "rtl" : "ltr"}
+      data-testid="outreach-panel"
+      data-settings-unreadable={gate.unreadable ? "true" : "false"}
+      className="space-y-4"
+    >
       <div className="flex gap-2 overflow-x-auto pb-1">
         {TABS.map((key) => (
           <button
@@ -399,11 +478,17 @@ export function OutreachPanel() {
 
       {tab === "campaigns" && (
         <CampaignsTab
-          campaigns={campaigns}
+          state={campaignsState}
+          settingsState={settingsState}
           templates={templateOptions}
           cityData={cityData}
           run={run}
           refresh={loadCampaigns}
+          onRetrySettings={() =>
+            run(async () => {
+              await loadSettings();
+            })
+          }
           setMessage={setMessage}
         />
       )}
@@ -427,12 +512,18 @@ export function OutreachPanel() {
 
       {tab === "invitations" && (
         <InvitationsTab
-          invitations={invitations}
+          state={invitationsState}
+          settingsState={settingsState}
           onReload={() => run(loadInvitations)}
           onPreview={setPreview}
           onCopy={copy}
           run={run}
           refresh={loadInvitations}
+          onRetrySettings={() =>
+            run(async () => {
+              await loadSettings();
+            })
+          }
           setMessage={setMessage}
         />
       )}
@@ -453,7 +544,7 @@ export function OutreachPanel() {
         <DiscoveryTab
           candidates={candidates}
           runs={runs}
-          settings={settings}
+          settings={settingsState.data}
           run={run}
           refresh={() => loadDiscovery()}
           refreshSettings={loadSettings}
@@ -1299,16 +1390,29 @@ function DiagnosticStat({
 /* ---------------------------------------------------------------------- */
 
 function InvitationsTab({
-  invitations,
+  state,
+  settingsState,
   onReload,
   onPreview,
   onCopy,
   run,
   refresh,
+  onRetrySettings,
   setMessage,
 }: any) {
   const t = useTranslations("outreach");
+  const locale = useLocale();
+  const isRtl = locale === "fa" || locale === "ar";
   const [count, setCount] = useState(10);
+  /** The invitation whose manual-send attestation is being recorded. */
+  const [manualSendFor, setManualSendFor] = useState<any>(null);
+  const [manualSendError, setManualSendError] = useState<string | null>(null);
+  const [manualSendBusy, setManualSendBusy] = useState(false);
+
+  const invitations: any[] = state?.data ?? [];
+  const view = loadView<any[]>(state, (rows) => rows.length === 0);
+  const gate = settingsGate(settingsState?.data);
+  const unresolved = isUnresolved(state) || settingsState?.phase !== "ready";
 
   async function prepare() {
     await run(async () => {
@@ -1322,38 +1426,107 @@ function InvitationsTab({
   }
 
   async function act(id: string, action: string) {
-    if (action === "mark_manual_sent" && !window.confirm("Confirm you already contacted this consenting recipient manually?")) return;
     await run(async () => {
       await api(`/api/admin/outreach/invitations/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ action, ...(action === "mark_manual_sent" ? { confirmedByOperator: true } : {}) }),
+        body: JSON.stringify({ action }),
       });
       await refresh();
+      setMessage({ kind: "ok", text: t("saved") });
     });
   }
 
+  /**
+   * Record an attestation. The dialog collects the two things the server
+   * requires (`evidence`, `confirmedByOperator`); the server still re-checked
+   * verification, do-not-contact, opt-out, consent and the kill switch before
+   * anything is written.
+   */
+  async function submitManualSend(payload: {
+    action: "mark_manual_sent";
+    confirmedByOperator: true;
+    evidence: string;
+  }) {
+    if (!manualSendFor) return;
+    setManualSendBusy(true);
+    setManualSendError(null);
+    try {
+      await api(`/api/admin/outreach/invitations/${manualSendFor.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      setManualSendFor(null);
+      await refresh();
+      setMessage({ kind: "ok", text: t("manualSendRecorded") });
+    } catch (error) {
+      // The server's message is shown verbatim: it names the exact rule that
+      // blocked the attestation.
+      setManualSendError(
+        error instanceof Error ? error.message : t("requestFailed")
+      );
+    } finally {
+      setManualSendBusy(false);
+    }
+  }
+
   return (
-    <div className="space-y-4">
+    <div dir={isRtl ? "rtl" : "ltr"} className="space-y-4">
       <section className={CARD_MAIN}>
         <h2 className="text-base font-bold text-[#1A1F36]">{t("prepareTitle")}</h2>
         <p className="mt-1 text-xs text-[#1A1F36]/60">{t("prepareHelp")}</p>
 
-        <div className="mt-4 flex gap-2">
+        {gate.paused && (
+          <div className="mt-2">
+            <SettingsPausedNotice
+              t={t}
+              testId={gate.unreadable ? "invitations-settings-unreadable" : "invitations-settings-paused"}
+            />
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-wrap gap-2">
           <input
             type="number"
             min={1}
             max={100}
             value={count}
             onChange={(e) => setCount(Number(e.target.value))}
+            dir="ltr"
+            aria-label={t("prepareCountLabel")}
             className={INPUT + " w-24"}
           />
-          <button type="button" onClick={prepare} className={BTN_PRIMARY}>
+          <button
+            type="button"
+            data-testid="invitations-prepare"
+            onClick={prepare}
+            disabled={unresolved || gate.paused}
+            className={BTN_PRIMARY}
+          >
             <Sparkles className="h-4 w-4" />
             {t("prepare")}
           </button>
-          <button type="button" onClick={onReload} className={BTN_GHOST}>
+          <button
+            type="button"
+            data-testid="invitations-reload"
+            onClick={onReload}
+            className={BTN_GHOST}
+          >
             <RefreshCw className="h-4 w-4" />
+            {t("retry")}
           </button>
+        </div>
+        <div className="mt-2">
+          <DisabledReasonHint
+            testId="invitations-prepare-hint"
+            reason={
+              unresolved
+                ? "controlBlockedUnresolved"
+                : gate.paused
+                  ? "controlBlockedSettingsPaused"
+                  : null
+            }
+            t={t}
+          />
         </div>
       </section>
 
@@ -1361,95 +1534,188 @@ function InvitationsTab({
         <h2 className="text-base font-bold text-[#1A1F36]">{t("invitationsTitle")}</h2>
 
         <div className="mt-3 space-y-3">
-          {invitations.length === 0 && (
-            <p className="text-sm text-[#1A1F36]/60">{t("empty")}</p>
+          {view === "loading" && (
+            <LoadingNotice label={t("loading")} testId="invitations-loading" />
           )}
 
-          {invitations.map((invitation: any) => (
-            <div key={invitation.id} className={CARD_INNER}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-[#1A1F36]">
-                    {invitation.prospect?.publicName ?? "—"}
+          {view === "error" && (
+            <LoadFailureNotice
+              testId="invitations-load-error"
+              title={t("invitationsLoadFailed")}
+              message={state?.error ?? t("requestFailed")}
+              onRetry={onReload}
+              t={t}
+            />
+          )}
+
+          {view === "empty" && (
+            <EmptyStateNotice testId="invitations-empty" message={t("empty")} />
+          )}
+
+          {view === "ready" &&
+            invitations.map((invitation: any) => {
+              const actions = invitationActionAvailability({
+                busy: false,
+                statusUnresolved: unresolved,
+                invitationStatus: invitation.status,
+                settingsPaused: gate.paused,
+              });
+              const approveReason = unresolved
+                ? null
+                : actions.approve.reason;
+              const manualReason = unresolved
+                ? null
+                : actions.mark_manual_sent.reason;
+
+              return (
+                <div
+                  key={invitation.id}
+                  data-testid="invitation-card"
+                  data-status={invitation.status}
+                  className={CARD_INNER}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-[#1A1F36]">
+                        {invitation.prospect?.publicName ?? "—"}
+                      </p>
+                      <p className="mt-0.5 text-[11px] font-medium text-[#1A1F36]/60">
+                        {invitation.language} · {formatDate(invitation.createdAt)}
+                        {invitation.prospect?.verificationStatus &&
+                        invitation.prospect.verificationStatus !== "VERIFIED"
+                          ? ` · ${
+                              VERIFICATION_FA[invitation.prospect.verificationStatus] ??
+                              invitation.prospect.verificationStatus
+                            }`
+                          : ""}
+                      </p>
+                    </div>
+                    <span className={`${BADGE} ${statusColor(invitation.status)}`}>
+                      {invitation.status}
+                    </span>
+                  </div>
+
+                  <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs font-medium leading-6 text-[#1A1F36]/70">
+                    {invitation.body}
                   </p>
-                  <p className="mt-0.5 text-[11px] font-medium text-[#1A1F36]/60">
-                    {invitation.language} · {formatDate(invitation.createdAt)}
-                    {invitation.prospect?.verificationStatus &&
-                    invitation.prospect.verificationStatus !== "VERIFIED"
-                      ? ` · ${VERIFICATION_FA[invitation.prospect.verificationStatus] ?? invitation.prospect.verificationStatus}`
-                      : ""}
-                  </p>
+
+                  {invitation.failureReason && (
+                    <p className="mt-2 rounded-xl bg-[#FF4D5E]/10 px-3 py-2 text-[11px] font-bold text-[#FF4D5E]">
+                      {invitation.failureReason}
+                    </p>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      data-testid="invitation-preview"
+                      onClick={() => onPreview(invitation)}
+                      className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-[#1A1F36] shadow-soft"
+                    >
+                      <Eye className="me-1 inline h-3.5 w-3.5" />
+                      {t("preview")}
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="invitation-copy"
+                      onClick={() =>
+                        onCopy(invitation.body + "\n\n" + invitation.deepLink)
+                      }
+                      className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-[#1A1F36] shadow-soft"
+                    >
+                      <ClipboardCopy className="me-1 inline h-3.5 w-3.5" />
+                      {t("copy")}
+                    </button>
+
+                    {invitation.status === "DRAFT" && (
+                      <>
+                        <button
+                          type="button"
+                          data-testid="invitation-approve"
+                          onClick={() => void act(invitation.id, "approve")}
+                          disabled={!actions.approve.enabled}
+                          className="rounded-xl bg-[#34C759] px-3 py-2 text-xs font-bold text-white shadow-soft disabled:opacity-50"
+                        >
+                          <Check className="me-1 inline h-3.5 w-3.5" />
+                          {t("approve")}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="invitation-reject"
+                          onClick={() => void act(invitation.id, "reject")}
+                          disabled={!actions.reject.enabled}
+                          className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-[#FF4D5E] shadow-soft disabled:opacity-50"
+                        >
+                          <XCircle className="me-1 inline h-3.5 w-3.5" />
+                          {t("reject")}
+                        </button>
+                      </>
+                    )}
+
+                    {invitation.status === "APPROVED" && (
+                      <button
+                        type="button"
+                        data-testid="invitation-manual-sent"
+                        onClick={() => {
+                          setManualSendError(null);
+                          setManualSendFor(invitation);
+                        }}
+                        disabled={!actions.mark_manual_sent.enabled}
+                        className="rounded-xl bg-[#FCA311] px-3 py-2 text-xs font-bold text-white shadow-soft disabled:opacity-50"
+                      >
+                        <Mail className="me-1 inline h-3.5 w-3.5" />
+                        {t("markManualSent")}
+                      </button>
+                    )}
+                  </div>
+
+                  {invitation.status === "DRAFT" && (
+                    <DisabledReasonHint
+                      testId={`invitation-approve-hint-${invitation.id}`}
+                      reason={approveReason}
+                      t={t}
+                    />
+                  )}
+                  {invitation.status === "APPROVED" && (
+                    <DisabledReasonHint
+                      testId={`invitation-manual-hint-${invitation.id}`}
+                      reason={manualReason}
+                      t={t}
+                    />
+                  )}
                 </div>
-                <span className={`${BADGE} ${statusColor(invitation.status)}`}>
-                  {invitation.status}
-                </span>
-              </div>
-
-              <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs font-medium leading-6 text-[#1A1F36]/70">
-                {invitation.body}
-              </p>
-
-              {invitation.failureReason && (
-                <p className="mt-2 rounded-xl bg-[#FF4D5E]/10 px-3 py-2 text-[11px] font-bold text-[#FF4D5E]">
-                  {invitation.failureReason}
-                </p>
-              )}
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => onPreview(invitation)}
-                  className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-[#1A1F36] shadow-soft"
-                >
-                  <Eye className="me-1 inline h-3.5 w-3.5" />
-                  {t("preview")}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onCopy(invitation.body + "\n\n" + invitation.deepLink)}
-                  className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-[#1A1F36] shadow-soft"
-                >
-                  <ClipboardCopy className="me-1 inline h-3.5 w-3.5" />
-                  {t("copy")}
-                </button>
-
-                {invitation.status === "DRAFT" && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void act(invitation.id, "approve")}
-                      className="rounded-xl bg-[#34C759] px-3 py-2 text-xs font-bold text-white shadow-soft"
-                    >
-                      <Check className="me-1 inline h-3.5 w-3.5" />
-                      {t("approve")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void act(invitation.id, "reject")}
-                      className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-[#FF4D5E] shadow-soft"
-                    >
-                      <XCircle className="me-1 inline h-3.5 w-3.5" />
-                      {t("reject")}
-                    </button>
-                  </>
-                )}
-
-                {invitation.status === "APPROVED" && (
-                  <button
-                    type="button"
-                    onClick={() => void act(invitation.id, "mark_manual_sent")}
-                    className="rounded-xl bg-[#FCA311] px-3 py-2 text-xs font-bold text-white shadow-soft"
-                  >
-                    <Mail className="me-1 inline h-3.5 w-3.5" />
-                    {t("markManualSent")}
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+              );
+            })}
         </div>
+
+        {settingsState?.phase === "error" && (
+          <div className="mt-3">
+            <LoadFailureNotice
+              testId="invitations-settings-error"
+              title={t("loadFailedTitle")}
+              message={settingsState.error ?? t("settingsUnreadableNotice")}
+              onRetry={onRetrySettings}
+              t={t}
+            />
+          </div>
+        )}
       </section>
+
+      {manualSendFor && (
+        <ManualSendPrompt
+          t={t}
+          recipientName={manualSendFor.prospect?.publicName ?? "—"}
+          busy={manualSendBusy}
+          error={manualSendError}
+          onCancel={() => {
+            if (manualSendBusy) return;
+            setManualSendFor(null);
+            setManualSendError(null);
+          }}
+          onSubmit={submitManualSend}
+        />
+      )}
     </div>
   );
 }
@@ -2980,17 +3246,24 @@ function MessageBuilder({
 }
 
 function CampaignsTab({
-  campaigns,
+  state,
+  settingsState,
   templates,
   cityData,
   run,
   refresh,
+  onRetrySettings,
   setMessage,
 }: any) {
   const t = useTranslations("outreach");
   const locale = useLocale();
+  const isRtl = locale === "fa" || locale === "ar";
+  const campaigns: any[] = state?.data ?? [];
+  const listView = loadView<any[]>(state, (rows) => rows.length === 0);
+  const gate = settingsGate(settingsState?.data);
   const [open, setOpen] = useState(false);
   const [plan, setPlan] = useState<any>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [campaignDetails, setCampaignDetails] = useState<Record<string, any>>({});
@@ -3070,13 +3343,41 @@ function CampaignsTab({
     });
   }
 
+  /**
+   * Which sensitive controls may be pressed for one campaign, and why not.
+   * Fail-closed: while the list or the settings are unresolved nothing is
+   * enabled, and delivery is never exposed from this UI.
+   */
+  function actionsFor(campaign: any) {
+    const planForCampaign =
+      plan && plan.campaignId === campaign.id ? plan : null;
+    return campaignActionAvailability({
+      busy: false,
+      statusUnresolved: isUnresolved(state),
+      campaignStatus: campaign.status,
+      planLoaded: Boolean(planForCampaign),
+      planStale: planForCampaign ? planIsStale(planForCampaign, campaign) : false,
+      settingsPaused: gate.paused || Boolean(planForCampaign?.settingsPaused),
+      approvable: planForCampaign?.approvable ?? 0,
+      heldOver: planForCampaign?.heldOver ?? 0,
+    });
+  }
+
   async function loadPlan(id: string) {
+    setPlanError(null);
     await run(async () => {
-      const data = await api<any>(`/api/admin/outreach/campaigns/${id}`);
-      setCampaignDetails((current) => ({ ...current, [id]: data.campaign }));
-      setAuditByCampaign((current) => ({ ...current, [id]: data.auditEvents ?? [] }));
-      setPlan({ ...data.plan, campaignId: id });
-      setExpanded(id);
+      try {
+        const data = await api<any>(`/api/admin/outreach/campaigns/${id}`);
+        setCampaignDetails((current) => ({ ...current, [id]: data.campaign }));
+        setAuditByCampaign((current) => ({ ...current, [id]: data.auditEvents ?? [] }));
+        setPlan({ ...data.plan, campaignId: id });
+        setExpanded(id);
+      } catch (error) {
+        setPlanError(
+          error instanceof Error ? error.message : t("requestFailed")
+        );
+        throw error;
+      }
     });
   }
 
@@ -3094,7 +3395,7 @@ function CampaignsTab({
   }
 
   return (
-    <div className={CARD_MAIN}>
+    <div className={CARD_MAIN} dir={isRtl ? "rtl" : "ltr"}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-extrabold text-[#1A1F36]">
@@ -3237,15 +3538,60 @@ function CampaignsTab({
         </div>
       )}
 
+      {gate.paused && (
+        <div className="mt-3">
+          <SettingsPausedNotice
+            t={t}
+            testId={
+              gate.unreadable
+                ? "campaigns-settings-unreadable"
+                : "campaigns-settings-paused"
+            }
+          />
+        </div>
+      )}
+
+      {listView === "loading" && (
+        <div className="mt-3">
+          <LoadingNotice label={t("loading")} testId="campaigns-loading" />
+        </div>
+      )}
+
+      {listView === "error" && (
+        <div className="mt-3">
+          <LoadFailureNotice
+            testId="campaigns-load-error"
+            title={t("campaignsLoadFailed")}
+            message={state?.error ?? t("requestFailed")}
+            onRetry={() => void run(refresh)}
+            t={t}
+          />
+        </div>
+      )}
+
+      {settingsState?.phase === "error" && (
+        <div className="mt-3">
+          <LoadFailureNotice
+            testId="campaigns-settings-error"
+            title={t("loadFailedTitle")}
+            message={settingsState.error ?? t("settingsUnreadableNotice")}
+            onRetry={onRetrySettings}
+            t={t}
+          />
+        </div>
+      )}
+
       <div className="mt-3 space-y-3">
-        {campaigns.length === 0 && (
-          <p className={`${CARD_INNER} text-sm text-[#1A1F36]/60`}>
-            {t("noCampaigns")}
-          </p>
+        {listView === "empty" && (
+          <EmptyStateNotice testId="campaigns-empty" message={t("noCampaigns")} />
         )}
 
-        {campaigns.map((campaign: any) => (
-          <div key={campaign.id} className={CARD_INNER}>
+        {campaigns.map((campaign: any) => {
+          const actions = actionsFor(campaign);
+          const unresolved =
+            isUnresolved(state) || settingsState?.phase !== "ready";
+          return (
+          <div key={campaign.id} className={CARD_INNER} data-testid="campaign-card">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold text-[#1A1F36]">
@@ -3282,6 +3628,7 @@ function CampaignsTab({
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 className={BTN_NEUTRAL}
+                data-testid={`campaign-edit-${campaign.id}`}
                 onClick={() => void run(() => openEditor(campaign.id))}
               >
                 <Mail className="h-3.5 w-3.5" />
@@ -3289,30 +3636,55 @@ function CampaignsTab({
               </button>
               <button
                 className={BTN_NEUTRAL}
+                data-testid={`campaign-dry-run-${campaign.id}`}
                 onClick={() => void run(() => act(campaign.id, "dry-run"))}
+                disabled={!actions.dry_run.enabled}
               >
                 {t("dryRun")}
               </button>
               <button
                 className={BTN_PRIMARY}
+                data-testid={`campaign-approve-${campaign.id}`}
                 onClick={() => void run(() => act(campaign.id, "approve"))}
-                disabled={campaign.status === "APPROVED"}
+                disabled={!actions.approve.enabled}
               >
                 {t("approve")}
               </button>
               <button
                 className={BTN_NEUTRAL}
+                data-testid={`campaign-prepare-${campaign.id}`}
                 onClick={() => void run(() => act(campaign.id, "prepare"))}
-                disabled={campaign.status !== "APPROVED"}
+                disabled={!actions.prepare.enabled}
               >
                 {t("prepare")}
               </button>
               <button
                 className={BTN_NEUTRAL}
+                data-testid={`campaign-view-plan-${campaign.id}`}
                 onClick={() => void run(() => loadPlan(campaign.id))}
               >
                 {t("viewPlan")}
               </button>
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-1">
+              <DisabledReasonHint
+                testId={`campaign-approve-hint-${campaign.id}`}
+                reason={unresolved ? null : actions.approve.reason}
+                t={t}
+              />
+              <DisabledReasonHint
+                testId={`campaign-prepare-hint-${campaign.id}`}
+                reason={unresolved ? null : actions.prepare.reason}
+                t={t}
+              />
+              {unresolved && (
+                <DisabledReasonHint
+                  testId={`campaign-unresolved-${campaign.id}`}
+                  reason="controlBlockedUnresolved"
+                  t={t}
+                />
+              )}
             </div>
 
             {editing === campaign.id && campaignDetails[campaign.id] && (
@@ -3344,6 +3716,15 @@ function CampaignsTab({
                   {t("eligible")}: {plan.eligible} · {t("manualOnly")}:{" "}
                   {plan.manualOnly} · {t("blocked")}: {plan.blocked}
                 </p>
+
+                {planIsStale(plan, campaign) && (
+                  <p
+                    data-testid="campaign-plan-stale"
+                    className="mt-2 rounded-xl bg-[#FCA311]/20 px-3 py-2 text-[11px] font-bold text-[#B45309]"
+                  >
+                    {t("planStaleNotice")}
+                  </p>
+                )}
 
                 {plan.byCitySegment?.length > 0 && (
                   <div className="mt-2 overflow-x-auto">
@@ -3380,44 +3761,42 @@ function CampaignsTab({
                   </div>
                 )}
 
-                {plan.warnings?.map((warning: string, index: number) => (
-                  <p
-                    key={index}
-                    className="mt-2 text-[11px] font-bold text-[#B45309]"
-                  >
-                    ⚠️ {warning}
-                  </p>
-                ))}
+                <RecipientReview
+                  plan={plan}
+                  locale={locale}
+                  t={t}
+                  dir={isRtl ? "rtl" : "ltr"}
+                  cityLabel={(code) => cityLabelFor(code, registry, locale)}
+                  segmentLabel={(segment) =>
+                    segment ? SEGMENT_FA[segment] ?? segment : ""
+                  }
+                  onCopy={(text) => {
+                    void navigator.clipboard?.writeText(text).catch(() => undefined);
+                    setMessage({ kind: "ok", text: t("copied") });
+                  }}
+                />
 
-                {plan.excluded?.map((recipient: any, index: number) => (
-                  <p key={`${recipient.prospectId}-${index}`} className="mt-1 text-[11px] text-[#B45309]">
-                    Excluded: {recipient.publicName} · {recipient.reason}
-                  </p>
-                ))}
-                <p className="mt-2 text-[11px] font-bold">CTA: {campaignDetails[campaign.id]?.cta ?? "See each message below"}. Preview links are placeholders; review the final DRAFT body before individual approval.</p>
-                {plan.recipients?.map((recipient: any) => (
-                  <div
-                    key={recipient.prospectId}
-                    className="mt-2 rounded-lg bg-white p-2"
-                  >
-                    <p className="text-[11px] font-bold text-[#1A1F36]">
-                      {recipient.publicName} ·{" "}
-                      {recipient.disposition === "ELIGIBLE"
-                        ? t("eligible")
-                        : t("manualOnly")}
-                    </p>
-                    <p className="text-[11px]">Verification: {recipient.verificationStatus} · Bot consent: {recipient.botConsent ? "current" : "none"} · Suppression: {recipient.suppressed ? "yes" : "no"} · Eligibility: {recipient.reason}</p>
-                    {recipient.previewBody && (
-                      <pre className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-[#1A1F36]/80">
-                        {recipient.previewBody}
-                      </pre>
-                    )}
-                  </div>
-                ))}
+                <p className="mt-2 text-[11px] font-medium text-[#1A1F36]/60">
+                  {t("previewNote")}
+                </p>
               </div>
             )}
+
+            {expanded === campaign.id && planError && (
+              <div className="mt-3">
+                <LoadFailureNotice
+                  testId="campaign-plan-load-error"
+                  title={t("loadFailedTitle")}
+                  message={planError}
+                  onRetry={() => void run(() => loadPlan(campaign.id))}
+                  t={t}
+                />
+              </div>
+            )}
+
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

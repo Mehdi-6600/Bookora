@@ -2,10 +2,14 @@ import { defineConfig } from "vitest/config";
 import path from "path";
 
 export default defineConfig({
+  // The Next.js tsconfig sets `jsx: "preserve"`. The render regression suites
+  // mount real components with react-dom/server, so JSX has to be transformed
+  // here (esbuild's automatic runtime).
+  esbuild: { jsx: "automatic", jsxImportSource: "react" },
   test: {
     environment: "node",
     globals: true,
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["./vitest.setup.ts"],
     env: {
       JWT_SECRET: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

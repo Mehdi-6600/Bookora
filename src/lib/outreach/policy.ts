@@ -55,6 +55,12 @@ export const POLICY_REASONS = {
   INVALID_INVITATION_STATE: "invalid_invitation_state",
   CAMPAIGN_NOT_APPROVED: "campaign_not_approved",
   DAILY_LIMIT: "daily_limit",
+  /**
+   * The prospect already has a pending invitation, so planning skips it. It is
+   * reported with a plain-language label like every other blocking reason so
+   * the reviewer never sees a bare code in the recipient list.
+   */
+  ALREADY_PENDING: "already_pending",
 } as const;
 
 export type PolicyReason =
@@ -139,6 +145,11 @@ export const POLICY_REASON_LABELS: Record<
     en: "Held back: the daily sending limit is already reached.",
     fa: "نگه داشته شد: سقف ارسال روزانه پر شده است.",
     ar: "مؤجّل: تم الوصول إلى حد الإرسال اليومي.",
+  },
+  [POLICY_REASONS.ALREADY_PENDING]: {
+    en: "Skipped: an invitation is already pending for this prospect.",
+    fa: "رد شد: یک دعوت‌نامه در انتظار برای این مورد وجود دارد.",
+    ar: "تم التخطي: هناك دعوة معلّقة لهذا النشاط بالفعل.",
   },
 };
 
