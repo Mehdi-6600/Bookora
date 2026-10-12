@@ -1,0 +1,333 @@
+name: DB Ops — apply + verify 0006 (gated)
+
+# Applies prisma/sql/0006_bot_starts_unique.sql to the Production database and
+# verifies the result, but only after every gate passes. It aborts without
+# touching anything when any gate fails.
+#
+# Gates, in order:
+#   1. a database credential is available to this runner (repo- or Production-environment scope)
+#   2. the target is a primary, holds production data, and has bot_starts
+#   3. a backup of the schema and of bot_starts was produced AND proven restorable
+#   4. no duplicate (telegramId, startParam) rows exist (the migration also aborts on them)
+#
+# It never prints a credential, never deletes or rewrites a row, never uploads
+# personal data, and never changes an outreach switch or a consent record.
+
+on:
+  push:
+    branches: [arena/decd6843-bookora]
+    paths: [".github/workflows/db-ops-apply.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  apply:
+    name: apply 0006 and verify
+    runs-on: ubuntu-latest
+    environment: Production
+    env:
+      C_DIRECT: ${{ secrets.DIRECT_URL }}
+      C_DATABASE: ${{ secrets.DATABASE_URL }}
+      C_POSTGRES: ${{ secrets.POSTGRES_URL }}
+      C_NEON: ${{ secrets.NEON_DATABASE_URL }}
+      C_PROD: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve credential and preflight (read-only)
+        run: |
+          set -o pipefail
+          R=/tmp/report.txt; : > "$R"
+          say() { echo "$*" >> "$R"; echo "$*"; }
+
+          URL="$C_DIRECT"; [ -n "$URL" ] || URL="$C_DATABASE"; [ -n "$URL" ] || URL="$C_POSTGRES"
+          [ -n "$URL" ] || URL="$C_NEON"; [ -n "$URL" ] || URL="$C_PROD"
+          if [ -z "$URL" ]; then
+            say "**BLOCKED: no database credential is configured for GitHub Actions.**"
+            say "Repository scope and environment \`Production\` were both checked. Nothing was connected to and nothing was modified."
+            say ""
+            say "Minimal enabler: create one repository secret named \`DIRECT_URL\` holding the Neon"
+            say "direct (unpooled) connection string. The value never has to leave the owner's hands."
+            echo "STOPPED_NO_CREDENTIAL" > /tmp/outcome
+            exit 0
+          fi
+
+          command -v psql >/dev/null 2>&1 || { sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq postgresql-client >/dev/null; }
+
+          say "## 1. Target database identity (masked)"
+          say ""
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -v ON_ERROR_STOP=1 -c "
+            select 'database' k, current_database() v
+            union all select 'is_replica', pg_is_in_recovery()::text
+            union all select 'server_addr_hash12', substr(md5(inet_server_addr()::text),1,12)
+            union all select 'server_port', inet_server_port()::text
+            union all select 'pg_version', (select setting from pg_settings where name='server_version')
+            union all select 'pg_started', pg_postmaster_start_time()::text;" 2>&1 | tee -a "$R"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select name, setting from pg_settings where name like 'neon%' order by name limit 20;" 2>&1 | tee -a "$R"
+          say '```'
+
+          say "## 2. Production fingerprint"
+          say ""
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'users' k, count(*)::text v from users
+            union all select 'businesses', count(*)::text from businesses
+            union all select 'bookings', count(*)::text from bookings
+            union all select 'bot_starts', count(*)::text from bot_starts;" 2>&1 | tee -a "$R"
+          say '```'
+
+          RECOVERY=$(psql "$URL" -X -A -t -c "select pg_is_in_recovery();")
+          USERS=$(psql "$URL" -X -A -t -c "select count(*) from users;" 2>/dev/null || echo 0)
+          BOTS=$(psql "$URL" -X -A -t -c "select to_regclass('public.\"bot_starts\"') is not null;" 2>/dev/null || echo f)
+          if [ "$RECOVERY" != "f" ]; then
+            say "**STOPPED: is_replica=$RECOVERY — refusing to write to a replica.**"; echo "STOPPED_REPLICA" > /tmp/outcome; exit 0
+          fi
+          if [ "$BOTS" != "t" ]; then
+            say "**STOPPED: bot_starts is absent — 0001 was never applied on this database.**"; echo "STOPPED_NO_TABLE" > /tmp/outcome; exit 0
+          fi
+          if [ "$USERS" = "0" ]; then
+            say "**STOPPED: zero rows in users — this does not look like the production database.**"; echo "STOPPED_NOT_PROD" > /tmp/outcome; exit 0
+          fi
+
+          psql "$URL" -X -A -t -c "
+            select count(*)::text || '|' || coalesce(md5(string_agg(id ||':'|| \"telegramId\" ||':'|| coalesce(\"startParam\",'-') ||':'|| coalesce(\"createdAt\"::text,'-'), ',' order by id)), 'empty')
+              from bot_starts;" > /tmp/pre_snapshot
+          say ""
+          say "pre-migration row-identity digest recorded: \`$(cat /tmp/pre_snapshot)\`"
+
+          say ""
+          say "## 3. Migration 0006 current state"
+          say ""
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'updateId' k, case when exists (select 1 from information_schema.columns
+                 where table_schema='public' and table_name='bot_starts' and column_name='updateId')
+                 then 'PRESENT' else 'MISSING' end v;"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select indexname, case when indexdef ilike '%unique%' then 'UNIQUE' else 'non-unique' end
+              from pg_indexes where schemaname='public' and tablename='bot_starts' order by 1;" 2>&1 | tee -a "$R"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'duplicate (telegramId,startParam) groups' k, count(*)::text v
+              from (select 1 from bot_starts where \"startParam\" is not null
+                     group by \"telegramId\",\"startParam\" having count(*) > 1) d;" 2>&1 | tee -a "$R"
+          say '```'
+
+          HASCOL=$(psql "$URL" -X -A -t -c "
+            select case when exists (select 1 from information_schema.columns
+                 where table_schema='public' and table_name='bot_starts' and column_name='updateId') then '1' else '0' end;")
+          HASIDX=$(psql "$URL" -X -A -t -c "
+            select case when (select count(*) from pg_indexes where schemaname='public'
+                 and indexname in ('bot_starts_telegramId_startParam_key','bot_starts_telegramId_updateId_key')) = 2 then '1' else '0' end;")
+          DUPS=$(psql "$URL" -X -A -t -c "
+            select count(*) from (select 1 from bot_starts where \"startParam\" is not null
+              group by \"telegramId\",\"startParam\" having count(*) > 1) d;")
+
+          if [ "$HASCOL" = "1" ] && [ "$HASIDX" = "1" ]; then
+            say ""
+            say "**0006 is already fully applied — applying is skipped and only verification runs.**"
+            echo "ALREADY_APPLIED" > /tmp/outcome
+          elif [ "$DUPS" != "0" ]; then
+            say ""
+            say "**STOPPED: $DUPS duplicate (telegramId, startParam) group(s) present.** The migration aborts on these by"
+            say "design; no row is deleted or merged automatically. An explicitly approved clean-up is required first."
+            echo "STOPPED_DUPLICATES" > /tmp/outcome
+          else
+            echo "READY_TO_APPLY" > /tmp/outcome
+          fi
+          cp /tmp/outcome /tmp/outcome_preflight
+          printf '%s' "$URL" > /tmp/db_ref
+          chmod 600 /tmp/db_ref
+
+      - name: Backup schema and bot_starts, then prove the backup restores
+        run: |
+          set -o pipefail
+          R=/tmp/report.txt
+          say() { echo "$*" >> "$R"; echo "$*"; }
+          if [ "$(cat /tmp/outcome)" != "READY_TO_APPLY" ]; then say ""; say "## 4. Backup — skipped (outcome: $(cat /tmp/outcome))"; exit 0; fi
+          URL=$(cat /tmp/db_ref)
+
+          say ""
+          say "## 4. Backup and restore verification"
+          say ""
+          say '```'
+          pg_dump "$URL" --schema-only -f /tmp/backup-schema.sql
+          pg_dump "$URL" --data-only --table=bot_starts -f /tmp/backup-bot_starts.sql
+          echo "dump sizes (bytes) and checksums:"
+          wc -c /tmp/backup-schema.sql /tmp/backup-bot_starts.sql | sed '$d'
+          sha256sum /tmp/backup-schema.sql /tmp/backup-bot_starts.sql | awk '{print substr($1,1,16)"…  "$2}'
+          SOURCE_ROWS=$(psql "$URL" -X -A -t -c "select count(*) from bot_starts;")
+          echo "source bot_starts rows: $SOURCE_ROWS"
+          say '```'
+
+          say ""
+          say "### Restoring both dumps into a throwaway PostgreSQL inside this runner"
+          say ""
+          say '```'
+          export PGDATA=/tmp/pgdata
+          command -v initdb >/dev/null 2>&1 || sudo apt-get install -y -qq postgresql >/dev/null 2>&1 || true
+          INITDB=$(ls /usr/lib/postgresql/*/bin/initdb 2>/dev/null | head -1); INITDB=${INITDB:-initdb}
+          PGCTL=$(ls /usr/lib/postgresql/*/bin/pg_ctl 2>/dev/null | head -1); PGCTL=${PGCTL:-pg_ctl}
+          rm -rf "$PGDATA"
+          "$INITDB" -D "$PGDATA" -U restorer >/dev/null 2>&1
+          "$PGCTL" -D "$PGDATA" -l /tmp/pglog -o "-p 55432 -k /tmp" start >/dev/null 2>&1
+          sleep 3
+          createdb -h /tmp -p 55432 -U restorer scratch
+          psql -h /tmp -p 55432 -U restorer -d scratch -q -v ON_ERROR_STOP=1 -f /tmp/backup-schema.sql >/dev/null && echo "schema dump restored: OK"
+          psql -h /tmp -p 55432 -U restorer -d scratch -q -c "set session_replication_role = replica;" -f /tmp/backup-bot_starts.sql >/dev/null && echo "bot_starts data restored: OK"
+          RESTORED_ROWS=$(psql -h /tmp -p 55432 -U restorer -d scratch -X -A -t -c "select count(*) from bot_starts;")
+          echo "restored bot_starts rows: $RESTORED_ROWS"
+          if [ "$RESTORED_ROWS" = "$SOURCE_ROWS" ]; then
+            echo "BACKUP VERIFIED: restorable, row count matches the source"
+          else
+            echo "BACKUP VERIFICATION FAILED — refusing to apply"; echo "STOPPED_BACKUP" > /tmp/outcome
+          fi
+          "$PGCTL" -D "$PGDATA" stop >/dev/null 2>&1 || true
+          say '```'
+
+          # Only the schema dump is retained as an artifact: no personal data.
+          cp /tmp/backup-schema.sql /tmp/artifact-schema.sql
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: db-0006-schema-backup
+          path: /tmp/artifact-schema.sql
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Apply migration 0006
+        run: |
+          set -o pipefail
+          R=/tmp/report.txt
+          say() { echo "$*" >> "$R"; echo "$*"; }
+          OUT=$(cat /tmp/outcome)
+          if [ "$OUT" = "ALREADY_APPLIED" ]; then say ""; say "## 5. Migration — skipped (already applied)"; exit 0; fi
+          if [ "$OUT" != "READY_TO_APPLY" ]; then say ""; say "## 5. Migration — not applied (outcome: $OUT)"; exit 0; fi
+          URL=$(cat /tmp/db_ref)
+
+          # The committed file stays byte-identical; only the runtime copy gains
+          # two SET LOCAL guard lines (integer milliseconds, so no quoting games).
+          sed '0,/^BEGIN;$/s//BEGIN;\nSET LOCAL lock_timeout = 5000;\nSET LOCAL statement_timeout = 120000;/' \
+            prisma/sql/0006_bot_starts_unique.sql > /tmp/0006_apply.sql
+          ORIG_LINES=$(wc -l < prisma/sql/0006_bot_starts_unique.sql)
+          RUNTIME_LINES=$(wc -l < /tmp/0006_apply.sql)
+          RUNTIME_SHA=$(sha256sum /tmp/0006_apply.sql | cut -d' ' -f1)
+
+          say ""
+          say "## 5. Migration applied"
+          say ""
+          say "runtime SQL: $ORIG_LINES lines committed → $RUNTIME_LINES lines executed (two guards added), sha256 \`${RUNTIME_SHA:0:16}…\`"
+          say ""
+          say '```'
+          set +e
+          psql "$URL" -X -q -v ON_ERROR_STOP=1 -P pager=off -f /tmp/0006_apply.sql 2>&1 | tee -a "$R"
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "psql exit code: $RC"
+          say '```'
+          if [ "$RC" != "0" ]; then
+            say ""
+            say "**MIGRATION FAILED (exit $RC).** The file wraps everything in one transaction, so a failure leaves the"
+            say "database exactly as it was. The workflow does not retry automatically."
+            echo "APPLY_FAILED" > /tmp/outcome
+          else
+            echo "APPLIED" > /tmp/outcome
+          fi
+
+      - name: Verify the result against the live database
+        if: always()
+        run: |
+          set -o pipefail
+          R=/tmp/report.txt
+          say() { echo "$*" >> "$R"; echo "$*"; }
+          OUT=$(cat /tmp/outcome)
+          if [ "$OUT" != "APPLIED" ] && [ "$OUT" != "ALREADY_APPLIED" ]; then
+            say ""; say "## 6. Verification — skipped (outcome: $OUT)"; exit 0
+          fi
+          URL=$(cat /tmp/db_ref)
+
+          say ""
+          say "## 6. Verification (read directly from the database)"
+          say ""
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select column_name, data_type, is_nullable, coalesce(column_default,'(none)') as default_value
+              from information_schema.columns
+             where table_schema='public' and table_name='bot_starts' and column_name='updateId';"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select i.relname as index_name, ix.indisunique, ix.indisvalid, ix.indisready
+              from pg_index ix join pg_class i on i.oid = ix.indexrelid
+             where ix.indrelid = 'bot_starts'::regclass
+               and i.relname in ('bot_starts_telegramId_startParam_key','bot_starts_telegramId_updateId_key')
+             order by 1;"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'duplicate groups (startParam)' k, count(*)::text v from (
+              select 1 from bot_starts where \"startParam\" is not null
+               group by \"telegramId\",\"startParam\" having count(*) > 1) d
+            union all select 'duplicate groups (updateId)', count(*)::text from (
+              select 1 from bot_starts where \"updateId\" is not null
+               group by \"telegramId\",\"updateId\" having count(*) > 1) d2;"
+          POST=$(psql "$URL" -X -A -t -c "
+            select count(*)::text || '|' || coalesce(md5(string_agg(id ||':'|| \"telegramId\" ||':'|| coalesce(\"startParam\",'-') ||':'|| coalesce(\"createdAt\"::text,'-'), ',' order by id)), 'empty')
+              from bot_starts;")
+          echo "pre  digest: $(cat /tmp/pre_snapshot)"
+          echo "post digest: $POST"
+          if [ "$(cat /tmp/pre_snapshot)" = "$POST" ]; then echo "ROWS PRESERVED: identical row-identity digest before and after"; else echo "WARNING: digest changed — investigate before trusting the result"; fi
+          say '```'
+
+          say ""
+          say "### Application-level probe (real Prisma Client, inside a rolled-back transaction)"
+          say ""
+          say '```'
+          npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund --ignore-scripts >/dev/null 2>&1
+          npx prisma generate >/dev/null 2>&1 && echo "prisma client generated"
+          DATABASE_URL="$URL" node -e '
+            const { PrismaClient } = require("@prisma/client");
+            const p = new PrismaClient();
+            (async () => {
+              try {
+                const rows = await p.botStart.findMany({ take: 1, orderBy: { createdAt: "desc" } });
+                console.log("READ bot_starts (every scalar column, incl. updateId): OK — rows=" + rows.length);
+                await p.$transaction(async (tx) => {
+                  const made = await tx.botStart.create({
+                    data: { telegramId: "__probe__", startParam: "__probe_0006__", updateId: 1 },
+                  });
+                  console.log("CREATE inside transaction: OK — id=" + made.id);
+                  throw new Error("ROLLBACK_ON_PURPOSE");
+                });
+              } catch (e) {
+                console.log("transaction outcome: " + String(e.message).split("\n")[0]);
+              } finally { await p.$disconnect(); }
+            })();'
+          LEFT=$(psql "$URL" -X -A -t -c "select count(*) from bot_starts where \"telegramId\" = '__probe__';")
+          echo "probe residue rows: $LEFT (must be 0)"
+          say '```'
+
+          say ""
+          say "## 7. Outreach switches (read-only; nothing was enabled by this workflow)"
+          say ""
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select key, value from admin_settings
+             where key in ('outreach.enabled','outreach.auto_send_enabled') order by key;"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'admin_settings rows with key like outreach.%' k, count(*)::text v from admin_settings where key like 'outreach.%';"
+          say '```'
+
+      - name: Publish findings
+        if: always()
+        run: |
+          REPORT=$(cat /tmp/report.txt 2>/dev/null || echo "no findings collected")
+          OUTCOME=$(cat /tmp/outcome 2>/dev/null || echo "UNKNOWN")
+          {
+            echo '{"name":"DB 0006 apply+verify","head_sha":"'"$GITHUB_SHA"'","status":"completed","conclusion":"neutral","output":'
+            printf '%s' "$REPORT" | jq -Rs --arg o "$OUTCOME" '{title:("Bookora 0006 — outcome: " + $o), summary:.}'
+            echo '}'
+          } > /tmp/payload.json
+          gh api -X POST "repos/$GITHUB_REPOSITORY/check-runs" --input /tmp/payload.json >/dev/null && echo "check run published"
