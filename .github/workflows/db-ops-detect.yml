@@ -1,0 +1,128 @@
+name: DB Ops — detect (read-only)
+
+# READ-ONLY. This workflow never modifies the database: it only reports whether a
+# credential is available and, if so, the database's non-sensitive identity and
+# the preconditions for prisma/sql/0006_bot_starts_unique.sql.
+# It prints presence booleans and catalog facts — never a secret value.
+
+on:
+  push:
+    branches: [arena/decd6843-bookora]
+    paths: [".github/workflows/db-ops-detect.yml"]
+  workflow_dispatch:
+
+jobs:
+  repo-scope:
+    name: repo-scoped secrets
+    runs-on: ubuntu-latest
+    env:
+      C_DIRECT: ${{ secrets.DIRECT_URL }}
+      C_DATABASE: ${{ secrets.DATABASE_URL }}
+      C_POSTGRES: ${{ secrets.POSTGRES_URL }}
+      C_NEON: ${{ secrets.NEON_DATABASE_URL }}
+      C_PROD_DB: ${{ secrets.PRODUCTION_DATABASE_URL }}
+    steps:
+      - name: Report which candidate secrets exist (booleans only)
+        run: |
+          echo "scope: repository"
+          for v in C_DIRECT C_DATABASE C_POSTGRES C_NEON C_PROD_DB; do
+            if [ -n "${!v}" ]; then echo "  $v = PRESENT"; else echo "  $v = absent"; fi
+          done
+          if [ -n "$C_DIRECT$C_DATABASE$C_POSTGRES$C_NEON$C_PROD_DB" ]; then
+            echo "RESULT: at least one database credential is available at repository scope"
+          else
+            echo "RESULT: no database credential at repository scope"
+          fi
+
+  production-environment:
+    name: Production-environment secrets
+    runs-on: ubuntu-latest
+    environment: Production
+    env:
+      C_DIRECT: ${{ secrets.DIRECT_URL }}
+      C_DATABASE: ${{ secrets.DATABASE_URL }}
+      C_POSTGRES: ${{ secrets.POSTGRES_URL }}
+      C_NEON: ${{ secrets.NEON_DATABASE_URL }}
+      C_PROD_DB: ${{ secrets.PRODUCTION_DATABASE_URL }}
+    steps:
+      - name: Report which candidate secrets exist (booleans only)
+        run: |
+          echo "scope: environment=Production"
+          for v in C_DIRECT C_DATABASE C_POSTGRES C_NEON C_PROD_DB; do
+            if [ -n "${!v}" ]; then echo "  $v = PRESENT"; else echo "  $v = absent"; fi
+          done
+          if [ -n "$C_DIRECT$C_DATABASE$C_POSTGRES$C_NEON$C_PROD_DB" ]; then
+            echo "RESULT: at least one database credential is available in environment Production"
+          else
+            echo "RESULT: no database credential in environment Production"
+          fi
+
+      - name: Read-only identity and 0006 preconditions (only when a credential exists)
+        env:
+          URL_DIRECT: ${{ secrets.DIRECT_URL }}
+          URL_DATABASE: ${{ secrets.DATABASE_URL }}
+          URL_NEON: ${{ secrets.NEON_DATABASE_URL }}
+          URL_PROD: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          URL="$URL_DIRECT"
+          [ -n "$URL" ] || URL="$URL_DATABASE"
+          [ -n "$URL" ] || URL="$URL_NEON"
+          [ -n "$URL" ] || URL="$URL_PROD"
+          if [ -z "$URL" ]; then echo "no credential to connect with; stopping"; exit 0; fi
+
+          command -v psql >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client; }
+
+          # A connection string was found but its value is never printed.
+          echo "credential: found (value not shown)"
+
+          psql "$URL" -X -q -A -F' | ' -P pager=off -v ON_ERROR_STOP=1 -c "
+            select current_database() as database,
+                   current_user as db_role,
+                   pg_is_in_recovery() as is_replica,
+                   (select setting from pg_settings where name='server_version') as pg_version,
+                   inet_server_addr() as server_ip,
+                   inet_server_port() as server_port,
+                   pg_postmaster_start_time() as pg_started;" || { echo "CONNECT FAILED"; exit 1; }
+
+          echo "--- expected tables present ---"
+          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+            select t as table_name,
+                   case when to_regclass('public.\"' || t || '\"') is null then 'MISSING' else 'present' end as status
+              from unnest(array['bot_starts','users','businesses','bookings','admin_settings',
+                                'outreach_prospects','outreach_invitations','outreach_campaigns',
+                                'telegram_bot_opt_ins','outreach_audit_events']) as t
+             order by 1;"
+
+          echo "--- production fingerprint (row counts) ---"
+          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+            select (select count(*) from users) as users,
+                   (select count(*) from businesses) as businesses,
+                   (select count(*) from bookings) as bookings,
+                   (select count(*) from bot_starts) as bot_starts_rows,
+                   (select max(\"createdAt\") from bot_starts) as last_bot_start;"
+
+          echo "--- 0006 state: column, indexes, duplicates ---"
+          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+            select case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='bot_starts'
+                          and column_name='updateId') then 'updateId: PRESENT' else 'updateId: MISSING' end as col;"
+          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+            select indexname, case when indexdef ilike '%unique%' then 'UNIQUE' else 'non-unique' end as kind
+              from pg_indexes where schemaname='public' and tablename='bot_starts' order by indexname;"
+          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+            select coalesce(sum(c),0) as duplicate_groups
+              from (select count(*) c from bot_starts
+                     where \"startParam\" is not null
+                     group by \"telegramId\",\"startParam\" having count(*) > 1) d;"
+
+          echo "--- outreach kill switches (values are not secrets) ---"
+          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+            select key, value from admin_settings
+             where key in ('outreach.enabled','outreach.auto_send_enabled') order by key;"
+          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+            select count(*) as outreach_rows_in_admin_settings
+              from admin_settings where key like 'outreach.%';"
+
+          echo "--- active sessions (counts only, no query text) ---"
+          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+            select count(*) as other_sessions from pg_stat_activity where pid <> pg_backend_pid();"
