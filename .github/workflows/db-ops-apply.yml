@@ -307,6 +307,29 @@ jobs:
             })();'
           LEFT=$(psql "$URL" -X -A -t -c "select count(*) from bot_starts where \"telegramId\" = '__probe__';")
           echo "probe residue rows: $LEFT (must be 0)"
+
+          echo ""
+          echo "--- idempotency probe: write, then refuse the duplicate, then roll back ---"
+          printf '%s\n' \
+            'BEGIN;' \
+            'INSERT INTO "bot_starts" (id,"telegramId","startParam","updateId","wasExistingUser")' \
+            '  VALUES ('"'"'__probeA_0006__'"'"','"'"'__probe__'"'"','"'"'__probe_0006__'"'"',1,false);' \
+            'SELECT '"'"'PASS: first /start-shaped write accepted'"'"' AS step1;' \
+            'DO $$' \
+            'BEGIN' \
+            '  BEGIN' \
+            '    INSERT INTO "bot_starts" (id,"telegramId","startParam","updateId","wasExistingUser")' \
+            '      VALUES ('"'"'__probeB_0006__'"'"','"'"'__probe__'"'"','"'"'__probe_0006__'"'"',2,false);' \
+            '    RAISE EXCEPTION '"'"'FAIL: duplicate was accepted — uniqueness not enforced'"'"';' \
+            '  EXCEPTION WHEN unique_violation THEN' \
+            '    RAISE NOTICE '"'"'PASS: duplicate update rejected by the unique index'"'"';' \
+            '  END;' \
+            'END $$;' \
+            'ROLLBACK;' \
+            > /tmp/probe.sql
+          psql "$URL" -X -q -A -P pager=off -v ON_ERROR_STOP=1 -f /tmp/probe.sql
+          LEFT2=$(psql "$URL" -X -A -t -c "select count(*) from bot_starts where \"telegramId\" = '__probe__';")
+          echo "residue after idempotency probe: $LEFT2 (must be 0)"
           say '```'
 
           say ""
