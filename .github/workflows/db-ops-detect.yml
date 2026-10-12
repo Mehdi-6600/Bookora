@@ -1,9 +1,12 @@
 name: DB Ops — detect (read-only)
 
-# READ-ONLY. This workflow never modifies the database: it only reports whether a
-# credential is available and, if so, the database's non-sensitive identity and
-# the preconditions for prisma/sql/0006_bot_starts_unique.sql.
-# It prints presence booleans and catalog facts — never a secret value.
+# READ-ONLY. Reports whether a Production database credential is available to CI
+# and, if so, the database's non-sensitive identity plus the preconditions for
+# prisma/sql/0006_bot_starts_unique.sql.
+#
+# Findings are published as a check-run summary because workflow logs are not
+# reachable from every network. No secret value is ever printed: only presence
+# booleans, catalog facts and a masked host fingerprint.
 
 on:
   push:
@@ -11,31 +14,13 @@ on:
     paths: [".github/workflows/db-ops-detect.yml"]
   workflow_dispatch:
 
-jobs:
-  repo-scope:
-    name: repo-scoped secrets
-    runs-on: ubuntu-latest
-    env:
-      C_DIRECT: ${{ secrets.DIRECT_URL }}
-      C_DATABASE: ${{ secrets.DATABASE_URL }}
-      C_POSTGRES: ${{ secrets.POSTGRES_URL }}
-      C_NEON: ${{ secrets.NEON_DATABASE_URL }}
-      C_PROD_DB: ${{ secrets.PRODUCTION_DATABASE_URL }}
-    steps:
-      - name: Report which candidate secrets exist (booleans only)
-        run: |
-          echo "scope: repository"
-          for v in C_DIRECT C_DATABASE C_POSTGRES C_NEON C_PROD_DB; do
-            if [ -n "${!v}" ]; then echo "  $v = PRESENT"; else echo "  $v = absent"; fi
-          done
-          if [ -n "$C_DIRECT$C_DATABASE$C_POSTGRES$C_NEON$C_PROD_DB" ]; then
-            echo "RESULT: at least one database credential is available at repository scope"
-          else
-            echo "RESULT: no database credential at repository scope"
-          fi
+permissions:
+  contents: read
+  checks: write
 
-  production-environment:
-    name: Production-environment secrets
+jobs:
+  detect:
+    name: detect credential and 0006 preconditions
     runs-on: ubuntu-latest
     environment: Production
     env:
@@ -43,86 +28,125 @@ jobs:
       C_DATABASE: ${{ secrets.DATABASE_URL }}
       C_POSTGRES: ${{ secrets.POSTGRES_URL }}
       C_NEON: ${{ secrets.NEON_DATABASE_URL }}
-      C_PROD_DB: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      C_PROD: ${{ secrets.PRODUCTION_DATABASE_URL }}
     steps:
-      - name: Report which candidate secrets exist (booleans only)
+      - name: Collect findings (read-only)
         run: |
-          echo "scope: environment=Production"
-          for v in C_DIRECT C_DATABASE C_POSTGRES C_NEON C_PROD_DB; do
-            if [ -n "${!v}" ]; then echo "  $v = PRESENT"; else echo "  $v = absent"; fi
+          set -o pipefail
+          R=/tmp/report.txt
+          : > "$R"
+          say() { echo "$*" | tee -a "$R"; }
+
+          say "## 1. Credential availability (presence only, never values)"
+          for v in C_DIRECT C_DATABASE C_POSTGRES C_NEON C_PROD; do
+            if [ -n "${!v}" ]; then say "- \`$v\`: **PRESENT**"; else say "- \`$v\`: absent"; fi
           done
-          if [ -n "$C_DIRECT$C_DATABASE$C_POSTGRES$C_NEON$C_PROD_DB" ]; then
-            echo "RESULT: at least one database credential is available in environment Production"
-          else
-            echo "RESULT: no database credential in environment Production"
+
+          URL="$C_DIRECT"
+          [ -n "$URL" ] || URL="$C_DATABASE"
+          [ -n "$URL" ] || URL="$C_POSTGRES"
+          [ -n "$URL" ] || URL="$C_NEON"
+          [ -n "$URL" ] || URL="$C_PROD"
+
+          if [ -z "$URL" ]; then
+            say ""
+            say "**BLOCKED: no database credential is configured for GitHub Actions** (repository scope"
+            say "and environment \`Production\` were both checked). Nothing was connected to and nothing"
+            say "was modified."
+            exit 0
           fi
+          say ""
+          say "### Credential found (value never printed)"
 
-      - name: Read-only identity and 0006 preconditions (only when a credential exists)
-        env:
-          URL_DIRECT: ${{ secrets.DIRECT_URL }}
-          URL_DATABASE: ${{ secrets.DATABASE_URL }}
-          URL_NEON: ${{ secrets.NEON_DATABASE_URL }}
-          URL_PROD: ${{ secrets.PRODUCTION_DATABASE_URL }}
-        run: |
-          URL="$URL_DIRECT"
-          [ -n "$URL" ] || URL="$URL_DATABASE"
-          [ -n "$URL" ] || URL="$URL_NEON"
-          [ -n "$URL" ] || URL="$URL_PROD"
-          if [ -z "$URL" ]; then echo "no credential to connect with; stopping"; exit 0; fi
+          command -v psql >/dev/null 2>&1 || { sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq postgresql-client >/dev/null; }
 
-          command -v psql >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client; }
+          PSQL="psql $URL -X -q -A -F| -P pager=off -v ON_ERROR_STOP=1"
 
-          # A connection string was found but its value is never printed.
-          echo "credential: found (value not shown)"
+          say ""
+          say "## 2. Connection identity"
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -v ON_ERROR_STOP=1 -c "
+            select 'database' as k, current_database() as v
+            union all select 'db_role', current_user
+            union all select 'is_replica', pg_is_in_recovery()::text
+            union all select 'pg_version', (select setting from pg_settings where name='server_version')
+            union all select 'server_addr_hash12', substr(md5(inet_server_addr()::text),1,12)
+            union all select 'server_port', inet_server_port()::text
+            union all select 'pg_started', pg_postmaster_start_time()::text
+            union all select 'in_recovery', pg_is_in_recovery()::text;" 2>&1 | tee -a "$R"
+          say '```'
 
-          psql "$URL" -X -q -A -F' | ' -P pager=off -v ON_ERROR_STOP=1 -c "
-            select current_database() as database,
-                   current_user as db_role,
-                   pg_is_in_recovery() as is_replica,
-                   (select setting from pg_settings where name='server_version') as pg_version,
-                   inet_server_addr() as server_ip,
-                   inet_server_port() as server_port,
-                   pg_postmaster_start_time() as pg_started;" || { echo "CONNECT FAILED"; exit 1; }
+          say ""
+          say "## 3. Neon identity settings (if exposed)"
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select name, setting from pg_settings where name like 'neon%' order by name limit 20;" 2>&1 | tee -a "$R"
+          say '```'
 
-          echo "--- expected tables present ---"
-          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+          say ""
+          say "## 4. Expected tables"
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
             select t as table_name,
                    case when to_regclass('public.\"' || t || '\"') is null then 'MISSING' else 'present' end as status
               from unnest(array['bot_starts','users','businesses','bookings','admin_settings',
                                 'outreach_prospects','outreach_invitations','outreach_campaigns',
                                 'telegram_bot_opt_ins','outreach_audit_events']) as t
-             order by 1;"
+             order by 2 desc, 1;" 2>&1 | tee -a "$R"
+          say '```'
 
-          echo "--- production fingerprint (row counts) ---"
-          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
-            select (select count(*) from users) as users,
-                   (select count(*) from businesses) as businesses,
-                   (select count(*) from bookings) as bookings,
-                   (select count(*) from bot_starts) as bot_starts_rows,
-                   (select max(\"createdAt\") from bot_starts) as last_bot_start;"
+          say ""
+          say "## 5. Production fingerprint"
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'users' k, count(*)::text v from users
+            union all select 'businesses', count(*)::text from businesses
+            union all select 'bookings', count(*)::text from bookings
+            union all select 'bot_starts_rows', count(*)::text from bot_starts
+            union all select 'bot_starts_last_createdAt', coalesce(max(\"createdAt\")::text,'-') from bot_starts;" 2>&1 | tee -a "$R"
+          say '```'
 
-          echo "--- 0006 state: column, indexes, duplicates ---"
-          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
-            select case when exists (select 1 from information_schema.columns
+          say ""
+          say "## 6. Migration 0006 state"
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'updateId column' k,
+                   case when exists (select 1 from information_schema.columns
                         where table_schema='public' and table_name='bot_starts'
-                          and column_name='updateId') then 'updateId: PRESENT' else 'updateId: MISSING' end as col;"
-          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
-            select indexname, case when indexdef ilike '%unique%' then 'UNIQUE' else 'non-unique' end as kind
-              from pg_indexes where schemaname='public' and tablename='bot_starts' order by indexname;"
-          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
-            select coalesce(sum(c),0) as duplicate_groups
-              from (select count(*) c from bot_starts
-                     where \"startParam\" is not null
-                     group by \"telegramId\",\"startParam\" having count(*) > 1) d;"
+                          and column_name='updateId') then 'PRESENT' else 'MISSING' end v;"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select indexname, case when indexdef ilike '%unique%' then 'UNIQUE' else 'non-unique' end
+              from pg_indexes where schemaname='public' and tablename='bot_starts' order by 1;" 2>&1 | tee -a "$R"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'duplicate (telegramId,startParam) groups' k, count(*)::text v
+              from (select 1 from bot_starts where \"startParam\" is not null
+                     group by \"telegramId\",\"startParam\" having count(*) > 1) d;" 2>&1 | tee -a "$R"
+          say '```'
 
-          echo "--- outreach kill switches (values are not secrets) ---"
-          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
+          say ""
+          say "## 7. Outreach kill switches (current values, read-only)"
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
             select key, value from admin_settings
-             where key in ('outreach.enabled','outreach.auto_send_enabled') order by key;"
-          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
-            select count(*) as outreach_rows_in_admin_settings
-              from admin_settings where key like 'outreach.%';"
+             where key in ('outreach.enabled','outreach.auto_send_enabled') order by key;" 2>&1 | tee -a "$R"
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select 'rows with key like outreach.%' k, count(*)::text v from admin_settings where key like 'outreach.%';" 2>&1 | tee -a "$R"
+          say '```'
 
-          echo "--- active sessions (counts only, no query text) ---"
-          psql "$URL" -X -q -A -F' | ' -P pager=off -c "
-            select count(*) as other_sessions from pg_stat_activity where pid <> pg_backend_pid();"
+          say ""
+          say "## 8. Concurrent sessions (count only, no query text)"
+          say '```'
+          psql "$URL" -X -q -A -F'|' -P pager=off -c "
+            select count(*)::text as other_sessions from pg_stat_activity where pid <> pg_backend_pid();" 2>&1 | tee -a "$R"
+          say '```'
+
+      - name: Publish findings as a check-run summary
+        if: always()
+        run: |
+          REPORT=$(cat /tmp/report.txt 2>/dev/null || echo "no findings collected")
+          {
+            echo '{"name":"DB 0006 readiness","head_sha":"'"$GITHUB_SHA"'","status":"completed","conclusion":"neutral","output":'
+            printf '%s' "$REPORT" | jq -Rs '{title:"Bookora DB 0006 readiness (read-only)", summary:.}'
+            echo '}'
+          } > /tmp/payload.json
+          gh api -X POST "repos/$GITHUB_REPOSITORY/check-runs" --input /tmp/payload.json >/dev/null && echo "check run published"
