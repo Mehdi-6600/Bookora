@@ -5,41 +5,32 @@ name: DB Ops — 0007 apply + verify (gated)
 # when every gate passes. The run is never reported as successful unless the
 # change was really made and really verified.
 #
-# Secret provenance (important): the \`secrets.*\` values referenced below are
+# Secret provenance (important): the `secrets.*` values referenced below are
 # GitHub Actions repository/environment secrets, NOT Vercel environment
 # variables. Vercel does not automatically forward its env to GitHub Actions.
-# Before an apply run the operator must confirm that the GitHub Actions
-# \`Production\` environment (or repository) has \`DIRECT_URL\` (and, optionally,
-# \`DATABASE_URL\`) set to the same Neon direct connection string that Vercel
-# Production uses. This workflow never prints any secret value, never asks for
-# a value to be pasted, and never reads a value from Vercel.
+# This workflow never prints any secret value, never asks for a value to be
+# pasted, and never reads a value from Vercel.
 #
 #   mode=verify-only (default): read-only. Reports identity, a masked
-#     fingerprint, and the 0007 state. Writes nothing, ever. Use it first to
-#     record the trusted fingerprint values required by the apply gate.
+#     fingerprint, and the 0007 structural state. Writes nothing, ever.
 #   mode=apply : additionally requires confirm=APPLY-0007 AND trusted
-#     fingerprint inputs, then backs up (schema-only), applies the migration
-#     and verifies it.
+#     fingerprint inputs, then takes a schema-only DDL dump, applies the
+#     migration and verifies it.
 #
-# Gates before any write (in order, fail-closed):
-#   1. A usable DIRECT_URL credential is present in GitHub Actions secrets.
-#   2. Credential connects; target is a primary (not a replica).
+# Gates before any write (fail-closed):
+#   1. DIRECT_URL (or one fallback) is present and parses as postgres(s)://.
+#   2. Credential connects; target is a primary; businesses table exists.
 #   3. Trusted fingerprint inputs are provided AND match the live target
-#      (database name, server address hash prefix, users/businesses/bookings
-#      counts). Without a trusted fingerprint the run stops before any write
-#      and prints exactly what a verify-only run recorded.
-#   4. Pre-state is either NOT_APPLIED (all 9 objects missing) or
-#      ALREADY_APPLIED (all 9 objects present). PARTIAL states abort.
-#   5. Schema-only backup is produced.
-#   6. The DDL file runs in a single transaction with lock/statement timeouts;
-#      any psql failure aborts (ON_ERROR_STOP=1) and rolls back.
-#
-# The workflow never prints a connection string, never uploads personal data,
-# never inserts/updates/deletes an application row outside the explicitly
-# rolled-back Prisma probe, and never changes an outreach switch or a consent
-# record. Any failure — credential absent, identity unverifiable, fingerprint
-# mismatch, gates not met, migration error, verification mismatch, or probe
-# assertion failure — ends the run as a FAILURE.
+#      (database name, server hash prefix, users/businesses/bookings counts).
+#   4. Pre-state is NOT_APPLIED or ALREADY_APPLIED per the structural checks
+#      in prisma/sql/_ci_0007_state_check.sql; PARTIAL_OR_UNEXPECTED aborts.
+#   5. Schema-only DDL dump is produced (DDL reference; NOT a data backup —
+#      data recovery must use Neon PITR/branch).
+#   6. The DDL runs in one transaction with lock/statement timeouts; any
+#      failure aborts with ON_ERROR_STOP=1 and rolls back.
+#   7. Post-apply structural checks all pass and table counts are unchanged.
+#   8. Prisma probe: read lifecycle columns, create a holiday inside a
+#      transaction, deliberately rollback, confirm zero residue.
 
 on:
   workflow_dispatch:
@@ -51,36 +42,30 @@ on:
         default: verify-only
         required: true
       confirm:
-        description: 'Type exactly APPLY-0007 to permit mode=apply. Ignored for verify-only.'
+        description: 'Type exactly APPLY-0007 to permit mode=apply.'
         type: string
         default: ""
-      # Trusted-fingerprint inputs. These are NOT secrets. They are obtained
-      # from a prior verify-only run on this same workflow (Section 1 & 2 of
-      # the report). They pin the apply run to a specific target so it cannot
-      # silently run against a freshly-created Neon branch, a restored copy,
-      # or a preview database.
       expected_database:
-        description: "(apply only) Expected value of current_database() (from verify-only §1)."
+        description: "(apply only) Expected current_database() from verify-only §1."
         required: false
         default: ""
       expected_server_hash12:
-        description: "(apply only) Expected server_addr_hash12 (12 hex chars, from verify-only §1)."
+        description: "(apply only) Expected server_addr_hash12 (12 hex) from verify-only §1."
         required: false
         default: ""
       expected_users:
-        description: "(apply only) Expected users row count (from verify-only §2)."
+        description: "(apply only) Expected users row count from verify-only §2."
         required: false
         default: ""
       expected_businesses:
-        description: "(apply only) Expected businesses row count (from verify-only §2)."
+        description: "(apply only) Expected businesses row count from verify-only §2."
         required: false
         default: ""
       expected_bookings:
-        description: "(apply only) Expected bookings row count (from verify-only §2)."
+        description: "(apply only) Expected bookings row count from verify-only §2."
         required: false
         default: ""
 
-# Never let two migration runs overlap, and never cancel one mid-flight.
 concurrency:
   group: db-ops-0007
   cancel-in-progress: false
@@ -95,8 +80,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: Production
     env:
-      # GitHub Actions environment/repository secrets ONLY — these are NOT
-      # read from Vercel. Vercel's own env is never consulted by this workflow.
       C_DIRECT: ${{ secrets.DIRECT_URL }}
       C_DATABASE: ${{ secrets.DATABASE_URL }}
       C_POSTGRES: ${{ secrets.POSTGRES_URL }}
@@ -121,75 +104,110 @@ jobs:
           OUT=/tmp/outcome; echo "PENDING" > "$OUT"
 
           say() { printf '%s\n' "$*" | tee -a "$R"; }
-          # Redaction: the connection string is never printed; host and
-          # user:password are stripped from anything echoed.
-          red() { sed -e "s|${PGHOST:-__no_host__}|[db-host]|g" -e 's|://[^:/@]*:[^@]*@|://***:***@|g'; }
+          # Redact host + any user:password + password= query string before
+          # anything hits the report. All query/probe output is piped through.
+          red() {
+            sed -e "s|${PGHOST:-__no_host__}|[db-host]|g" \
+                -e 's|://[^:/@]*:[^@]*@|://***:***@|g' \
+                -e 's|password=[^&"'"'"' ]*|password=***|g'
+          }
           finish() {
             echo "$1" > "$OUT"
             say ""
             say "**OUTCOME: \`$1\`**"
             exit 0
           }
+
           say "mode: \`$MODE\`"
           say "target migration: \`prisma/sql/0007_business_lifecycle_holidays.sql\`"
           say ""
           say "## 0. Secret provenance"
           say ""
-          say "Credentials are read from GitHub Actions \`Production\` environment/repository secrets"
-          say "(\`DIRECT_URL\`, \`DATABASE_URL\`, \`POSTGRES_URL\`, \`NEON_DATABASE_URL\`, \`PRODUCTION_DATABASE_URL\`)."
-          say "Vercel environment variables are NOT accessible to this workflow and were not consulted."
-          say "Values are never printed."
+          say "Credentials are read from GitHub Actions \`Production\` environment/repository secrets."
+          say "Vercel environment variables are NOT accessible here. Values are never printed."
 
-          # ── Gate 1: a credential must exist ──────────────────────────────────
-          URL="${C_DIRECT:-}"; [ -n "$URL" ] || URL="${C_DATABASE:-}"; [ -n "$URL" ] || URL="${C_POSTGRES:-}"
-          [ -n "$URL" ] || URL="${C_NEON:-}"; [ -n "$URL" ] || URL="${C_PROD:-}"
+          # ── Gate 1: credential resolution + URL validation ────────────────
+          DIRECT_SELECTED="${C_DIRECT:-}"
+          DATABASE_SELECTED="${C_DATABASE:-}"
+          # verify-only may read through any available postgres URL; apply
+          # MUST have a direct/unpooled URL in DIRECT_URL (DDL + lock_timeout
+          # + multi-statement transactions are not safe through a pooler).
+          if [ "$MODE" = "apply" ]; then
+            if [ -z "$DIRECT_SELECTED" ]; then
+              say ""
+              say "## BLOCKED — mode=apply requires secret DIRECT_URL (direct/unpooled)"
+              say ""
+              say "Fallback secrets (DATABASE_URL / POSTGRES_URL / NEON_DATABASE_URL /"
+              say "PRODUCTION_DATABASE_URL) are accepted for verify-only reads but"
+              say "must NOT be used for DDL because they may point at a pooled endpoint."
+              finish NO_DIRECT_CREDENTIAL
+            fi
+            URL="$DIRECT_SELECTED"
+          else
+            URL="${DIRECT_SELECTED:-}"
+            [ -n "$URL" ] || URL="${DATABASE_SELECTED:-}"
+            [ -n "$URL" ] || URL="${C_POSTGRES:-}"
+            [ -n "$URL" ] || URL="${C_NEON:-}"
+            [ -n "$URL" ] || URL="${C_PROD:-}"
+          fi
           if [ -z "$URL" ]; then
             say ""
             say "## BLOCKED — no database credential in GitHub Actions secrets"
             say ""
-            say "Repository scope and GitHub Actions environment \`Production\` were both checked."
+            say "Repository scope and environment \`Production\` were both checked."
             say "Nothing was connected to and nothing was modified."
             say ""
-            say "Required: add a GitHub Actions secret named \`DIRECT_URL\` (Neon direct / unpooled"
-            say "connection string) to the \`Production\` environment. Do NOT paste it here; do NOT"
-            say "print it. If Vercel already holds the right value, copy it once into the GitHub"
-            say "Actions secret store — Vercel does not expose its env to GitHub Actions."
+            say "Add a GitHub Actions secret named \`DIRECT_URL\` (Neon direct/unpooled) to the"
+            say "\`Production\` environment or repository scope. Do NOT paste or print its value."
             finish NO_CREDENTIAL
           fi
-          if [ "$MODE" = "apply" ] && [ "$CONFIRM" != "APPLY-0007" ]; then
-            say ""
-            say "## BLOCKED — mode=apply requires confirm=APPLY-0007"
-            finish APPLY_NOT_CONFIRMED
+          case "$URL" in
+            postgres://*|postgresql://*) ;;
+            *) say ""; say "## BLOCKED — selected credential is not postgres(s)://"; finish CREDENTIAL_BAD_SCHEME ;;
+          esac
+          # Prisma requires both DATABASE_URL and DIRECT_URL. If DATABASE_URL is
+          # set separately and valid, honor it; otherwise feed the direct URL to
+          # both vars. This is safe for the short probe (read + rolled-back tx).
+          if [ -z "$DATABASE_SELECTED" ]; then
+            PRISMA_DATABASE_URL="$URL"
+          else
+            case "$DATABASE_SELECTED" in
+              postgres://*|postgresql://*) PRISMA_DATABASE_URL="$DATABASE_SELECTED" ;;
+              *) say "## BLOCKED — DATABASE_URL secret is present but not a postgres URL"; finish CREDENTIAL_BAD_SCHEME ;;
+            esac
           fi
+          PRISMA_DIRECT_URL="$URL"
+          say "credential: selected (DIRECT_URL first); Prisma probe will receive both DATABASE_URL and DIRECT_URL"
+
+          if [ "$MODE" = "apply" ] && [ "$CONFIRM" != "APPLY-0007" ]; then
+            say ""; say "## BLOCKED — mode=apply requires confirm=APPLY-0007"; finish APPLY_NOT_CONFIRMED
+          fi
+
           command -v psql >/dev/null 2>&1 || { sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq postgresql-client >/dev/null; }
 
-          # Split the credential into PG* variables. The value is passed through
-          # the environment only and is never written to the log.
           __DBURL__="$URL" python3 - > /tmp/pg_env.sh <<'PY'
           import os, urllib.parse, shlex
           u = urllib.parse.urlparse(os.environ["__DBURL__"])
           vals = {
-              "PGHOST": u.hostname or "",
-              "PGPORT": str(u.port or 5432),
-              "PGUSER": urllib.parse.unquote(u.username or ""),
-              "PGPASSWORD": urllib.parse.unquote(u.password or ""),
-              "PGDATABASE": (u.path or "/").lstrip("/"),
-              "PGSSLMODE": "require",
+            "PGHOST": u.hostname or "",
+            "PGPORT": str(u.port or 5432),
+            "PGUSER": urllib.parse.unquote(u.username or ""),
+            "PGPASSWORD": urllib.parse.unquote(u.password or ""),
+            "PGDATABASE": (u.path or "/").lstrip("/"),
+            "PGSSLMODE": "require",
           }
           for k, v in vals.items():
-              print(f"export {k}={shlex.quote(v)}")
+            print(f"export {k}={shlex.quote(v)}")
           PY
           # shellcheck disable=SC1091
           . /tmp/pg_env.sh
-          say "credential: loaded into PG* variables from GitHub Actions secret (value never printed)"
+          say "credential: loaded into PG* variables (value never printed)"
 
-          # q() runs a query through psql with -v ON_ERROR_STOP=1; on failure
-          # it tees (redacted) output to the report and exits the whole script
-          # via the global `set -e`, so a failed gate/verification query aborts
-          # BEFORE any migration step can run. qt() returns a scalar silently
-          # and also aborts the script on failure. We never use `|| true` on a
-          # gate/verification query.
-          q() {
+          # Query helpers (all use -v ON_ERROR_STOP=1; failure calls finish).
+          # qq <sql>  — run a SQL string, tee redacted output to the report.
+          # qf <file> — run a SQL file, tee redacted output to the report.
+          # qt <sql>  — run a SQL string, return scalar silently (no tee).
+          qq() {
             set +e
             local out rc
             out=$(psql -X -q -A -F'|' -P pager=off -v ON_ERROR_STOP=1 -c "$1" 2>&1)
@@ -197,7 +215,19 @@ jobs:
             set -e
             printf '%s\n' "$out" | red | tee -a "$R"
             if [ "$rc" -ne 0 ]; then
-              say "query failed with exit code $rc; aborting"
+              say "query failed with exit code $rc; aborting before any write"
+              finish QUERY_FAILED
+            fi
+          }
+          qf() {
+            set +e
+            local out rc
+            out=$(psql -X -q -A -F'|' -P pager=off -v ON_ERROR_STOP=1 -f "$1" 2>&1)
+            rc=$?
+            set -e
+            printf '%s\n' "$out" | red | tee -a "$R"
+            if [ "$rc" -ne 0 ]; then
+              say "query file $1 failed with exit code $rc; aborting"
               finish QUERY_FAILED
             fi
           }
@@ -208,39 +238,36 @@ jobs:
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then
-              say "scalar query failed with exit code $rc; aborting"
+              say "scalar query failed with exit code $rc; aborting before any write"
               finish QUERY_FAILED
             fi
             printf '%s' "$out"
           }
-          # Sanity connection. qt() self-aborts on failure (calls finish
-          # QUERY_FAILED), so if we reach past it we are connected.
           _sanity=$(qt "select 1;")
           say "sanity select: OK"
 
-          # ── Gate 2: identity + counts (read, do not decide yet) ──────────────
+          # ── Gate 2: identity + counts ────────────────────────────────────
           say ""
           say "## 1. Target identity (masked)"
           say ""
           say '```'
-          q "select 'database' k, current_database() v
-             union all select 'is_replica', pg_is_in_recovery()::text
-             union all select 'server_addr_hash12', substr(md5(inet_server_addr()::text),1,12)
-             union all select 'server_port', inet_server_port()::text
-             union all select 'pg_version', (select setting from pg_settings where name='server_version')
-             union all select 'pg_started', pg_postmaster_start_time()::text;"
-          q "select name, setting from pg_settings where name like 'neon%' order by name limit 20;"
+          qq "select 'database' k, current_database() v
+              union all select 'is_replica', pg_is_in_recovery()::text
+              union all select 'server_addr_hash12', substr(md5(inet_server_addr()::text),1,12)
+              union all select 'server_port', inet_server_port()::text
+              union all select 'pg_version', (select setting from pg_settings where name='server_version')
+              union all select 'pg_started', pg_postmaster_start_time()::text;"
+          qq "select name, setting from pg_settings where name like 'neon%' order by name limit 20;"
           say '```'
           say ""
-          say "## 2. Data fingerprint (counts only — no customer data)"
+          say "## 2. Data fingerprint (counts only)"
           say ""
           say '```'
-          q "select 'users' k, count(*)::text v from users
-             union all select 'businesses', count(*) from businesses
-             union all select 'bookings', count(*) from bookings;"
+          qq "select 'users' k, count(*)::text v from users
+              union all select 'businesses', count(*) from businesses
+              union all select 'bookings', count(*) from bookings;"
           say '```'
 
-          # Read scalars; any failure here aborts before writes.
           RECOVERY=$(qt "select pg_is_in_recovery();")
           DB_NAME=$(qt  "select current_database();")
           SRV_HASH=$(qt "select substr(md5(inet_server_addr()::text),1,12);")
@@ -250,13 +277,13 @@ jobs:
           HAS_BIZ=$(qt  "select to_regclass('public.\"businesses\"') is not null;")
 
           if [ "$RECOVERY" != "f" ]; then
-            say ""; say "**STOPPED: the target reports is_replica=$RECOVERY — refusing to write to a replica.**"; finish STOPPED_REPLICA
+            say ""; say "**STOPPED: is_replica=$RECOVERY — refusing to write to a replica.**"; finish STOPPED_REPLICA
           fi
           if [ "$HAS_BIZ" != "t" ]; then
-            say ""; say "**STOPPED: \`businesses\` is absent — this is not the Bookora production database.**"; finish STOPPED_NO_TABLE
+            say ""; say "**STOPPED: \`businesses\` is absent — not the Bookora database.**"; finish STOPPED_NO_TABLE
           fi
 
-          # ── Gate 3: trusted fingerprint comparison (mode=apply only) ─────────
+          # ── Gate 3: fingerprint (apply only) ─────────────────────────────
           if [ "$MODE" = "apply" ]; then
             say ""
             say "## 3. Trusted fingerprint gate"
@@ -268,40 +295,30 @@ jobs:
             [ -z "$FP_BIZ" ]  && missing+=("expected_businesses")
             [ -z "$FP_BK" ]   && missing+=("expected_bookings")
             if [ "${#missing[@]}" -gt 0 ]; then
-              say "**STOPPED: no trusted fingerprint was supplied.** apply runs require all five fingerprint"
-              say "inputs (${missing[*]}). Do NOT invent values — obtain them from a prior"
-              say "\`mode=verify-only\` run of this exact workflow against this repository, copy"
-              say "the five fields from §1 and §2 of its check-run summary, and dispatch the apply"
-              say "run with those inputs. Nothing was modified."
+              say "**STOPPED: trusted fingerprint missing: ${missing[*]}.**"
+              say "Obtain all five from a prior verify-only run; do not invent values."
               finish STOPPED_NO_TRUSTED_FINGERPRINT
             fi
-
-            say "\`database\`:             live=\`$DB_NAME\`  expected=\`$FP_DB\`"
-            say "\`server_addr_hash12\`:   live=\`$SRV_HASH\`  expected=\`$FP_HASH\`"
-            say "\`users\` count:          live=\`$USERS\`     expected=\`$FP_USERS\`"
-            say "\`businesses\` count:     live=\`$BIZ_CT\`    expected=\`$FP_BIZ\`"
-            say "\`bookings\` count:       live=\`$BK_CT\`     expected=\`$FP_BK\`"
-
+            say "\`database\`:           live=\`$DB_NAME\`   expected=\`$FP_DB\`"
+            say "\`server_hash12\`:      live=\`$SRV_HASH\`  expected=\`$FP_HASH\`"
+            say "\`users\` count:        live=\`$USERS\`     expected=\`$FP_USERS\`"
+            say "\`businesses\` count:   live=\`$BIZ_CT\`    expected=\`$FP_BIZ\`"
+            say "\`bookings\` count:     live=\`$BK_CT\`     expected=\`$FP_BK\`"
             mismatch=()
             [ "$DB_NAME"  = "$FP_DB" ]   || mismatch+=("database")
-            [ "$SRV_HASH" = "$FP_HASH" ] || mismatch+=("server_addr_hash12")
+            [ "$SRV_HASH" = "$FP_HASH" ] || mismatch+=("server_hash12")
             [ "$USERS"    = "$FP_USERS" ] || mismatch+=("users count")
             [ "$BIZ_CT"   = "$FP_BIZ" ]  || mismatch+=("businesses count")
             [ "$BK_CT"    = "$FP_BK" ]   || mismatch+=("bookings count")
             if [ "${#mismatch[@]}" -gt 0 ]; then
-              say ""
-              say "**STOPPED: trusted fingerprint does not match the live target (${mismatch[*]}).**"
-              say "The DSN may be pointing at a Neon branch, a restored copy, or a different environment."
-              say "Refusing to write. Re-run verify-only on this workflow to capture the current"
-              say "fingerprint, confirm it is really Production, and only then re-dispatch apply."
-              finish STOPPED_FINGERPRINT_MISMATCH
+              say ""; say "**STOPPED: fingerprint mismatch (${mismatch[*]}).**"; finish STOPPED_FINGERPRINT_MISMATCH
             fi
             say "all five fingerprint fields match."
           else
             say ""
             say "## 3. Trusted fingerprint (verify-only)"
             say ""
-            say "Record these five values and supply them as inputs to a future \`mode=apply\` run:"
+            say "Record these values for a future apply run:"
             say ""
             say "| Field | Value |"
             say "| --- | --- |"
@@ -312,100 +329,75 @@ jobs:
             say "| expected_bookings | \`$BK_CT\` |"
           fi
 
-          # ── Gate 4: current 0007 state (before) ──────────────────────────────
+          # ── Gate 4: structural state ─────────────────────────────────────
           say ""
-          say "## 4. Migration 0007 state (before)"
+          say "## 4. Migration 0007 state (before) — structural check"
           say ""
-          # Define the full set of objects 0007 creates. Presence is checked
-          # individually; a partial set is PARTIAL, never ALREADY_APPLIED.
           say '```'
-          q "select 'cols:businesses.expiresAt'       k, case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='expiresAt')      then 'PRESENT' else 'MISSING' end v
-             union all select 'cols:businesses.deletedAt',        case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='deletedAt')      then 'PRESENT' else 'MISSING' end
-             union all select 'cols:businesses.setupCompletedAt', case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='setupCompletedAt') then 'PRESENT' else 'MISSING' end
-             union all select 'cols:businesses.creationKey',      case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='creationKey')      then 'PRESENT' else 'MISSING' end
-             union all select 'table:holidays',                   case when to_regclass('public.holidays') is not null then 'PRESENT' else 'MISSING' end
-             union all select 'idx:businesses_expiresAt_idx',     case when exists (select 1 from pg_indexes where schemaname='public' and tablename='businesses' and indexname='businesses_expiresAt_idx') then 'PRESENT' else 'MISSING' end
-             union all select 'idx:businesses_deletedAt_idx',     case when exists (select 1 from pg_indexes where schemaname='public' and tablename='businesses' and indexname='businesses_deletedAt_idx') then 'PRESENT' else 'MISSING' end
-             union all select 'idx:businesses_ownerId_creationKey_key', case when exists (select 1 from pg_indexes where schemaname='public' and tablename='businesses' and indexname='businesses_ownerId_creationKey_key') then 'PRESENT' else 'MISSING' end
-             union all select 'idx:holidays_businessId_date_key', case when exists (select 1 from pg_indexes where schemaname='public' and tablename='holidays'   and indexname='holidays_businessId_date_key') then 'PRESENT' else 'MISSING' end;"
+          STRUCT_BEFORE=$(psql -X -A -t -v ON_ERROR_STOP=1 -f prisma/sql/_ci_0007_state_check.sql 2>/dev/null)
+          STRUCT_RC=$?
+          if [ "$STRUCT_RC" -ne 0 ] || [ -z "$STRUCT_BEFORE" ]; then
+            say "structural query failed or returned no rows; aborting"
+            finish QUERY_FAILED
+          fi
+          printf '%s\n' "$STRUCT_BEFORE" | red | tee -a "$R"
           say '```'
-
-          obj_present() {
-            # Args: 1 = kind (cols|table|idx), 2 = identifier used in query above.
-            local r
-            r=$(qt "select case when $(case "$1" in
-                  cols)  echo "exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='$2')";;
-                  table) echo "to_regclass('public.$2') is not null";;
-                  idx)   echo "exists (select 1 from pg_indexes where schemaname='public' and ((tablename='businesses' or tablename='holidays') and indexname='$2'))";;
-                  *) echo "false";;
-                esac) then '1' else '0' end;")
-            echo "$r"
-          }
-          HAS_EXPIRES=$(obj_present cols expiresAt)
-          HAS_DELETED=$(obj_present cols deletedAt)
-          HAS_SETUP=$(obj_present cols setupCompletedAt)
-          HAS_CKEY=$(obj_present cols creationKey)
-          HAS_HOL=$(obj_present table holidays)
-          HAS_IDX_EX=$(obj_present idx businesses_expiresAt_idx)
-          HAS_IDX_DEL=$(obj_present idx businesses_deletedAt_idx)
-          HAS_IDX_CK=$(obj_present idx businesses_ownerId_creationKey_key)
-          HAS_IDX_HOL=$(obj_present idx holidays_businessId_date_key)
-          PRESENT_COUNT=$((HAS_EXPIRES+HAS_DELETED+HAS_SETUP+HAS_CKEY+HAS_HOL+HAS_IDX_EX+HAS_IDX_DEL+HAS_IDX_CK+HAS_IDX_HOL))
-
+          TOTAL_CHECKS=$(printf '%s\n' "$STRUCT_BEFORE" | wc -l)
+          OK_COUNT=$(printf '%s\n' "$STRUCT_BEFORE" | awk -F'|' '$2=="OK"{c++} END{print c+0}')
+          say ""
+          say "structural checks before: \`$OK_COUNT/$TOTAL_CHECKS\`"
           STATE="NOT_APPLIED"
-          if [ "$PRESENT_COUNT" -eq 9 ]; then
+          if [ "$OK_COUNT" -eq "$TOTAL_CHECKS" ]; then
             STATE="ALREADY_APPLIED"
-          elif [ "$PRESENT_COUNT" -gt 0 ]; then
-            STATE="PARTIAL"
+          elif [ "$OK_COUNT" -gt 0 ]; then
+            STATE="PARTIAL_OR_UNEXPECTED"
           fi
-          say ""
-          say "pre-state: 4 cols=\`$((HAS_EXPIRES+HAS_DELETED+HAS_SETUP+HAS_CKEY))/4\` · holidays=\`$HAS_HOL\` · biz indexes=\`$((HAS_IDX_EX+HAS_IDX_DEL+HAS_IDX_CK))/3\` · holidays index=\`$HAS_IDX_HOL\` → \`$STATE\` (\`$PRESENT_COUNT/9\` objects present)"
+          say "pre-state classification: \`$STATE\`"
 
-          if [ "$MODE" = "apply" ] && [ "$STATE" = "PARTIAL" ]; then
+          if [ "$MODE" = "apply" ] && [ "$STATE" = "PARTIAL_OR_UNEXPECTED" ]; then
             say ""
-            say "**STOPPED: partial schema detected.** Some 0007 objects exist but not all. Refusing"
-            say "to apply on top of a partial state — an operator must inspect and reconcile"
-            say "manually before this workflow can proceed."
-            finish STOPPED_PARTIAL_STATE
+            say "**STOPPED: PARTIAL_OR_UNEXPECTED state.** Some objects exist but not with the expected"
+            say "structure. Refusing to apply on top of a partial/modified schema."
+            finish STOPPED_PARTIAL_OR_UNEXPECTED
           fi
-
-          # Schema-only backup (public schema, no data) for rollback reference.
-          say ""
-          say "## 5. Schema-only backup (DDL, no data)"
-          say ""
-          pg_dump -s -n public -O -x --no-owner --no-privileges > /tmp/artifact-schema.sql 2>/tmp/pg_dump.err
-          PGBK_RC=$?
-          if [ "$PGBK_RC" != "0" ]; then
-            say "backup failed (rc=$PGBK_RC); aborting before any write. stderr (redacted):"
-            red < /tmp/pg_dump.err | tee -a "$R"
-            finish BACKUP_FAILED
-          fi
-          BK_SIZE=$(wc -c < /tmp/artifact-schema.sql)
-          say "schema-only backup captured: \`${BK_SIZE}\` bytes (DDL only; uploaded as an artifact, never printed)"
-          say "file sha256: \`$(sha256sum /tmp/artifact-schema.sql | cut -c1-16)…\`"
 
           if [ "$MODE" != "apply" ]; then
             say ""
-            say "## 6. verify-only: nothing was modified"
+            say "## 5. verify-only: nothing was modified"
             say ""
             say "No row, no column, no index was changed."
             finish VERIFY_ONLY
           fi
 
+          # ── Gate 5: schema-only DDL dump (apply only). NOT a data backup. ─
+          say ""
+          say "## 6. Schema-only DDL dump (reference artifact, NOT a data backup)"
+          say ""
+          say "This captures public-schema DDL only. Data recovery requires Neon PITR/branch."
+          set +e
+          pg_dump -s -n public -O -x --no-owner --no-privileges > /tmp/artifact-schema.sql 2>/tmp/pg_dump.err
+          PGBK_RC=$?
+          set -e
+          if [ "$PGBK_RC" != "0" ]; then
+            say "DDL dump failed (rc=$PGBK_RC); aborting. stderr (redacted):"
+            red < /tmp/pg_dump.err | tee -a "$R"
+            finish BACKUP_FAILED
+          fi
+          BK_SIZE=$(wc -c < /tmp/artifact-schema.sql)
+          say "DDL dump: \`${BK_SIZE}\` bytes (artifact; never printed); sha256=\`$(sha256sum /tmp/artifact-schema.sql | cut -c1-16)…\`"
+
           if [ "$STATE" = "ALREADY_APPLIED" ]; then
             say ""
-            say "## 6. already applied — skipping DDL"
-            say ""
-            say "All 9 0007 objects are present; no DDL executed."
+            say "## 7. already applied — skipping DDL"
           else
-            # ── Apply 0007 ──────────────────────────────────────────────────────
+            # ── Apply 0007 ──────────────────────────────────────────────────
             say ""
-            say "## 6. Applying migration 0007"
+            say "## 7. Applying migration 0007"
             say ""
             sed '0,/^BEGIN;$/s//BEGIN;\nSET LOCAL lock_timeout = 5000;\nSET LOCAL statement_timeout = 120000;/' \
               prisma/sql/0007_business_lifecycle_holidays.sql > /tmp/0007_apply.sql
-            say "runtime SQL: $(wc -l < prisma/sql/0007_business_lifecycle_holidays.sql) lines committed → $(wc -l < /tmp/0007_apply.sql) lines executed (two SET LOCAL guards prepended)"
-            say "runtime SQL sha256: \`$(sha256sum /tmp/0007_apply.sql | cut -c1-16)…\`"
+            say "runtime SQL lines: $(wc -l < prisma/sql/0007_business_lifecycle_holidays.sql) → $(wc -l < /tmp/0007_apply.sql)"
+            say "sha256: \`$(sha256sum /tmp/0007_apply.sql | cut -c1-16)…\`"
             say ""
             say '```'
             set +e
@@ -416,92 +408,66 @@ jobs:
             say '```'
             if [ "$RC" != "0" ]; then
               say ""
-              say "**MIGRATION FAILED (exit $RC).** The file runs as one transaction, so the database is left exactly as it was. Nothing is retried automatically."
+              say "**MIGRATION FAILED (exit $RC).** Transactional DDL rolled back; nothing applied."
               finish APPLY_FAILED
             fi
             STATE="APPLIED"
           fi
 
-          # ── Post-apply verification (must confirm ALL 9 objects, and no data loss) ─
+          # ── Post-apply structural verification ───────────────────────────
           say ""
-          say "## 7. Verification against the live database"
+          say "## 8. Post-apply structural verification"
           say ""
           say '```'
-          q "select 'cols:businesses.expiresAt'       k, case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='expiresAt')      then 'PRESENT' else 'MISSING' end v
-             union all select 'cols:businesses.deletedAt',        case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='deletedAt')      then 'PRESENT' else 'MISSING' end
-             union all select 'cols:businesses.setupCompletedAt', case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='setupCompletedAt') then 'PRESENT' else 'MISSING' end
-             union all select 'cols:businesses.creationKey',      case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='creationKey')      then 'PRESENT' else 'MISSING' end
-             union all select 'table:holidays',                   case when to_regclass('public.holidays') is not null then 'PRESENT' else 'MISSING' end
-             union all select 'idx:businesses_expiresAt_idx',     case when exists (select 1 from pg_indexes where schemaname='public' and tablename='businesses' and indexname='businesses_expiresAt_idx') then 'PRESENT' else 'MISSING' end
-             union all select 'idx:businesses_deletedAt_idx',     case when exists (select 1 from pg_indexes where schemaname='public' and tablename='businesses' and indexname='businesses_deletedAt_idx') then 'PRESENT' else 'MISSING' end
-             union all select 'idx:businesses_ownerId_creationKey_key', case when exists (select 1 from pg_indexes where schemaname='public' and tablename='businesses' and indexname='businesses_ownerId_creationKey_key') then 'PRESENT' else 'MISSING' end
-             union all select 'idx:holidays_businessId_date_key', case when exists (select 1 from pg_indexes where schemaname='public' and tablename='holidays' and indexname='holidays_businessId_date_key') then 'PRESENT' else 'MISSING' end;"
-          q "select c.column_name, c.data_type, c.is_nullable, coalesce(c.column_default,'(none)') as column_default
-               from information_schema.columns c
-              where c.table_schema='public' and c.table_name='holidays'
-              order by c.ordinal_position;"
-          q "select 'users' k, count(*)::text v from users
-             union all select 'businesses', count(*) from businesses
-             union all select 'bookings', count(*) from bookings;"
+          qf prisma/sql/_ci_0007_state_check.sql
           say '```'
-
-          P_EX=$(obj_present cols expiresAt)
-          P_DEL=$(obj_present cols deletedAt)
-          P_SET=$(obj_present cols setupCompletedAt)
-          P_CK=$(obj_present cols creationKey)
-          P_HOL=$(obj_present table holidays)
-          P_IX=$(obj_present idx businesses_expiresAt_idx)
-          P_ID=$(obj_present idx businesses_deletedAt_idx)
-          P_IC=$(obj_present idx businesses_ownerId_creationKey_key)
-          P_IH=$(obj_present idx holidays_businessId_date_key)
-          P_TOTAL=$((P_EX+P_DEL+P_SET+P_CK+P_HOL+P_IX+P_ID+P_IC+P_IH))
-
+          POST_OK=$(psql -X -A -t -v ON_ERROR_STOP=1 -f prisma/sql/_ci_0007_state_check.sql 2>/dev/null | awk -F'|' '$2=="OK"{c++} END{print c+0}')
           USERS_AF=$(qt "select count(*) from users;")
           BIZ_AF=$(qt   "select count(*) from businesses;")
           BK_AF=$(qt    "select count(*) from bookings;")
 
           say ""
-          say "post-state: 4 cols=\`$((P_EX+P_DEL+P_SET+P_CK))/4\` · holidays=\`$P_HOL\` · biz indexes=\`$((P_IX+P_ID+P_IC))/3\` · holidays index=\`$P_IH\` → \`$P_TOTAL/9\` objects present"
+          say "structural checks after: \`$POST_OK/$TOTAL_CHECKS\`"
           say "counts before→after: users \`$USERS\`→\`$USERS_AF\` · businesses \`$BIZ_CT\`→\`$BIZ_AF\` · bookings \`$BK_CT\`→\`$BK_AF\`"
 
-          if [ "$P_TOTAL" -ne 9 ] || [ "$USERS_AF" != "$USERS" ] || [ "$BIZ_AF" != "$BIZ_CT" ] || [ "$BK_AF" != "$BK_CT" ]; then
-            say ""
-            say "**VERIFICATION FAILED.** The database does not match the expected 0007 end-state or counts drifted."
-            finish VERIFY_FAILED
+          if [ "$POST_OK" -ne "$TOTAL_CHECKS" ] || [ "$USERS_AF" != "$USERS" ] || [ "$BIZ_AF" != "$BIZ_CT" ] || [ "$BK_AF" != "$BK_CT" ]; then
+            say ""; say "**VERIFICATION FAILED.** End-state mismatch or counts drifted."; finish VERIFY_FAILED
           fi
-          say "**VERIFIED: all 9 expected objects are present and table counts are unchanged.**"
+          say "**VERIFIED: all $TOTAL_CHECKS structural checks pass; table counts unchanged.**"
 
-          # ── Application-level probe (Prisma, inside a rolled-back transaction) ─
+          # ── Prisma probe ────────────────────────────────────────────────
           say ""
-          say "## 8. Prisma probe (rolled back; no residue)"
+          say "## 9. Prisma probe (rolled back; no residue)"
           say ""
+          # Resolve node's absolute path BEFORE running npm install, so npm's
+          # node_modules/.bin shims cannot shadow the real node binary.
+          NODE_BIN="$(command -v node || true)"
           say '```'
           npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund --ignore-scripts >/dev/null 2>&1
           PRISMA_OK=1; PRISMA_UNAVAILABLE=0
-          if npx prisma generate >/dev/null 2>&1; then
+          if [ -z "$NODE_BIN" ]; then
+            echo "prisma client could not be generated (no node)"
+            PRISMA_OK=0; PRISMA_UNAVAILABLE=1
+          elif npx prisma generate >/dev/null 2>&1; then
             echo "prisma client generated"
-            DATABASE_URL="$URL" node -e '
+            # Run the node probe; capture exit code without letting set -e
+            # abort the script when the probe deliberately exits non-zero.
+            set +e
+            DATABASE_URL="$PRISMA_DATABASE_URL" DIRECT_URL="$PRISMA_DIRECT_URL" "$NODE_BIN" -e '
               const { PrismaClient } = require("@prisma/client");
               const p = new PrismaClient();
               (async () => {
                 const asserts = { read:false, created:false, rolledBack:false, residueZero:false };
                 let err = null;
                 try {
-                  // 1) Require at least one business to attach the probe row to;
-                  //    otherwise we cannot demonstrate a holiday create against
-                  //    the real schema on real data.
                   const biz = await p.business.findFirst({
                     where: { deletedAt: null },
                     select: { id: true, expiresAt: true, deletedAt: true, setupCompletedAt: true, creationKey: true },
                     orderBy: { createdAt: "asc" },
                   });
-                  if (!biz) {
-                    throw new Error("PROBE_PRECONDITION: no non-deleted business row to attach probe holiday to");
-                  }
-                  // 2) READ lifecycle columns on that real business.
+                  if (!biz) throw new Error("PROBE_PRECONDITION: no non-deleted business row");
                   console.log("READ lifecycle cols on business " + biz.id + ": expiresAt=" + biz.expiresAt + " deletedAt=" + biz.deletedAt + " setupCompletedAt=" + biz.setupCompletedAt + " creationKey=" + biz.creationKey);
                   asserts.read = true;
-                  // 3) CREATE a holiday INSIDE a transaction, then deliberately throw.
                   let created;
                   try {
                     await p.$transaction(async (tx) => {
@@ -516,20 +482,15 @@ jobs:
                     if (e && e.message === "ROLLBACK_ON_PURPOSE") {
                       console.log("transaction threw ROLLBACK_ON_PURPOSE as expected");
                       asserts.rolledBack = true;
-                    } else {
-                      throw e;
-                    }
+                    } else { throw e; }
                   }
                   if (!created || !created.id) throw new Error("PROBE: holiday create did not return an id");
-                  // 4) Verify the throwaway row did NOT persist (transaction committed a rollback).
-                  const leftovers = await p.holiday.count({
-                    where: { businessId: biz.id, reason: "__probe_0007__" },
-                  });
-                  console.log("residue holiday rows for business " + biz.id + ": " + leftovers);
+                  const leftovers = await p.holiday.count({ where: { businessId: biz.id, reason: "__probe_0007__" } });
+                  console.log("residue rows: " + leftovers);
                   if (leftovers === 0) {
                     asserts.residueZero = true;
                   } else {
-                    throw new Error("PROBE: residue rows exist after rollback (" + leftovers + ")");
+                    throw new Error("PROBE: residue rows exist (" + leftovers + ")");
                   }
                 } catch (e) {
                   err = e;
@@ -541,37 +502,32 @@ jobs:
                 process.exit(err ? 2 : (asserts.read && asserts.created && asserts.rolledBack && asserts.residueZero) ? 0 : 3);
               })();' > /tmp/prisma_probe.out 2>&1
             PROBE_RC=$?
+            set -e
             red < /tmp/prisma_probe.out | tee -a "$R"
             case $PROBE_RC in
-              0) echo "PRISMA PROBE PASSED: read ok, create ok, rolled back, zero residue" ;;
-              2) echo "PRISMA PROBE FAILED: runtime error (see log)"; PRISMA_OK=0 ;;
-              3) echo "PRISMA PROBE FAILED: one or more required assertions did not pass"; PRISMA_OK=0 ;;
+              0) echo "PRISMA PROBE PASSED: read, create, rolled back, zero residue" ;;
+              2) echo "PRISMA PROBE FAILED: runtime error"; PRISMA_OK=0 ;;
+              3) echo "PRISMA PROBE FAILED: required assertions did not all pass"; PRISMA_OK=0 ;;
               *) echo "PRISMA PROBE FAILED: unexpected exit code $PROBE_RC"; PRISMA_OK=0 ;;
             esac
           else
-            echo "prisma client could not be generated on this runner (engine download blocked) —"
-            echo "the application query path cannot be proven here"
+            echo "prisma client could not be generated on this runner (engine download blocked)"
             PRISMA_OK=0; PRISMA_UNAVAILABLE=1
           fi
           echo '```'
           if [ "$PRISMA_UNAVAILABLE" = "1" ]; then
-            say ""
-            say "**PROBE UNAVAILABLE.** The SQL-level state is verified, but the Prisma query path could not be exercised on this runner."
-            finish PROBE_UNAVAILABLE
+            say ""; say "**PROBE UNAVAILABLE.** Prisma engine blocked on this runner."; finish PROBE_UNAVAILABLE
           fi
           if [ "$PRISMA_OK" != "1" ]; then
-            say ""
-            say "**PROBE FAILED.** The application path is not proven end to end."
-            finish PROBE_FAILED
+            say ""; say "**PROBE FAILED.** Application path not proven end to end."; finish PROBE_FAILED
           fi
 
-          # ── Outreach switches: not touched ───────────────────────────────────
           say ""
-          say "## 9. Outreach switches (read-only; nothing was enabled)"
+          say "## 10. Outreach switches (read-only; not changed)"
           say ""
           say '```'
-          q "select key, value from admin_settings
-              where key in ('outreach.enabled','outreach.auto_send_enabled') order by key;"
+          qq "select key, value from admin_settings
+               where key in ('outreach.enabled','outreach.auto_send_enabled') order by key;"
           say '```'
 
           if [ "$STATE" = "APPLIED" ]; then finish VERIFIED; else finish ALREADY_APPLIED_VERIFIED; fi
@@ -596,14 +552,14 @@ jobs:
           } > /tmp/payload.json
           gh api -X POST "repos/$GITHUB_REPOSITORY/check-runs" --input /tmp/payload.json >/dev/null && echo "check run published"
 
-      - name: Enforce outcome (a gated run must fail unless it verified the database)
+      - name: Enforce outcome
         if: always()
         run: |
           OUTCOME=$(cat /tmp/outcome 2>/dev/null || echo "NO_OUTCOME")
           case "$OUTCOME" in
             VERIFIED|ALREADY_APPLIED_VERIFIED|VERIFY_ONLY)
-              echo "outcome $OUTCOME — run completed as intended"; exit 0 ;;
+              echo "outcome $OUTCOME"; exit 0 ;;
             *)
-              echo "::error::0007 run ended as $OUTCOME — see the check-run summary for the exact reason"
+              echo "::error::0007 run ended as $OUTCOME"
               exit 1 ;;
           esac
