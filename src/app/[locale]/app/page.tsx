@@ -394,7 +394,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || tMsg("loadBusinessesError"));
+        const apiError =
+          data?.code === "BUSINESS_SCHEMA_MIGRATION_REQUIRED"
+            ? tMsg("businessSchemaOutdated")
+            : data?.error;
+        throw new Error(apiError || tMsg("loadBusinessesError"));
       }
 
       const list: Business[] = data.businesses || [];
@@ -474,7 +478,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || tMsg("businessCreateError"));
+        const apiError =
+          data?.code === "BUSINESS_SCHEMA_MIGRATION_REQUIRED"
+            ? tMsg("businessSchemaOutdated")
+            : data?.error;
+        throw new Error(apiError || tMsg("businessCreateError"));
       }
 
       clearBusinessCreationKey(

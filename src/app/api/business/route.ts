@@ -5,6 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { COUNTRY_CURRENCY, isCountryCode } from "@/lib/currency";
 import { getEffectiveBusinessStatus } from "@/lib/business/lifecycle";
+import {
+  BUSINESS_SCHEMA_MIGRATION_REQUIRED,
+  getPrismaSchemaMismatch,
+} from "@/lib/business/schema-drift";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { normalizeTimeZone } from "@/lib/booking/time";
 import { markRegistered } from "@/lib/outreach/attribution";
@@ -88,6 +92,18 @@ export async function GET() {
       })),
     });
   } catch (error) {
+    const schemaMismatch = getPrismaSchemaMismatch(error);
+    if (schemaMismatch) {
+      console.error("GET /api/business schema mismatch:", schemaMismatch);
+      return NextResponse.json(
+        {
+          error: "The business database needs a schema update.",
+          code: BUSINESS_SCHEMA_MIGRATION_REQUIRED,
+        },
+        { status: 503 }
+      );
+    }
+
     console.error(
       "GET /api/business failed:",
       error instanceof Error ? error.name : "UnknownError"
@@ -264,6 +280,19 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       );
     }
+
+    const schemaMismatch = getPrismaSchemaMismatch(error);
+    if (schemaMismatch) {
+      console.error("POST /api/business schema mismatch:", schemaMismatch);
+      return NextResponse.json(
+        {
+          error: "The business database needs a schema update.",
+          code: BUSINESS_SCHEMA_MIGRATION_REQUIRED,
+        },
+        { status: 503 }
+      );
+    }
+
     console.error(
       "POST /api/business failed:",
       error instanceof Error ? error.name : "UnknownError"
