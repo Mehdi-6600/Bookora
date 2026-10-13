@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { verifySession } from "@/lib/auth/jwt";
-import { adminTelegramIds, adminTelegramIdsConfigured } from "@/lib/env";
+import { getAdminTelegramConfig } from "@/lib/env";
 
 export const SESSION_COOKIE = "bookora_session";
 
@@ -38,9 +38,10 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 
   if (!user) return null;
 
+  const adminConfig = getAdminTelegramConfig();
   const hasNumericTelegramId = /^\d+$/.test(user.telegramId);
-  const isAdmin = adminTelegramIdsConfigured
-    ? hasNumericTelegramId && adminTelegramIds.includes(BigInt(user.telegramId))
+  const isAdmin = adminConfig.configured
+    ? hasNumericTelegramId && adminConfig.ids.includes(BigInt(user.telegramId))
     : user.isAdmin;
 
   return {

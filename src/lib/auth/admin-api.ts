@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/session";
+import { ServerEnvValidationError } from "@/lib/env";
 
 export type AdminGuard =
   | { ok: true; user: CurrentUser }
@@ -17,7 +18,8 @@ export async function requireAdmin(): Promise<AdminGuard> {
 
   try {
     user = await getCurrentUser();
-  } catch {
+  } catch (error) {
+    if (error instanceof ServerEnvValidationError) throw error;
     user = null;
   }
 

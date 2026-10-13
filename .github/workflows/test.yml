@@ -23,10 +23,10 @@ jobs:
       - name: Run tests
         run: npm test
       - name: Build
-        run: npx next build
+        # Exercise the production build with database URLs absent. Prisma and
+        # application runtime code must validate them on use, not at import time.
+        run: env -u DATABASE_URL -u DIRECT_URL npm run build
         env:
-          DATABASE_URL: "postgres://dummy:dummy@localhost:5432/dummy"
-          DIRECT_URL: "postgres://dummy:dummy@localhost:5432/dummy"
           JWT_SECRET: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           TELEGRAM_BOT_TOKEN: "123:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
           TELEGRAM_BOT_USERNAME: "BookoraBot"

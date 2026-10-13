@@ -7,7 +7,7 @@ import { SESSION_COOKIE } from "@/lib/auth/session";
 import { cookies } from "next/headers";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/get-client-ip";
-import { adminTelegramIds, adminTelegramIdsConfigured } from "@/lib/env";
+import { getAdminTelegramConfig } from "@/lib/env";
 import { recordFunnelEvent } from "@/lib/funnel";
 import { recordAttributedStart } from "@/lib/outreach/attribution";
 
@@ -56,7 +56,8 @@ export async function POST(req: NextRequest) {
   }
 
   const tg = validated.user;
-  const isConfiguredAdmin = adminTelegramIds.includes(BigInt(tg.id));
+  const adminConfig = getAdminTelegramConfig();
+  const isConfiguredAdmin = adminConfig.ids.includes(BigInt(tg.id));
 
   const user = await prisma.user.upsert({
     where: { telegramId: String(tg.id) },
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
       firstName: tg.first_name,
       lastName: tg.last_name ?? null,
       languageCode: tg.language_code ?? null,
-      ...(adminTelegramIdsConfigured ? { isAdmin: isConfiguredAdmin } : {}),
+      ...(adminConfig.configured ? { isAdmin: isConfiguredAdmin } : {}),
     },
     create: {
       telegramId: String(tg.id),

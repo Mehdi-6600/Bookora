@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { requireAdmin } from "@/lib/auth/admin-api";
+import { ServerEnvValidationError } from "@/lib/env";
 
 const sessionMock = vi.hoisted(() => vi.fn());
 
@@ -41,5 +42,12 @@ describe("requireAdmin", () => {
     const result = await requireAdmin();
 
     expect(result).toEqual({ ok: true, user: admin });
+  });
+
+  it("does not turn a server environment error into an unauthenticated response", async () => {
+    const error = new ServerEnvValidationError();
+    sessionMock.mockRejectedValue(error);
+
+    await expect(requireAdmin()).rejects.toBe(error);
   });
 });
