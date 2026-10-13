@@ -334,10 +334,18 @@ jobs:
           say "## 4. Migration 0007 state (before) — structural check"
           say ""
           say '```'
-          STRUCT_BEFORE=$(psql -X -A -t -v ON_ERROR_STOP=1 -f prisma/sql/_ci_0007_state_check.sql 2>/dev/null)
+          # Capture STRUCT_BEFORE in set +e so that a psql/network failure does
+          # not let `set -e` abort the script before we can classify+finish
+          # QUERY_FAILED. Do NOT rely on set -e + implicit exit after command
+          # substitution — it masks rc and can let the script continue with
+          # an empty STRUCT_BEFORE.
+          set +e
+          STRUCT_BEFORE=$(psql -X -A -t -v ON_ERROR_STOP=1 -f prisma/sql/_ci_0007_state_check.sql 2>&1)
           STRUCT_RC=$?
+          set -e
           if [ "$STRUCT_RC" -ne 0 ] || [ -z "$STRUCT_BEFORE" ]; then
-            say "structural query failed or returned no rows; aborting"
+            printf '%s\n' "$STRUCT_BEFORE" | red | tee -a "$R"
+            say "structural query failed (rc=$STRUCT_RC); aborting before any write"
             finish QUERY_FAILED
           fi
           printf '%s\n' "$STRUCT_BEFORE" | red | tee -a "$R"
@@ -419,21 +427,46 @@ jobs:
           say "## 8. Post-apply structural verification"
           say ""
           say '```'
-          qf prisma/sql/_ci_0007_state_check.sql
+          # Capture post-apply structural output with the same set+e pattern
+          # as pre-apply. We CANNOT rely on `psql … | awk …` inside a command
+          # substitution under set -e + pipefail: psql failure is masked and
+          # awk still exits 0, so POST_OK would silently become 0 and we'd
+          # report a misleading VERIFY_FAILED instead of QUERY_FAILED.
+          set +e
+          STRUCT_AFTER=$(psql -X -A -t -v ON_ERROR_STOP=1 -f prisma/sql/_ci_0007_state_check.sql 2>&1)
+          STRUCT_AF_RC=$?
+          set -e
+          if [ "$STRUCT_AF_RC" -ne 0 ] || [ -z "$STRUCT_AFTER" ]; then
+            printf '%s\n' "$STRUCT_AFTER" | red | tee -a "$R"
+            say '```'
+            say "post-apply structural query failed (rc=$STRUCT_AF_RC)"
+            finish QUERY_FAILED
+          fi
+          printf '%s\n' "$STRUCT_AFTER" | red | tee -a "$R"
           say '```'
-          POST_OK=$(psql -X -A -t -v ON_ERROR_STOP=1 -f prisma/sql/_ci_0007_state_check.sql 2>/dev/null | awk -F'|' '$2=="OK"{c++} END{print c+0}')
-          USERS_AF=$(qt "select count(*) from users;")
-          BIZ_AF=$(qt   "select count(*) from businesses;")
-          BK_AF=$(qt    "select count(*) from bookings;")
+          TOTAL_AF=$(printf '%s\n' "$STRUCT_AFTER" | wc -l)
+          POST_OK=$(printf '%s\n' "$STRUCT_AFTER" | awk -F'|' '$2=="OK"{c++} END{print c+0}')
+          set +e
+          USERS_AF=$(psql -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from users;" 2>&1)
+          UA_RC=$?
+          BIZ_AF=$(psql -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from businesses;" 2>&1)
+          BA_RC=$?
+          BK_AF=$(psql -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from bookings;" 2>&1)
+          KA_RC=$?
+          set -e
+          if [ "$UA_RC" -ne 0 ] || [ "$BA_RC" -ne 0 ] || [ "$KA_RC" -ne 0 ]; then
+            say "post-apply count query failed (users_rc=$UA_RC biz_rc=$BA_RC bk_rc=$KA_RC)"
+            finish QUERY_FAILED
+          fi
 
           say ""
-          say "structural checks after: \`$POST_OK/$TOTAL_CHECKS\`"
+          say "structural checks after: \`$POST_OK/$TOTAL_AF\`"
           say "counts before→after: users \`$USERS\`→\`$USERS_AF\` · businesses \`$BIZ_CT\`→\`$BIZ_AF\` · bookings \`$BK_CT\`→\`$BK_AF\`"
 
-          if [ "$POST_OK" -ne "$TOTAL_CHECKS" ] || [ "$USERS_AF" != "$USERS" ] || [ "$BIZ_AF" != "$BIZ_CT" ] || [ "$BK_AF" != "$BK_CT" ]; then
+          if [ "$POST_OK" -ne "$TOTAL_AF" ] || [ "$TOTAL_AF" -ne "$TOTAL_CHECKS" ] || [ "$USERS_AF" != "$USERS" ] || [ "$BIZ_AF" != "$BIZ_CT" ] || [ "$BK_AF" != "$BK_CT" ]; then
             say ""; say "**VERIFICATION FAILED.** End-state mismatch or counts drifted."; finish VERIFY_FAILED
           fi
-          say "**VERIFIED: all $TOTAL_CHECKS structural checks pass; table counts unchanged.**"
+          say "**VERIFIED: all $TOTAL_AF structural checks pass; table counts unchanged.**"
 
           # ── Prisma probe ────────────────────────────────────────────────
           say ""
