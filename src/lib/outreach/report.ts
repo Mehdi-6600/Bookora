@@ -1,4 +1,4 @@
-import { adminTelegramIds, adminTelegramIdsConfigured } from "@/lib/env";
+import { getAdminTelegramConfig } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { normalizeTimeZone } from "@/lib/booking/time";
 import { runDateFor } from "@/lib/outreach/settings";
@@ -23,8 +23,9 @@ export type DailyReport = {
 
 /** Recipients of the daily report: configured admin ids, else DB admins. */
 async function reportRecipients(): Promise<string[]> {
-  if (adminTelegramIdsConfigured && adminTelegramIds.length > 0) {
-    return adminTelegramIds.map((id) => id.toString());
+  const adminConfig = getAdminTelegramConfig();
+  if (adminConfig.configured && adminConfig.ids.length > 0) {
+    return adminConfig.ids.map((id) => id.toString());
   }
 
   const admins = await prisma.user.findMany({

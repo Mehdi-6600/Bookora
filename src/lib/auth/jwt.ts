@@ -1,7 +1,9 @@
 import { SignJWT, jwtVerify } from "jose";
-import { env } from "@/lib/env";
+import { getServerEnv } from "@/lib/env";
 
-const secret = new TextEncoder().encode(env.JWT_SECRET);
+function getSessionSecret(): Uint8Array {
+  return new TextEncoder().encode(getServerEnv().JWT_SECRET);
+}
 
 const ISSUER = "bookora";
 const AUDIENCE = "bookora-app";
@@ -23,12 +25,16 @@ export async function signSession(payload: SessionPayload): Promise<string> {
     .setAudience(AUDIENCE)
     .setIssuedAt()
     .setExpirationTime("30d")
-    .sign(secret);
+    .sign(getSessionSecret());
 }
 
 export async function verifySession(
   token: string
 ): Promise<SessionPayload | null> {
+  // Keep configuration errors distinct from an invalid/untrusted JWT. Missing
+  // runtime settings must not be swallowed as an ordinary authentication miss.
+  const secret = getSessionSecret();
+
   try {
     const { payload } = await jwtVerify(token, secret, {
       algorithms: ["HS256"],

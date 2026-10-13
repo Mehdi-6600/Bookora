@@ -149,6 +149,7 @@
   "messages": {
     "businessCreated": "تم إنشاء النشاط بنجاح.",
     "businessCreateError": "فشل إنشاء النشاط.",
+    "businessSchemaOutdated": "تسجيل النشاط غير متاح مؤقتًا لأن تحديثًا مطلوبًا لقاعدة البيانات لم يُطبّق. يُرجى التواصل مع الدعم.",
     "businessSubscriptionRequired": "لإنشاء أكثر من نشاط واحد، يجب أولاً شراء اشتراك. يمكنك اختيار خطة من الأسفل.",
     "businessEditError": "فشل تعديل النشاط.",
     "businessEdited": "تم تعديل النشاط.",

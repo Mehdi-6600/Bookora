@@ -149,6 +149,7 @@
   "messages": {
     "businessCreated": "Business created successfully.",
     "businessCreateError": "Failed to create business.",
+    "businessSchemaOutdated": "Business registration is temporarily unavailable because a required database update has not been applied. Please contact support.",
     "businessSubscriptionRequired": "To create more than one business, you first need to buy a subscription. You can pick a plan below.",
     "businessEditError": "Failed to edit business.",
     "businessEdited": "Business updated.",
