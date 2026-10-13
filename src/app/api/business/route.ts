@@ -4,11 +4,14 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { COUNTRY_CURRENCY, isCountryCode } from "@/lib/currency";
-import { FREE_BUSINESS_LIMIT } from "@/lib/subscription/plans";
-import { activePaidSubscriptionWhere } from "@/lib/subscription/entitlement";
+import { getEffectiveBusinessStatus } from "@/lib/business/lifecycle";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { normalizeTimeZone } from "@/lib/booking/time";
 import { markRegistered } from "@/lib/outreach/attribution";
+
+const creationKeySchema = z.string().uuid();
+
+class BusinessCreationConflictError extends Error {}
 
 const createBusinessSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -45,8 +48,9 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const now = new Date();
     const businesses = await prisma.business.findMany({
-      where: { ownerId: user.id },
+      where: { ownerId: user.id, deletedAt: null },
       orderBy: { createdAt: "asc" },
       include: {
         services: {
@@ -65,7 +69,9 @@ export async function GET() {
         country: business.country,
         currency: business.currency,
         timezone: business.timezone,
-        status: business.status,
+        status: getEffectiveBusinessStatus(business, now),
+        expiresAt: business.expiresAt,
+        setupCompletedAt: business.setupCompletedAt,
         services: business.services.map((service) => ({
           id: service.id,
           name: service.name,
@@ -108,6 +114,17 @@ export async function POST(req: NextRequest) {
     }
     triggerRateLimitCleanup();
 
+    const parsedCreationKey = creationKeySchema.safeParse(
+      req.headers.get("idempotency-key")
+    );
+    if (!parsedCreationKey.success) {
+      return NextResponse.json(
+        { error: "کلید یکتای درخواست کسب‌وکار معتبر نیست." },
+        { status: 400 }
+      );
+    }
+    const creationKey = parsedCreationKey.data;
+
     let body: unknown;
     try {
       body = await req.json();
@@ -138,27 +155,32 @@ export async function POST(req: NextRequest) {
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
-        const business = await prisma.$transaction(async (tx) => {
+        const result = await prisma.$transaction(async (tx) => {
           await tx.$queryRaw<Array<{ locked: string }>>`
             SELECT pg_advisory_xact_lock(
               hashtext(${user.id}::text),
-              hashtext('business-limit'::text)
+              hashtext('business-slug'::text)
             )::text AS locked
           `;
 
-          const existingCount = await tx.business.count({
-            where: { ownerId: user.id },
+          const existing = await tx.business.findUnique({
+            where: {
+              ownerId_creationKey: {
+                ownerId: user.id,
+                creationKey,
+              },
+            },
           });
-
-          if (existingCount >= FREE_BUSINESS_LIMIT) {
-            const activeSubscription = await tx.subscription.findFirst({
-              where: activePaidSubscriptionWhere(user.id, new Date()),
-              select: { id: true },
-            });
-
-            if (!activeSubscription) {
-              throw new Error("SUBSCRIPTION_REQUIRED");
+          if (existing) {
+            if (
+              existing.name !== name ||
+              existing.description !== description ||
+              existing.country !== country ||
+              existing.timezone !== timezone
+            ) {
+              throw new BusinessCreationConflictError();
             }
+            return { business: existing, created: false };
           }
 
           const base = createBaseSlug(name);
@@ -181,14 +203,17 @@ export async function POST(req: NextRequest) {
               country: country,
               currency: currency,
               timezone: timezone,
+              status: "DRAFT",
+              creationKey,
             },
           });
 
-          return created;
+          return { business: created, created: true };
         });
 
         // Best-effort growth attribution. Never fails the request.
-        void markRegistered(user.id, business.id);
+        if (result.created) void markRegistered(user.id, result.business.id);
+        const business = result.business;
 
         return NextResponse.json(
           {
@@ -201,24 +226,14 @@ export async function POST(req: NextRequest) {
               currency: business.currency,
               timezone: business.timezone,
               status: business.status,
+              setupCompletedAt: business.setupCompletedAt,
               services: [],
               _count: { bookings: 0 },
             },
           },
-          { status: 201 }
+          { status: result.created ? 201 : 200 }
         );
       } catch (err) {
-        if (err instanceof Error && err.message === "SUBSCRIPTION_REQUIRED") {
-          return NextResponse.json(
-            {
-              error:
-                "برای ساخت بیش از یک کسب‌وکار، ابتدا باید اشتراک بخرید.",
-              code: "SUBSCRIPTION_REQUIRED",
-            },
-            { status: 403 }
-          );
-        }
-
         if (
           err instanceof Prisma.PrismaClientKnownRequestError &&
           err.code === "P2002"
@@ -240,6 +255,15 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } catch (error) {
+    if (error instanceof BusinessCreationConflictError) {
+      return NextResponse.json(
+        {
+          error: "کلید درخواست ایجاد کسب‌وکار قبلاً با اطلاعات دیگری استفاده شده است.",
+          code: "IDEMPOTENCY_CONFLICT",
+        },
+        { status: 409 }
+      );
+    }
     console.error(
       "POST /api/business failed:",
       error instanceof Error ? error.name : "UnknownError"

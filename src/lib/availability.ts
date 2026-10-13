@@ -16,6 +16,7 @@ export function computeAvailableSlots(params: {
   durationMinutes: number;
   busyRanges: BusyRange[];
   slotIntervalMinutes?: number;
+  isHoliday?: boolean;
 }): Date[] {
   const {
     dateStr,
@@ -27,6 +28,8 @@ export function computeAvailableSlots(params: {
     durationMinutes,
     busyRanges,
   } = params;
+
+  if (params.isHoliday) return [];
 
   if (
     !isValidDateOnly(dateStr) ||

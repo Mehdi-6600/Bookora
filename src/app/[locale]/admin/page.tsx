@@ -13,6 +13,7 @@ import {
   ExternalLink,
   FileText,
   Hash,
+  Power,
   Loader2,
   LogIn,
   Receipt,
@@ -20,6 +21,7 @@ import {
   Search,
   ShieldCheck,
   StickyNote,
+  Trash2,
   Users,
   X,
   XCircle,
@@ -31,7 +33,13 @@ import { MANUAL_PAYMENT_SETTING_KEYS } from "@/lib/admin-settings";
 type SettingRow = { key: string; value: string };
 type FilterKey = "PENDING" | "ACTIVE" | "REJECTED";
 type TabKey = "requests" | "businesses" | "outreach";
-type BizStatusKey = "ALL" | "ACTIVE" | "ARCHIVED";
+type BizStatusKey =
+  | "ALL"
+  | "DRAFT"
+  | "ACTIVE"
+  | "EXPIRED"
+  | "DISABLED"
+  | "ARCHIVED";
 
 type SubscriptionRow = {
   id: string;
@@ -52,9 +60,13 @@ type BusinessRow = {
   name: string;
   slug: string;
   country: string | null;
+  phone: string | null;
+  email: string | null;
   currency: string;
   status: string;
   createdAt: string;
+  expiresAt: string | null;
+  canSoftDelete: boolean;
   owner: {
     firstName: string | null;
     lastName: string | null;
@@ -82,7 +94,14 @@ type MessageState = {
 } | null;
 
 const FILTERS: FilterKey[] = ["PENDING", "ACTIVE", "REJECTED"];
-const BIZ_STATUSES: BizStatusKey[] = ["ALL", "ACTIVE", "ARCHIVED"];
+const BIZ_STATUSES: BizStatusKey[] = [
+  "ALL",
+  "DRAFT",
+  "ACTIVE",
+  "EXPIRED",
+  "DISABLED",
+  "ARCHIVED",
+];
 
 const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-5 shadow-soft";
 
@@ -178,7 +197,8 @@ function statusBadgeClass(status: string): string {
 
 function bizStatusBadgeClass(status: string): string {
   if (status === "ACTIVE") return BADGE_OK;
-  if (status === "ARCHIVED") return BADGE_MUTED;
+  if (status === "DISABLED" || status === "ARCHIVED") return BADGE_MUTED;
+  if (status === "EXPIRED") return BADGE_BAD;
   return BADGE_WARN;
 }
 
@@ -210,6 +230,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const [bizQuery, setBizQuery] = useState("");
   const [bizRows, setBizRows] = useState<BusinessRow[]>([]);
   const [loadingBiz, setLoadingBiz] = useState(false);
+  const [businessActionId, setBusinessActionId] = useState<string | null>(null);
 
   const [message, setMessage] = useState<MessageState>(null);
 
@@ -272,6 +293,71 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
     },
     []
   );
+
+  async function disableBusiness(business: BusinessRow) {
+    if (!window.confirm(t("bizDisableConfirm", { name: business.name }))) return;
+    try {
+      setBusinessActionId(business.id);
+      const response = await fetch(`/api/admin/businesses/${business.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "disable" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || t("bizActionError"));
+      await Promise.all([loadBusinesses(bizStatus, bizQuery), loadStats()]);
+      setMessage({ kind: "ok", text: t("bizDisabled") });
+    } catch (error) {
+      setMessage({
+        kind: "err",
+        text: error instanceof Error ? error.message : t("bizActionError"),
+      });
+    } finally {
+      setBusinessActionId(null);
+    }
+  }
+
+  async function softDeleteBusiness(business: BusinessRow) {
+    try {
+      setBusinessActionId(business.id);
+      const previewResponse = await fetch(`/api/admin/businesses/${business.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: false }),
+      });
+      const preview = await previewResponse.json();
+      if (!previewResponse.ok) {
+        throw new Error(preview?.error || t("bizActionError"));
+      }
+      if (!preview.confirmationRequired) return;
+
+      const bookingCount = formatNumber(Number(preview.bookingCount) || 0, locale);
+      if (
+        !window.confirm(
+          t("bizDeleteConfirm", { name: business.name, count: bookingCount })
+        )
+      ) {
+        return;
+      }
+
+      const response = await fetch(`/api/admin/businesses/${business.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || t("bizActionError"));
+      await Promise.all([loadBusinesses(bizStatus, bizQuery), loadStats()]);
+      setMessage({ kind: "ok", text: t("bizDeleted") });
+    } catch (error) {
+      setMessage({
+        kind: "err",
+        text: error instanceof Error ? error.message : t("bizActionError"),
+      });
+    } finally {
+      setBusinessActionId(null);
+    }
+  }
 
   useEffect(() => {
     if (isAdmin) {
@@ -390,7 +476,10 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
   const bizSearchPlaceholder = t("bizSearchPlaceholder");
   const bizEmpty = t("bizEmpty");
   const bizFilterAll = t("bizFilterAll");
+  const bizFilterDraft = t("bizFilterDraft");
   const bizFilterActive = t("bizFilterActive");
+  const bizFilterExpired = t("bizFilterExpired");
+  const bizFilterDisabled = t("bizFilterDisabled");
   const bizFilterArchived = t("bizFilterArchived");
   const bizServices = t("bizServices");
   const bizBookings = t("bizBookings");
@@ -411,8 +500,19 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
 
   const bizStatusLabels: Record<BizStatusKey, string> = {
     ALL: bizFilterAll,
+    DRAFT: bizFilterDraft,
     ACTIVE: bizFilterActive,
+    EXPIRED: bizFilterExpired,
+    DISABLED: bizFilterDisabled,
     ARCHIVED: bizFilterArchived,
+  };
+
+  const bizStatusText: Record<string, string> = {
+    DRAFT: t("bizStatusDraft"),
+    ACTIVE: statActive,
+    EXPIRED: t("bizStatusExpired"),
+    DISABLED: t("bizStatusDisabled"),
+    ARCHIVED: statArchived,
   };
 
   const settingLabels: Record<string, string> = {
@@ -1005,6 +1105,9 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                   : null;
                 const bizLink = "/book/" + biz.slug;
                 const createdDate = formatDate(biz.createdAt, locale);
+                const expiresDate = biz.expiresAt
+                  ? formatDate(biz.expiresAt, locale)
+                  : null;
                 const panelLink = "/app?businessId=" + biz.id;
 
                 return (
@@ -1016,11 +1119,7 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                             {biz.name}
                           </h3>
                           <span className={badgeCls}>
-                            {biz.status === "ACTIVE"
-                              ? statActive
-                              : biz.status === "ARCHIVED"
-                              ? statArchived
-                              : biz.status}
+                            {bizStatusText[biz.status] || biz.status}
                           </span>
                         </div>
 
@@ -1049,16 +1148,52 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                           <LogIn className="h-4 w-4" />
                         </a>
 
-                        <a
-                          href={bizLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={txtViewBusiness}
-                          title={txtViewBusiness}
-                          className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#1A1F36]/10 text-[#1A1F36]/70 transition-transform active:scale-95"
-                        >
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
+                        {biz.status === "ACTIVE" && (
+                          <a
+                            href={bizLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={txtViewBusiness}
+                            title={txtViewBusiness}
+                            className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#1A1F36]/10 text-[#1A1F36]/70 transition-transform active:scale-95"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        )}
+
+                        {biz.status === "ACTIVE" && (
+                          <button
+                            type="button"
+                            onClick={() => disableBusiness(biz)}
+                            disabled={businessActionId === biz.id}
+                            aria-label={t("bizDisableButton")}
+                            title={t("bizDisableButton")}
+                            className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#FCA311] text-white transition-transform active:scale-95 disabled:opacity-50"
+                          >
+                            {businessActionId === biz.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Power className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+
+                        {biz.canSoftDelete && (
+                          <button
+                            type="button"
+                            onClick={() => softDeleteBusiness(biz)}
+                            disabled={businessActionId === biz.id}
+                            aria-label={t("bizDeleteButton")}
+                            title={t("bizDeleteButton")}
+                            className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#FF4D5E] text-white transition-transform active:scale-95 disabled:opacity-50"
+                          >
+                            {businessActionId === biz.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -1088,6 +1223,25 @@ function AdminDashboard({ isAdmin }: { isAdmin: boolean }) {
                         <Calendar className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                         <span>{createdDate}</span>
                       </div>
+
+                      {(biz.phone || biz.email) && (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[#1A1F36]/70">
+                          <span>{t("bizContact")}:</span>
+                          {biz.phone && (
+                            <span dir="ltr" className="break-all">{biz.phone}</span>
+                          )}
+                          {biz.email && (
+                            <span className="break-all">{biz.email}</span>
+                          )}
+                        </div>
+                      )}
+
+                      {expiresDate && (
+                        <div className="flex items-start gap-2 text-[#1A1F36]/70">
+                          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>{t("bizExpiresAt", { date: expiresDate })}</span>
+                        </div>
+                      )}
 
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[#1A1F36]/70">
                         <span className="inline-flex items-center gap-1">

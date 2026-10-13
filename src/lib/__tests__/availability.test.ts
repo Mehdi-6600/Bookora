@@ -50,6 +50,16 @@ describe("computeAvailableSlots", () => {
     expect(slots[1].getUTCHours()).toBe(11);
   });
 
+  it("returns no slots for a holiday regardless of working hours", () => {
+    const slots = computeAvailableSlots({
+      ...base,
+      durationMinutes: 60,
+      slotIntervalMinutes: 30,
+      isHoliday: true,
+    });
+    expect(slots).toHaveLength(0);
+  });
+
   it("returns empty when open >= close", () => {
     const slots = computeAvailableSlots({
       ...base,

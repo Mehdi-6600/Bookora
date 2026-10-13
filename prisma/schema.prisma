@@ -45,14 +45,19 @@ model Business {
   city        String?
   timezone    String   @default("UTC")
   currency    String   @default("EUR")
-  status      String   @default("ACTIVE")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status            String   @default("DRAFT")
+  expiresAt         DateTime?
+  deletedAt         DateTime?
+  setupCompletedAt  DateTime?
+  creationKey       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   owner          User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   services       Service[]
   workingHours   WorkingHour[]
   timeOffs       TimeOff[]
+  holidays       Holiday[]
   bookings       Booking[]
   specialOffers  SpecialOffer[]
   subscriptions  Subscription[]
@@ -61,6 +66,9 @@ model Business {
   @@index([ownerId])
   @@index([slug])
   @@index([status])
+  @@index([expiresAt])
+  @@index([deletedAt])
+  @@unique([ownerId, creationKey])
   @@map("businesses")
 }
 
@@ -121,6 +129,19 @@ model TimeOff {
   @@index([businessId])
   @@index([startAt, endAt])
   @@map("time_offs")
+}
+
+model Holiday {
+  id         String   @id @default(cuid())
+  businessId String
+  date       DateTime @db.Date
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, date])
+  @@map("holidays")
 }
 
 model Booking {

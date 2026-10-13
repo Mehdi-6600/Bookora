@@ -14,6 +14,7 @@ import {
   lockUserSubscriptions,
 } from "@/lib/booking/schedule";
 import { normalizePaymentReference } from "@/lib/payment-reference";
+import { isBusinessPubliclyActive } from "@/lib/business/lifecycle";
 
 const referencePattern = /^[\p{L}\p{N}][\p{L}\p{N} .#/_-]*[\p{L}\p{N}]$/u;
 
@@ -25,6 +26,8 @@ const submitSchema = z.object({
 });
 
 class BusinessNotFoundError extends Error {}
+class BusinessNotReadyError extends Error {}
+class SetupNotFinalizedError extends Error {}
 class PaymentMethodUnavailableError extends Error {}
 class PendingSubscriptionError extends Error {}
 class DuplicateReferenceError extends Error {}
@@ -60,7 +63,12 @@ export async function POST(req: NextRequest) {
     }
 
     const businessRef = await prisma.business.findFirst({
-      where: { id: parsed.data.businessId, ownerId: user.id },
+      where: {
+        id: parsed.data.businessId,
+        ownerId: user.id,
+        deletedAt: null,
+        status: { in: ["DRAFT", "ACTIVE", "EXPIRED"] },
+      },
       select: { id: true },
     });
     if (!businessRef) {
@@ -70,6 +78,7 @@ export async function POST(req: NextRequest) {
     const normalizedReference = normalizePaymentReference(
       parsed.data.receiptReference
     );
+    const now = new Date();
 
     const result = await prisma.$transaction(async (tx) => {
       await lockBusinessSchedule(tx, businessRef.id);
@@ -77,10 +86,36 @@ export async function POST(req: NextRequest) {
       await lockPaymentReference(tx, normalizedReference);
 
       const business = await tx.business.findFirst({
-        where: { id: businessRef.id, ownerId: user.id },
-        select: { id: true, country: true },
+        where: {
+          id: businessRef.id,
+          ownerId: user.id,
+          deletedAt: null,
+          status: { in: ["DRAFT", "ACTIVE", "EXPIRED"] },
+        },
+        select: {
+          id: true,
+          country: true,
+          status: true,
+          expiresAt: true,
+          setupCompletedAt: true,
+        },
       });
       if (!business) throw new BusinessNotFoundError();
+      if (!isBusinessPubliclyActive(business, now) && !business.setupCompletedAt) {
+        throw new SetupNotFinalizedError();
+      }
+
+      const [activeServices, enabledDays] = await Promise.all([
+        tx.service.count({
+          where: { businessId: business.id, active: true },
+        }),
+        tx.workingHour.count({
+          where: { businessId: business.id, enabled: true },
+        }),
+      ]);
+      if (activeServices < 1 || enabledDays < 1) {
+        throw new BusinessNotReadyError();
+      }
 
       const userRecord = await tx.user.findUnique({
         where: { id: user.id },
@@ -96,7 +131,7 @@ export async function POST(req: NextRequest) {
       }
 
       const existingPending = await tx.subscription.findFirst({
-        where: { userId: user.id, status: "PENDING" },
+        where: { userId: user.id, businessId: business.id, status: "PENDING" },
         select: {
           id: true,
           plan: true,
@@ -170,6 +205,24 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     if (error instanceof BusinessNotFoundError) {
       return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
+    }
+    if (error instanceof BusinessNotReadyError) {
+      return NextResponse.json(
+        {
+          error: "ابتدا دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید.",
+          code: "BUSINESS_NOT_READY",
+        },
+        { status: 409 }
+      );
+    }
+    if (error instanceof SetupNotFinalizedError) {
+      return NextResponse.json(
+        {
+          error: "برای شروع پرداخت، تکمیل نهایی تنظیمات کسب‌وکار را تأیید کنید.",
+          code: "SETUP_NOT_FINALIZED",
+        },
+        { status: 409 }
+      );
     }
     if (error instanceof PaymentMethodUnavailableError) {
       return NextResponse.json(

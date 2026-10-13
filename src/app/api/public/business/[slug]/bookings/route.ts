@@ -12,6 +12,12 @@ import { getClientIp } from "@/lib/get-client-ip";
 import { markFirstBooking } from "@/lib/outreach/attribution";
 import { recordFunnelEvent } from "@/lib/funnel";
 import { getCurrentUser } from "@/lib/auth/session";
+import { normalizePhoneNumber, INVALID_PHONE_MESSAGE } from "@/lib/normalize-phone";
+import {
+  customerNameSchema,
+  normalizedCustomerPhoneSchema,
+} from "@/lib/booking/customer-validation";
+import { isBusinessPubliclyActive } from "@/lib/business/lifecycle";
 import {
   activeBookingOverlapWhere,
   expireStalePendingBookings,
@@ -25,30 +31,20 @@ import {
   isWithinBookingWindow,
 } from "@/lib/booking/time";
 
-const phonePattern = /^[0-9+\- ()]{6,20}$/;
 const idempotencySchema = z.string().uuid();
 
 const createBookingSchema = z.object({
   serviceId: z.string().min(1).max(100),
   startAt: z.string().datetime(),
-  customerName: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .refine(
-      (value) => !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value)
-    ),
-  customerPhone: z
-    .string()
-    .trim()
-    .regex(phonePattern, "phone")
-    .refine((value) => (value.match(/[0-9]/g) || []).length >= 6),
+  customerName: customerNameSchema,
+  customerPhone: normalizedCustomerPhoneSchema,
   customerEmail: z.string().trim().email().max(254).nullable().optional(),
   isTestBooking: z.boolean().optional(),
 });
 
 class SlotTakenError extends Error {}
+class HolidayBookingError extends Error {}
+class BusinessNotActiveError extends Error {}
 class BusinessUnavailableError extends Error {}
 class ServiceUnavailableError extends Error {}
 class InvalidBookingTimeError extends Error {}
@@ -147,7 +143,7 @@ export async function POST(
 
     if (await isRateLimited("booking:ip:" + ip, 10, 10 * 60 * 1000)) {
       return NextResponse.json(
-        { error: "too many requests" },
+        { error: "درخواست‌های زیادی ارسال شده است؛ کمی صبر کنید و دوباره تلاش کنید." },
         { status: 429 }
       );
     }
@@ -157,13 +153,65 @@ export async function POST(
     try {
       body = await req.json();
     } catch {
-      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+      return NextResponse.json(
+        { error: "درخواست رزرو معتبر نیست؛ صفحه را بازخوانی کنید." },
+        { status: 400 }
+      );
     }
 
-    const parsed = createBookingSchema.safeParse(body);
+    let normalizedBody = body;
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      !Array.isArray(body) &&
+      Object.prototype.hasOwnProperty.call(body, "customerPhone")
+    ) {
+      const submittedPhone = (body as Record<string, unknown>).customerPhone;
+      if (typeof submittedPhone !== "string") {
+        return NextResponse.json(
+          {
+            error: INVALID_PHONE_MESSAGE,
+            code: "INVALID_CUSTOMER_PHONE",
+          },
+          { status: 400 }
+        );
+      }
+      try {
+        normalizedBody = {
+          ...(body as Record<string, unknown>),
+          customerPhone: normalizePhoneNumber(submittedPhone),
+        };
+      } catch {
+        return NextResponse.json(
+          {
+            error: INVALID_PHONE_MESSAGE,
+            code: "INVALID_CUSTOMER_PHONE",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    const parsed = createBookingSchema.safeParse(normalizedBody);
     if (!parsed.success) {
+      const invalidField = parsed.error.issues[0]?.path[0];
+      const errorMessage =
+        invalidField === "customerName"
+          ? "نام باید ۱ تا ۱۲۰ نویسه داشته باشد و شامل نویسه‌های کنترلی یا جهت‌دهی مخرب نباشد."
+          : invalidField === "customerPhone"
+          ? INVALID_PHONE_MESSAGE
+          : invalidField === "customerEmail"
+          ? "نشانی ایمیل معتبر نیست."
+          : "اطلاعات رزرو معتبر نیست؛ تاریخ و سرویس را بررسی کنید.";
       return NextResponse.json(
-        { error: "invalid booking" },
+        {
+          error: errorMessage,
+          ...(invalidField === "customerName"
+            ? { code: "INVALID_CUSTOMER_NAME" }
+            : invalidField === "customerPhone"
+            ? { code: "INVALID_CUSTOMER_PHONE" }
+            : {}),
+        },
         { status: 400 }
       );
     }
@@ -171,7 +219,10 @@ export async function POST(
     // Public callers may request a test booking only with an authenticated
     // administrator session. A client-supplied flag alone is never trusted.
     if (parsed.data.isTestBooking && !(await getCurrentUser())?.isAdmin) {
-      return NextResponse.json({ error: "Only an administrator can create a test booking." }, { status: 403 });
+      return NextResponse.json(
+        { error: "فقط مدیر سامانه می‌تواند رزرو آزمایشی ثبت کند." },
+        { status: 403 }
+      );
     }
 
     const suppliedKey = req.headers.get("idempotency-key");
@@ -180,7 +231,7 @@ export async function POST(
       const keyResult = idempotencySchema.safeParse(suppliedKey);
       if (!keyResult.success) {
         return NextResponse.json(
-          { error: "invalid idempotency key" },
+          { error: "کلید درخواست رزرو معتبر نیست؛ دوباره تلاش کنید." },
           { status: 400 }
         );
       }
@@ -189,12 +240,23 @@ export async function POST(
 
     const businessRef = await prisma.business.findUnique({
       where: { slug },
-      select: { id: true },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        deletedAt: true,
+      },
     });
 
     if (!businessRef) {
       return NextResponse.json(
-        { error: "business not found" },
+        { error: "کسب‌وکار پیدا نشد." },
+        { status: 404 }
+      );
+    }
+    if (!isBusinessPubliclyActive(businessRef)) {
+      return NextResponse.json(
+        { error: "این کسب‌وکار هنوز فعال نیست." },
         { status: 404 }
       );
     }
@@ -208,7 +270,7 @@ export async function POST(
       )
     ) {
       return NextResponse.json(
-        { error: "too many requests for this phone" },
+        { error: "برای این شماره درخواست‌های زیادی ثبت شده است؛ کمی بعد دوباره تلاش کنید." },
         { status: 429 }
       );
     }
@@ -218,6 +280,24 @@ export async function POST(
       await lockBusinessSchedule(tx, businessRef.id);
 
       const now = new Date();
+      const business = await tx.business.findFirst({
+        where: {
+          id: businessRef.id,
+          slug,
+          status: "ACTIVE",
+          deletedAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+        select: {
+          id: true,
+          name: true,
+          currency: true,
+          timezone: true,
+          owner: { select: { telegramId: true } },
+        },
+      });
+      if (!business) throw new BusinessNotActiveError();
+
       await expireStalePendingBookings(tx, businessRef.id, now);
 
       const existingByKey = await tx.booking.findUnique({
@@ -276,23 +356,6 @@ export async function POST(
         };
       }
 
-      const business = await tx.business.findFirst({
-        where: {
-          id: businessRef.id,
-          slug,
-          status: "ACTIVE",
-        },
-        select: {
-          id: true,
-          name: true,
-          currency: true,
-          timezone: true,
-          owner: { select: { telegramId: true } },
-        },
-      });
-
-      if (!business) throw new BusinessUnavailableError();
-
       const service = await tx.service.findFirst({
         where: {
           id: parsed.data.serviceId,
@@ -312,6 +375,17 @@ export async function POST(
       }
 
       const dayOfWeek = getBusinessDayOfWeek(localDate);
+      const holiday = await tx.holiday.findUnique({
+        where: {
+          businessId_date: {
+            businessId: business.id,
+            date: new Date(`${localDate}T00:00:00.000Z`),
+          },
+        },
+        select: { id: true },
+      });
+      if (holiday) throw new HolidayBookingError();
+
       const workingHour = await tx.workingHour.findUnique({
         where: {
           businessId_dayOfWeek: {
@@ -429,7 +503,7 @@ export async function POST(
           businessId: business.id,
           serviceId: service.id,
           customerName: parsed.data.customerName,
-          customerPhone: parsed.data.customerPhone,
+          customerPhone: normalizePhoneNumber(parsed.data.customerPhone),
           customerEmail: parsed.data.customerEmail || null,
           isTestBooking: parsed.data.isTestBooking ?? false,
           startAt,
@@ -551,39 +625,51 @@ export async function POST(
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
+    if (error instanceof HolidayBookingError) {
+      return NextResponse.json(
+        { error: "این روز تعطیل است." },
+        { status: 409 }
+      );
+    }
+    if (error instanceof BusinessNotActiveError) {
+      return NextResponse.json(
+        { error: "این کسب‌وکار هنوز فعال نیست." },
+        { status: 404 }
+      );
+    }
     if (error instanceof SlotTakenError) {
       return NextResponse.json(
-        { error: "slot taken" },
+        { error: "این زمان دیگر در دسترس نیست؛ زمان دیگری انتخاب کنید." },
         { status: 409 }
       );
     }
     if (error instanceof InvalidBookingTimeError) {
       return NextResponse.json(
-        { error: "invalid booking time" },
+        { error: "زمان انتخاب‌شده معتبر نیست یا خارج از ساعات کاری است." },
         { status: 400 }
       );
     }
     if (error instanceof BookingExpiredError) {
       return NextResponse.json(
-        { error: "booking expired" },
+        { error: "مهلت ثبت این درخواست به پایان رسیده است؛ زمان را دوباره انتخاب کنید." },
         { status: 409 }
       );
     }
     if (error instanceof IdempotencyConflictError) {
       return NextResponse.json(
-        { error: "idempotency key conflict" },
+        { error: "درخواست رزرو تکراری با اطلاعات متفاوت ارسال شده است؛ صفحه را بازخوانی کنید." },
         { status: 409 }
       );
     }
     if (error instanceof BusinessUnavailableError) {
       return NextResponse.json(
-        { error: "business or payment method unavailable" },
+        { error: "ثبت رزرو در حال حاضر ممکن نیست؛ اطلاعات پرداخت کسب‌وکار در دسترس نیست." },
         { status: 409 }
       );
     }
     if (error instanceof ServiceUnavailableError) {
       return NextResponse.json(
-        { error: "service unavailable" },
+        { error: "سرویس انتخاب‌شده دیگر در دسترس نیست." },
         { status: 404 }
       );
     }
@@ -592,7 +678,7 @@ export async function POST(
       error.code === "P2002"
     ) {
       return NextResponse.json(
-        { error: "duplicate request" },
+        { error: "درخواست رزرو تکراری شناسایی شد؛ وضعیت رزرو را بررسی کنید." },
         { status: 409 }
       );
     }
@@ -602,7 +688,7 @@ export async function POST(
       error instanceof Error ? error.name : "UnknownError"
     );
     return NextResponse.json(
-      { error: "booking failed" },
+      { error: "ثبت رزرو ناموفق بود؛ دوباره تلاش کنید." },
       { status: 500 }
     );
   }

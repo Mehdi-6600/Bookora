@@ -114,9 +114,11 @@ function formatToman(value: number, locale: string): string {
 export function SubscriptionPanel({
   businessId,
   country,
+  onActivated,
 }: {
   businessId: string | null;
   country: string | null;
+  onActivated?: () => Promise<void> | void;
 }) {
   const t = useTranslations("subscription");
   const locale = useLocale();
@@ -167,8 +169,16 @@ export function SubscriptionPanel({
       setLoading(true);
       setError(null);
 
+      if (!businessId) {
+        setSubscription(null);
+        setPending(null);
+        return;
+      }
+
+      const statusUrl =
+        "/api/subscription/status?businessId=" + encodeURIComponent(businessId);
       const [statusResponse, preferenceResponse] = await Promise.all([
-        fetch("/api/subscription/status", { cache: "no-store" }),
+        fetch(statusUrl, { cache: "no-store" }),
         fetch("/api/subscription/payment-preference", { cache: "no-store" }),
       ]);
 
@@ -201,7 +211,37 @@ export function SubscriptionPanel({
   useEffect(() => {
     loadStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId || !pending) return;
+
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetch(
+          "/api/subscription/status?businessId=" + encodeURIComponent(businessId),
+          { cache: "no-store" }
+        );
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled) return;
+
+        setSubscription(data.subscription ?? null);
+        setPending(data.pendingSubscription ?? null);
+        if (data.subscription?.status === "ACTIVE") {
+          await onActivated?.();
+        }
+      } catch {
+        // A transient status request must not disrupt the pending-payment UI.
+      }
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [businessId, pending?.createdAt, onActivated]);
 
   async function updatePreference(next: PaymentPreference) {
     if (savingPreference || next === preference) return;
@@ -236,6 +276,37 @@ export function SubscriptionPanel({
     }
   }
 
+  async function refreshAfterStarsPayment() {
+    if (!businessId) return;
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+      }
+
+      try {
+        const response = await fetch(
+          "/api/subscription/status?businessId=" + encodeURIComponent(businessId),
+          { cache: "no-store" }
+        );
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        setSubscription(data.subscription ?? null);
+        setPending(data.pendingSubscription ?? null);
+        if (data.subscription?.status === "ACTIVE") {
+          await onActivated?.();
+          return;
+        }
+      } catch {
+        // Continue polling briefly for Telegram's successful-payment update.
+      }
+    }
+
+    await loadStatus();
+    await onActivated?.();
+  }
+
   async function subscribeWithStars(plan: PlanCode) {
     setOkMessage(null);
 
@@ -257,6 +328,12 @@ export function SubscriptionPanel({
       const data = await response.json();
 
       if (!response.ok) {
+        if (data?.code === "SETUP_NOT_FINALIZED") {
+          throw new Error(t("setupNotFinalized"));
+        }
+        if (data?.code === "BUSINESS_NOT_READY") {
+          throw new Error(t("businessNotReady"));
+        }
         throw new Error(data?.error || t("checkoutError"));
       }
 
@@ -273,7 +350,7 @@ export function SubscriptionPanel({
 
       webApp.openInvoice(data.invoiceLink, (status) => {
         if (status === "paid") {
-          loadStatus();
+          void refreshAfterStarsPayment().catch(() => undefined);
         }
       });
     } catch (err) {
@@ -350,11 +427,18 @@ export function SubscriptionPanel({
       const data = await response.json();
 
       if (!response.ok) {
+        if (data?.code === "SETUP_NOT_FINALIZED") {
+          throw new Error(t("setupNotFinalized"));
+        }
+        if (data?.code === "BUSINESS_NOT_READY") {
+          throw new Error(t("businessNotReady"));
+        }
         throw new Error(data?.error || t("submitError"));
       }
 
       setManualPlan(null);
       await loadStatus();
+      await onActivated?.();
       setOkMessage(t("submittedNotice"));
     } catch (err) {
       const text = err instanceof Error ? err.message : t("submitError");

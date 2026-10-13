@@ -55,6 +55,7 @@ const UNIQUE_KEYS: Record<string, string[][]> = {
   discoveryCandidate: [["dedupeKey"]],
   discoveryRun: [["runDate"]],
   adminSetting: [["key"]],
+  holiday: [["businessId", "date"]],
   outreachSuppression: [["identifier"]],
   discoveryKeyword: [["group", "language", "term"]],
 };
@@ -445,6 +446,7 @@ export function createPrismaDouble(state: DoubleState) {
     "discoveryCandidate",
     "discoveryKeyword",
     "discoveryRun",
+    "holiday",
     "invitationTemplate",
     "outreachAuditEvent",
     "telegramBotOptIn",

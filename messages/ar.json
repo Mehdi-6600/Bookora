@@ -96,7 +96,25 @@
     "confirmDelete": "هل أنت متأكد؟",
     "deleting": "...",
     "reactivateButton": "إعادة تفعيل النشاط",
-    "reactivating": "جارٍ إعادة التفعيل..."
+    "reactivating": "جارٍ إعادة التفعيل...",
+    "draftTag": "مسودة",
+    "expiredTag": "انتهى الاشتراك",
+    "disabledTag": "معطّل",
+    "disabledBanner": "عطّل المسؤول هذا النشاط التجاري، لذلك لا يظهر للعامة. تواصل مع الدعم إذا كنت بحاجة إلى إعادة تفعيله.",
+    "draftBanner": "أكمل بيانات النشاط والخدمات وساعات العمل. يمكنك معاينة الصفحة بشكل خاص قبل تفعيلها.",
+    "previewButton": "معاينة خاصة",
+    "activateButton": "التفعيل بالاشتراك",
+    "renewActivateButton": "تجديد الاشتراك والتفعيل",
+    "activating": "جارٍ التفعيل...",
+    "activated": "تم تفعيل النشاط التجاري.",
+    "activationError": "تعذّر تفعيل النشاط التجاري.",
+    "subscriptionRequiredToActivate": "لنشر صفحة الحجز، اشترِ أولاً اشتراكاً لهذا النشاط أو أرسل طلب دفع.",
+    "activationIncomplete": "أضف خدمة نشطة واحدة على الأقل وفعّل يوماً واحداً على الأقل من أيام العمل قبل التفعيل.",
+    "privatePreviewLinkLabel": "رابط المعاينة الخاصة",
+    "completeSetupAndBuy": "أكمل الإعداد واشترِ الاشتراك",
+    "createAnotherButton": "إنشاء لوحة نشاط تجاري جديدة",
+    "cancelCreateBusiness": "إلغاء إعداد اللوحة",
+    "continueSubscription": "المتابعة إلى الاشتراك"
   },
   "service": {
     "addTitle": "إضافة خدمة",
@@ -159,7 +177,9 @@
     "serviceDeleted": "تم حذف الخدمة.",
     "serviceDeleteError": "فشل حذف الخدمة.",
     "serviceToggleError": "فشل تغيير الحالة.",
-    "copyFailed": "فشل النسخ التلقائي؛ الرجاء تحديد الرابط ونسخه يدوياً."
+    "copyFailed": "فشل النسخ التلقائي؛ الرجاء تحديد الرابط ونسخه يدوياً.",
+    "businessDisabled": "تم تعطيل النشاط التجاري وإغلاق صفحته العامة.",
+    "businessSoftDeleted": "تمت أرشفة النشاط التجاري مع الاحتفاظ بحجوزاته."
   },
   "publicBooking": {
     "loading": "جارٍ التحميل...",
@@ -170,7 +190,7 @@
     "noSlots": "لا توجد أوقات متاحة في هذا اليوم.",
     "yourInfo": "معلوماتك",
     "namePlaceholder": "الاسم الكامل",
-    "phonePlaceholder": "رقم الهاتف",
+    "phonePlaceholder": "رقم الهاتف مع رمز الدولة، مثل +971 أو +49",
     "emailPlaceholder": "البريد الإلكتروني (اختياري)",
     "confirmButton": "تأكيد الحجز - {price}",
     "confirming": "جارٍ الإرسال...",
@@ -195,7 +215,10 @@
     "receiptRequired": "الرجاء إدخال رقم المرجع أو رقم العملية.",
     "bookingError": "فشل إرسال الحجز.",
     "receiptError": "فشل إرسال الإيصال.",
-    "slotsError": "فشل تحميل الأوقات"
+    "slotsError": "فشل تحميل الأوقات",
+    "previewOnly": "معاينة خاصة — هذه الصفحة مرئية لك وحدك. الحجز متوقف حتى التفعيل.",
+    "invalidName": "أدخل اسماً صالحاً يتراوح بين حرف واحد و120 حرفاً.",
+    "invalidPhone": "أدخل رقم هاتف صالحاً مع رمز الدولة، مثل +49 أو +98 أو +971."
   },
   "workingHours": {
     "title": "ساعات العمل",
@@ -316,7 +339,10 @@
     "compareProBusiness": "أنشطة غير محدودة",
     "compareFreeSupport": "دعم عادي",
     "compareProSupport": "دعم ذو أولوية",
-    "compareProBadge": "بدون حد للحجوزات والخدمات"
+    "compareProBadge": "بدون حد للحجوزات والخدمات",
+    "submittedNotice": "تم إرسال طلب الدفع للمراجعة.",
+    "setupNotFinalized": "راجع إعداد هذا النشاط وأكّد الخطوة النهائية قبل الدفع.",
+    "businessNotReady": "أضف خدمة نشطة واحدة على الأقل ويوم عمل نشطاً واحداً قبل الدفع."
   },
   "admin": {
     "title": "لوحة المسؤول",
@@ -380,7 +406,22 @@
     "adminViewBanner": "وضع المسؤول — أنت تعدّل نشاطاً تجارياً",
     "backToAdmin": "العودة إلى لوحة المسؤول",
     "enterPanelButton": "الدخول إلى اللوحة",
-    "tabOutreach": "الاستحواذ"
+    "tabOutreach": "الاستحواذ",
+    "bizFilterDraft": "مسودة",
+    "bizFilterExpired": "منتهي",
+    "bizFilterDisabled": "معطّل",
+    "bizStatusDraft": "مسودة",
+    "bizStatusExpired": "منتهي",
+    "bizStatusDisabled": "معطّل",
+    "bizDisableButton": "تعطيل النشاط التجاري",
+    "bizDisableConfirm": "هل تريد تعطيل «{name}»؟ ستصبح صفحته العامة غير متاحة فوراً.",
+    "bizDisabled": "تم تعطيل النشاط التجاري.",
+    "bizDeleteButton": "أرشفة النشاط",
+    "bizDeleteConfirm": "ستتم أرشفة «{name}» مع الاحتفاظ بحجوزاته البالغ عددها {count}. هل تريد المتابعة؟",
+    "bizDeleted": "تمت أرشفة النشاط التجاري مع الاحتفاظ بحجوزاته.",
+    "bizActionError": "تعذّر تنفيذ الإجراء على النشاط التجاري.",
+    "bizContact": "معلومات التواصل",
+    "bizExpiresAt": "انتهاء الاشتراك: {date}"
   },
   "telegramAuth": {
     "title": "تسجيل الدخول إلى Bookora",
@@ -761,5 +802,36 @@
     "saved": "تم الحفظ.",
     "manualSendRecorded": "تم تسجيل التواصل اليدوي كـ«مُرسَل» مع الدليل الذي كتبته.",
     "prepareCountLabel": "عدد الدعوات المطلوب تجهيزها"
+  },
+  "holiday": {
+    "title": "العطلات",
+    "subtitle": "حدّد الأيام التي يكون فيها النشاط مغلقاً؛ لن تظهر أوقات للحجز في هذه التواريخ.",
+    "dateLabel": "تاريخ العطلة",
+    "dateRequired": "اختر تاريخ العطلة.",
+    "reasonPlaceholder": "سبب الإغلاق (اختياري)",
+    "addButton": "إضافة عطلة",
+    "saving": "جارٍ الحفظ...",
+    "loadError": "تعذّر تحميل العطلات.",
+    "saveError": "تعذّر حفظ العطلة.",
+    "removeError": "تعذّرت إزالة العطلة.",
+    "empty": "لم تُضف عطلات بعد.",
+    "removeButton": "إزالة العطلة"
+  },
+  "businessSetup": {
+    "title": "مراجعة الإعداد",
+    "subtitle": "راجع المعلومات المحفوظة لهذا النشاط. لن يُطلب الاشتراك إلا بعد اكتمال الإعداد.",
+    "business": "بيانات النشاط التجاري",
+    "timezone": "المنطقة الزمنية",
+    "services": "الخدمات النشطة ({count})",
+    "noServices": "لم تتم إضافة خدمات بعد.",
+    "inactive": "(غير نشط)",
+    "workingHours": "أيام وساعات العمل",
+    "holidays": "العطلات والإغلاقات",
+    "loading": "جارٍ تحميل تفاصيل الإعداد...",
+    "noWorkingDays": "لم يتم تفعيل أيام عمل بعد.",
+    "noHolidays": "لا توجد عطلات أو إغلاقات مضافة.",
+    "notReady": "فعّل خدمة واحدة على الأقل ويوماً واحداً من أيام العمل للمتابعة. ستظل تغييرات المسودة محفوظة.",
+    "loadError": "تعذّر تحميل ملخص الإعداد.",
+    "refresh": "تحديث الملخص"
   }
 }
