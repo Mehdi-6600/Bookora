@@ -1608,9 +1608,26 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 : tBiz("reactivateButton")}
                             </button>
                           ) : isDisabled ? (
-                            <p className="col-span-2 rounded-2xl bg-[#FCA311]/15 p-3 text-sm font-medium text-[#1A1F36]/80">
-                              {tBiz("disabledBanner")}
-                            </p>
+                            <div className="col-span-2 space-y-2">
+                              <p className="rounded-2xl bg-[#FCA311]/15 p-3 text-sm font-medium text-[#1A1F36]/80">
+                                {tBiz("disabledBanner")}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  reactivateBusiness(selectedBusiness)
+                                }
+                                disabled={reactivating}
+                                className={BTN_PRIMARY + " w-full"}
+                              >
+                                {reactivating && (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                )}
+                                {reactivating
+                                  ? tBiz("reactivating")
+                                  : tBiz("reactivateButton")}
+                              </button>
+                            </div>
                           ) : (
                             <>
                               <button
