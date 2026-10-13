@@ -1589,16 +1589,35 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         />
                       )}
 
-                      {!adminView && (
-                        <div className="mt-4 grid grid-cols-2 gap-2">
-                          {isArchived ? (
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        {isArchived ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              reactivateBusiness(selectedBusiness)
+                            }
+                            disabled={reactivating}
+                            className={BTN_PRIMARY + " col-span-2"}
+                          >
+                            {reactivating && (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            )}
+                            {reactivating
+                              ? tBiz("reactivating")
+                              : tBiz("reactivateButton")}
+                          </button>
+                        ) : isDisabled ? (
+                          <div className="col-span-2 space-y-2">
+                            <p className="rounded-2xl bg-[#FCA311]/15 p-3 text-sm font-medium text-[#1A1F36]/80">
+                              {tBiz("disabledBanner")}
+                            </p>
                             <button
                               type="button"
                               onClick={() =>
                                 reactivateBusiness(selectedBusiness)
                               }
                               disabled={reactivating}
-                              className={BTN_PRIMARY + " col-span-2"}
+                              className={BTN_PRIMARY + " w-full"}
                             >
                               {reactivating && (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1607,29 +1626,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 ? tBiz("reactivating")
                                 : tBiz("reactivateButton")}
                             </button>
-                          ) : isDisabled ? (
-                            <div className="col-span-2 space-y-2">
-                              <p className="rounded-2xl bg-[#FCA311]/15 p-3 text-sm font-medium text-[#1A1F36]/80">
-                                {tBiz("disabledBanner")}
-                              </p>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  reactivateBusiness(selectedBusiness)
-                                }
-                                disabled={reactivating}
-                                className={BTN_PRIMARY + " w-full"}
-                              >
-                                {reactivating && (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                )}
-                                {reactivating
-                                  ? tBiz("reactivating")
-                                  : tBiz("reactivateButton")}
-                              </button>
-                            </div>
-                          ) : (
-                            <>
+                          </div>
+                        ) : (
+                          <>
+                            {!adminView && (
                               <button
                                 type="button"
                                 onClick={() =>
@@ -1640,8 +1640,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 <Pencil className="h-4 w-4" />
                                 {tBiz("editButton")}
                               </button>
+                            )}
 
-                              {confirmDeleteBusiness ? (
+                            {!adminView && (
+                              confirmDeleteBusiness ? (
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -1668,11 +1670,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                   <Trash2 className="h-4 w-4" />
                                   {tBiz("deleteButton")}
                                 </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      )}
+                              )
+                            )}
+                          </>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
