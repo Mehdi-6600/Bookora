@@ -6,10 +6,12 @@ const PAID_PLAN_CODES = Object.keys(PLANS) as PlanCode[];
 
 export function activePaidSubscriptionWhere(
   userId: string,
-  now = new Date()
+  now = new Date(),
+  businessId?: string
 ): Prisma.SubscriptionWhereInput {
   return {
     userId,
+    ...(businessId ? { businessId } : {}),
     plan: { in: PAID_PLAN_CODES },
     status: "ACTIVE",
     startedAt: { lte: now },
@@ -25,11 +27,13 @@ export async function nextSubscriptionPeriod(
   tx: Prisma.TransactionClient,
   userId: string,
   durationDays: number,
-  now = new Date()
+  now = new Date(),
+  businessId?: string
 ): Promise<{ startedAt: Date; expiresAt: Date | null }> {
   const subscriptions = await tx.subscription.findMany({
     where: {
       userId,
+      ...(businessId ? { businessId } : {}),
       plan: { in: PAID_PLAN_CODES },
       status: "ACTIVE",
       OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],

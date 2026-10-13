@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { recordAttributedStart } from "@/lib/outreach/attribution";
 import { PLANS, parseInvoicePayload } from "@/lib/subscription/plans";
+import { nextSubscriptionPeriod } from "@/lib/subscription/entitlement";
 import {
   HELP,
   START_BUTTON,
@@ -16,6 +17,11 @@ import {
 import { recordOptOut } from "@/lib/outreach/invitations";
 import { recordBotStartConsent, revokeBotConsent } from "@/lib/outreach/bot-consent";
 import { recordAuditEvent } from "@/lib/outreach/audit";
+import {
+  lockBusinessSchedule,
+  lockUserSubscriptions,
+} from "@/lib/booking/schedule";
+import { isBusinessPubliclyActive } from "@/lib/business/lifecycle";
 
 let bot: Bot | null = null;
 
@@ -133,6 +139,22 @@ function registerPaymentHandlers(instance: Bot) {
       await ctx.answerPreCheckoutQuery(false, "اطلاعات پرداخت نامعتبر است.");
       return;
     }
+    if (!parsed.businessId) {
+      await ctx.answerPreCheckoutQuery(
+        false,
+        "این لینک پرداخت به پنل مشخصی متصل نیست؛ از داخل همان پنل دوباره اقدام کنید."
+      );
+      return;
+    }
+
+    const plan = PLANS[parsed.plan];
+    if (
+      query.currency !== "XTR" ||
+      query.total_amount !== plan.starsPrice
+    ) {
+      await ctx.answerPreCheckoutQuery(false, "مبلغ یا ارز پرداخت معتبر نیست.");
+      return;
+    }
 
     const fromId = ctx.from?.id;
     if (!fromId) {
@@ -155,6 +177,49 @@ function registerPaymentHandlers(instance: Bot) {
         "این پرداخت برای شما صادر نشده است."
       );
       return;
+    }
+
+    if (parsed.businessId) {
+      const business = await prisma.business.findFirst({
+        where: {
+          id: parsed.businessId,
+          ownerId: payer.id,
+          deletedAt: null,
+          status: { in: ["DRAFT", "ACTIVE", "EXPIRED"] },
+        },
+        select: {
+          id: true,
+          status: true,
+          expiresAt: true,
+          setupCompletedAt: true,
+        },
+      });
+      if (
+        !business ||
+        (!isBusinessPubliclyActive(business) && !business.setupCompletedAt)
+      ) {
+        await ctx.answerPreCheckoutQuery(
+          false,
+          "این کسب‌وکار برای حساب شما قابل فعال‌سازی نیست."
+        );
+        return;
+      }
+
+      const [activeServices, enabledDays] = await Promise.all([
+        prisma.service.count({
+          where: { businessId: business.id, active: true },
+        }),
+        prisma.workingHour.count({
+          where: { businessId: business.id, enabled: true },
+        }),
+      ]);
+      if (activeServices < 1 || enabledDays < 1) {
+        await ctx.answerPreCheckoutQuery(
+          false,
+          "برای ادامه دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید."
+        );
+        return;
+      }
     }
 
     await ctx.answerPreCheckoutQuery(true);
@@ -193,39 +258,124 @@ function registerPaymentHandlers(instance: Bot) {
       console.error("Unknown plan in payload:", parsed.plan);
       return;
     }
-
-    const now = new Date();
-    const expiresAt = new Date(
-      now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000
-    );
-
-    const existing = await prisma.subscription.findFirst({
-      where: { providerPaymentId: payment.telegram_payment_charge_id },
-      select: { id: true },
-    });
-
-    if (existing) {
-      await ctx.reply("این پرداخت قبلاً ثبت شده است.");
+    if (
+      payment.currency !== "XTR" ||
+      payment.total_amount !== plan.starsPrice
+    ) {
+      console.error("successful_payment amount or currency mismatch", {
+        currency: payment.currency,
+        amount: payment.total_amount,
+        expectedAmount: plan.starsPrice,
+      });
       return;
     }
 
+    const now = new Date();
+
     try {
-      await prisma.subscription.create({
-        data: {
-          userId: parsed.userId,
-          plan: plan.code,
-          status: "ACTIVE",
-          provider: "telegram_stars",
-          providerPaymentId: payment.telegram_payment_charge_id,
-          startedAt: now,
-          expiresAt: expiresAt,
-        },
+      const result = await prisma.$transaction(async (tx) => {
+        if (parsed.businessId) {
+          await lockBusinessSchedule(tx, parsed.businessId);
+        }
+        await lockUserSubscriptions(tx, payer.id);
+
+        const existing = await tx.subscription.findFirst({
+          where: { providerPaymentId: payment.telegram_payment_charge_id },
+          select: { id: true },
+        });
+        if (existing) {
+          return { duplicate: true, expiresAt: null, businessActivated: false };
+        }
+
+        const business = parsed.businessId
+          ? await tx.business.findFirst({
+              where: { id: parsed.businessId, ownerId: payer.id },
+              select: {
+                id: true,
+                status: true,
+                deletedAt: true,
+                setupCompletedAt: true,
+              },
+            })
+          : null;
+        const scopedBusinessId = business?.id ?? null;
+        const period = await nextSubscriptionPeriod(
+          tx,
+          payer.id,
+          plan.durationDays,
+          now,
+          scopedBusinessId ?? undefined
+        );
+
+        await tx.subscription.create({
+          data: {
+            userId: payer.id,
+            businessId: scopedBusinessId,
+            plan: plan.code,
+            status: "ACTIVE",
+            provider: "telegram_stars",
+            providerPaymentId: payment.telegram_payment_charge_id,
+            startedAt: period.startedAt,
+            expiresAt: period.expiresAt,
+          },
+        });
+
+        let businessActivated = false;
+        if (
+          business &&
+          !business.deletedAt &&
+          ["DRAFT", "ACTIVE", "EXPIRED"].includes(business.status)
+        ) {
+          const [activeServices, enabledDays] = await Promise.all([
+            tx.service.count({
+              where: { businessId: business.id, active: true },
+            }),
+            tx.workingHour.count({
+              where: { businessId: business.id, enabled: true },
+            }),
+          ]);
+
+          if (
+            (business.status !== "DRAFT" || business.setupCompletedAt) &&
+            activeServices > 0 &&
+            enabledDays > 0
+          ) {
+            const updated = await tx.business.updateMany({
+              where: {
+                id: business.id,
+                ownerId: payer.id,
+                deletedAt: null,
+                status: { in: ["DRAFT", "ACTIVE", "EXPIRED"] },
+              },
+              data: {
+                status: "ACTIVE",
+                expiresAt: period.expiresAt,
+                setupCompletedAt: business.setupCompletedAt ?? now,
+              },
+            });
+            businessActivated = updated.count === 1;
+          }
+        }
+
+        return {
+          duplicate: false,
+          expiresAt: period.expiresAt,
+          businessActivated,
+        };
       });
 
+      if (result.duplicate) {
+        await ctx.reply("این پرداخت قبلاً ثبت شده است.");
+        return;
+      }
+
+      const expiryText = result.expiresAt
+        ? result.expiresAt.toLocaleDateString("fa-IR")
+        : "";
       await ctx.reply(
-        `پرداخت با موفقیت انجام شد. اشتراک "${plan.titleFa}" شما تا ${expiresAt.toLocaleDateString(
-          "fa-IR"
-        )} فعال است.`
+        result.businessActivated
+          ? `پرداخت با موفقیت انجام شد. اشتراک "${plan.titleFa}" شما تا ${expiryText} فعال است و کسب‌وکار فعال شد.`
+          : `پرداخت با موفقیت ثبت شد. اشتراک "${plan.titleFa}" شما تا ${expiryText} فعال است.`
       );
     } catch (error) {
       if (

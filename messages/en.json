@@ -96,7 +96,25 @@
     "confirmDelete": "Are you sure?",
     "deleting": "...",
     "reactivateButton": "Reactivate business",
-    "reactivating": "Reactivating..."
+    "reactivating": "Reactivating...",
+    "draftTag": "Draft",
+    "expiredTag": "Subscription expired",
+    "disabledTag": "Disabled",
+    "disabledBanner": "This business was disabled by an administrator and is not shown publicly. Contact support if you need it re-enabled.",
+    "draftBanner": "Complete your business details, services, and working hours. You can preview the page privately before activation.",
+    "previewButton": "Private preview",
+    "activateButton": "Activate with subscription",
+    "renewActivateButton": "Renew subscription and activate",
+    "activating": "Activating...",
+    "activated": "Business activated.",
+    "activationError": "Could not activate the business.",
+    "subscriptionRequiredToActivate": "To make the booking page public, first buy a subscription for this business or submit a payment request.",
+    "activationIncomplete": "Add at least one active service and enable at least one working day before activation.",
+    "privatePreviewLinkLabel": "Private preview link",
+    "completeSetupAndBuy": "Complete setup and buy subscription",
+    "createAnotherButton": "Create another business panel",
+    "cancelCreateBusiness": "Cancel panel setup",
+    "continueSubscription": "Continue to subscription"
   },
   "service": {
     "addTitle": "Add service",
@@ -159,7 +177,9 @@
     "serviceDeleted": "Service deleted.",
     "serviceDeleteError": "Failed to delete service.",
     "serviceToggleError": "Failed to toggle status.",
-    "copyFailed": "Auto-copy failed; please select and copy the link manually."
+    "copyFailed": "Auto-copy failed; please select and copy the link manually.",
+    "businessDisabled": "Business disabled and its public page closed.",
+    "businessSoftDeleted": "Business archived; its bookings were preserved."
   },
   "publicBooking": {
     "loading": "Loading...",
@@ -170,7 +190,7 @@
     "noSlots": "No available times on this day.",
     "yourInfo": "Your information",
     "namePlaceholder": "Full name",
-    "phonePlaceholder": "Phone number",
+    "phonePlaceholder": "Phone number with country code, e.g. +49, +98, or +971",
     "emailPlaceholder": "Email (optional)",
     "confirmButton": "Confirm booking - {price}",
     "confirming": "Submitting...",
@@ -195,7 +215,10 @@
     "receiptRequired": "Please enter the reference or transaction number.",
     "bookingError": "Failed to submit booking.",
     "receiptError": "Failed to submit receipt.",
-    "slotsError": "Failed to load times"
+    "slotsError": "Failed to load times",
+    "previewOnly": "Private preview — only you can see this page. Booking is disabled until activation.",
+    "invalidName": "Enter a valid name using 1–120 characters.",
+    "invalidPhone": "Enter a valid phone number with its country code, such as +49, +98, or +971."
   },
   "workingHours": {
     "title": "Working hours",
@@ -316,7 +339,10 @@
     "compareProBusiness": "Unlimited businesses",
     "compareFreeSupport": "Standard support",
     "compareProSupport": "Priority support",
-    "compareProBadge": "No limit on bookings and services"
+    "compareProBadge": "No limit on bookings and services",
+    "submittedNotice": "Payment request submitted for review.",
+    "setupNotFinalized": "Review this business setup and confirm the final step before paying.",
+    "businessNotReady": "Add at least one active service and one active working day before paying."
   },
   "admin": {
     "title": "Admin panel",
@@ -380,7 +406,22 @@
     "adminViewBanner": "Admin mode — you are editing a business",
     "backToAdmin": "Back to admin panel",
     "enterPanelButton": "Enter panel",
-    "tabOutreach": "Outreach"
+    "tabOutreach": "Outreach",
+    "bizFilterDraft": "Draft",
+    "bizFilterExpired": "Expired",
+    "bizFilterDisabled": "Disabled",
+    "bizStatusDraft": "Draft",
+    "bizStatusExpired": "Expired",
+    "bizStatusDisabled": "Disabled",
+    "bizDisableButton": "Disable business",
+    "bizDisableConfirm": "Disable “{name}”? Its public page will become unavailable immediately.",
+    "bizDisabled": "Business disabled.",
+    "bizDeleteButton": "Archive business",
+    "bizDeleteConfirm": "“{name}” will be archived and its {count} bookings will be preserved. Continue?",
+    "bizDeleted": "Business archived; its bookings were preserved.",
+    "bizActionError": "Business action failed.",
+    "bizContact": "Contact",
+    "bizExpiresAt": "Subscription expires: {date}"
   },
   "telegramAuth": {
     "title": "Sign in to Bookora",
@@ -761,5 +802,36 @@
     "saved": "Saved.",
     "manualSendRecorded": "Manual outreach recorded as SENT with your evidence.",
     "prepareCountLabel": "How many invitations to draft"
+  },
+  "holiday": {
+    "title": "Holidays",
+    "subtitle": "Mark dates when the business is closed. No booking times will be offered on these dates.",
+    "dateLabel": "Holiday date",
+    "dateRequired": "Choose a holiday date.",
+    "reasonPlaceholder": "Reason (optional)",
+    "addButton": "Add holiday",
+    "saving": "Saving...",
+    "loadError": "Could not load holidays.",
+    "saveError": "Could not save the holiday.",
+    "removeError": "Could not remove the holiday.",
+    "empty": "No holidays added yet.",
+    "removeButton": "Remove holiday"
+  },
+  "businessSetup": {
+    "title": "Review setup",
+    "subtitle": "Review the saved details for this business. Subscription is requested only after setup is ready.",
+    "business": "Business details",
+    "timezone": "Time zone",
+    "services": "Active services ({count})",
+    "noServices": "No services have been added yet.",
+    "inactive": "(Inactive)",
+    "workingHours": "Working days and hours",
+    "holidays": "Holidays and closures",
+    "loading": "Loading setup details...",
+    "noWorkingDays": "No working days are enabled yet.",
+    "noHolidays": "No holidays or closures added.",
+    "notReady": "Enable at least one active service and one working day to continue. Your draft changes remain saved.",
+    "loadError": "Could not load the setup summary.",
+    "refresh": "Refresh summary"
   }
 }

@@ -27,6 +27,8 @@ import { TelegramAuthGate } from "@/components/telegram/auth-gate";
 import { WorkingHoursEditor } from "@/components/working-hours-editor";
 import { SubscriptionPanel } from "@/components/subscription-panel";
 import { TimeOffPanel } from "@/components/time-off-panel";
+import { HolidayPanel } from "@/components/holiday-panel";
+import { BusinessSetupReview } from "@/components/business-setup-review";
 import { PaymentMethodPanel } from "@/components/payment-method-panel";
 import { BookingsPanel } from "@/components/bookings-panel";
 import { LocaleSwitcher } from "@/components/locale-switcher";
@@ -71,6 +73,8 @@ type Business = {
   currency: string;
   timezone: string;
   status: string;
+  expiresAt?: string | null;
+  setupCompletedAt?: string | null;
   services: Service[];
   _count?: {
     bookings: number;
@@ -101,6 +105,70 @@ function getBrowserTimeZone(): string {
   }
 }
 
+const BUSINESS_CREATE_KEY_STORAGE = "bookora:business-create-request";
+
+async function getBusinessCreationKey(payload: unknown): Promise<{
+  key: string;
+  fingerprint: string;
+}> {
+  const serialized = JSON.stringify(payload);
+  let fingerprint: string;
+  try {
+    const digest = await window.crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(serialized)
+    );
+    fingerprint = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    let hash = 2_166_136_261;
+    for (let index = 0; index < serialized.length; index += 1) {
+      hash = Math.imul(hash ^ serialized.charCodeAt(index), 16_777_619);
+    }
+    fingerprint = `${(hash >>> 0).toString(16)}-${serialized.length}`;
+  }
+
+  try {
+    const cached = JSON.parse(
+      window.sessionStorage.getItem(BUSINESS_CREATE_KEY_STORAGE) || "null"
+    ) as { key?: string; fingerprint?: string } | null;
+    if (
+      cached?.fingerprint === fingerprint &&
+      typeof cached.key === "string" &&
+      /^[0-9a-f-]{36}$/i.test(cached.key)
+    ) {
+      return { key: cached.key, fingerprint };
+    }
+  } catch {
+    // If browser storage is unavailable, use a one-shot request key.
+  }
+
+  const key = window.crypto.randomUUID();
+  try {
+    window.sessionStorage.setItem(
+      BUSINESS_CREATE_KEY_STORAGE,
+      JSON.stringify({ key, fingerprint })
+    );
+  } catch {
+    // The request remains valid even when session storage is blocked.
+  }
+  return { key, fingerprint };
+}
+
+function clearBusinessCreationKey(key: string, fingerprint: string): void {
+  try {
+    const cached = JSON.parse(
+      window.sessionStorage.getItem(BUSINESS_CREATE_KEY_STORAGE) || "null"
+    ) as { key?: string; fingerprint?: string } | null;
+    if (cached?.key === key && cached.fingerprint === fingerprint) {
+      window.sessionStorage.removeItem(BUSINESS_CREATE_KEY_STORAGE);
+    }
+  } catch {
+    // Ignore storage restrictions after the server has confirmed creation.
+  }
+}
+
 const DEPOSIT_LABELS_KEYS = {
   NONE: "depositNone",
   PERCENTAGE: "depositPercentage",
@@ -118,6 +186,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const searchParams = useSearchParams();
   const queryBusinessId = searchParams.get("businessId");
   const adminView = user.isAdmin && !!queryBusinessId;
+  const selectedBusinessStorageKey = `bookora:selected-business:${user.id}`;
 
   const depositLabels: Record<string, string> = {
     NONE: tSvc(DEPOSIT_LABELS_KEYS.NONE),
@@ -135,6 +204,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [showServiceForm, setShowServiceForm] = useState(false);
 
   const [createStep, setCreateStep] = useState<1 | 2>(1);
+  const [showCreateBusinessForm, setShowCreateBusinessForm] = useState(false);
   const [businessName, setBusinessName] = useState("");
   const [businessDescription, setBusinessDescription] = useState("");
   const [businessCountry, setBusinessCountry] =
@@ -152,6 +222,8 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [confirmDeleteBusiness, setConfirmDeleteBusiness] = useState(false);
   const [deletingBusiness, setDeletingBusiness] = useState(false);
   const [reactivating, setReactivating] = useState(false);
+  const [activatingBusiness, setActivatingBusiness] = useState(false);
+  const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(false);
 
   const [serviceName, setServiceName] = useState("");
   const [serviceDescription, setServiceDescription] = useState("");
@@ -182,6 +254,44 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [linkCopied, setLinkCopied] = useState(false);
 
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const canResumeSubscription =
+      selectedBusiness &&
+      ["DRAFT", "EXPIRED"].includes(selectedBusiness.status) &&
+      Boolean(selectedBusiness.setupCompletedAt);
+    setShowSubscriptionPanel(Boolean(canResumeSubscription));
+    setConfirmDeleteBusiness(false);
+  }, [
+    selectedBusiness?.id,
+    selectedBusiness?.status,
+    selectedBusiness?.setupCompletedAt,
+  ]);
+
+  useEffect(() => {
+    if (adminView || loading) return;
+    try {
+      if (
+        selectedBusiness &&
+        businesses.some((business) => business.id === selectedBusiness.id)
+      ) {
+        window.localStorage.setItem(
+          selectedBusinessStorageKey,
+          selectedBusiness.id
+        );
+      } else if (!selectedBusiness && businesses.length === 0) {
+        window.localStorage.removeItem(selectedBusinessStorageKey);
+      }
+    } catch {
+      // Selecting a business must still work when browser storage is blocked.
+    }
+  }, [
+    adminView,
+    businesses,
+    loading,
+    selectedBusiness?.id,
+    selectedBusinessStorageKey,
+  ]);
 
   async function loadAdminBusinesses() {
     try {
@@ -261,7 +371,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
     }
   }
 
-  async function loadBusinesses(options?: { silent?: boolean }) {
+  async function loadBusinesses(options?: {
+    silent?: boolean;
+    selectBusinessId?: string;
+  }) {
     const silent = options?.silent === true;
 
     if (adminView) {
@@ -289,10 +402,22 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setBusinesses(list);
 
       if (list.length > 0) {
-        setSelectedBusiness((current) => {
-          if (!current) {
-            return list[0];
+        let preferredBusinessId = options?.selectBusinessId;
+        if (!preferredBusinessId) {
+          try {
+            preferredBusinessId =
+              window.localStorage.getItem(selectedBusinessStorageKey) ||
+              undefined;
+          } catch {
+            // The current selection falls back to the first available business.
           }
+        }
+        const requestedBusiness = preferredBusinessId
+          ? list.find((item) => item.id === preferredBusinessId)
+          : undefined;
+        setSelectedBusiness((current) => {
+          if (requestedBusiness) return requestedBusiness;
+          if (!current) return list[0];
           return list.find((item) => item.id === current.id) || list[0];
         });
       } else {
@@ -330,15 +455,20 @@ function Dashboard({ user }: { user: TelegramUser }) {
       setSavingBusiness(true);
       setMessage(null);
 
+      const requestBody = {
+        name: businessName.trim(),
+        description: businessDescription.trim() || null,
+        country: businessCountry,
+        timezone: businessTimezone,
+      };
+      const creationRequest = await getBusinessCreationKey(requestBody);
       const response = await fetch("/api/business", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: businessName.trim(),
-          description: businessDescription.trim() || null,
-          country: businessCountry,
-          timezone: businessTimezone,
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": creationRequest.key,
+        },
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
@@ -347,11 +477,19 @@ function Dashboard({ user }: { user: TelegramUser }) {
         throw new Error(data?.error || tMsg("businessCreateError"));
       }
 
+      clearBusinessCreationKey(
+        creationRequest.key,
+        creationRequest.fingerprint
+      );
       setBusinessName("");
       setBusinessDescription("");
       setBusinessCountry(null);
       setCreateStep(1);
-      await loadBusinesses({ silent: true });
+      setShowCreateBusinessForm(false);
+      await loadBusinesses({
+        silent: true,
+        selectBusinessId: data.business?.id,
+      });
       setMessage(tMsg("businessCreated"));
       track("business_created");
     } catch (error) {
@@ -438,7 +576,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
       await loadBusinesses({ silent: true });
 
       setMessage(
-        data.archived ? tMsg("businessArchived") : tMsg("businessDeleted")
+        data.disabled
+          ? tMsg("businessDisabled")
+          : data.archived
+          ? tMsg("businessSoftDeleted")
+          : tMsg("businessDeleted")
       );
     } catch (error) {
       setMessage(
@@ -447,6 +589,51 @@ function Dashboard({ user }: { user: TelegramUser }) {
     } finally {
       setDeletingBusiness(false);
     }
+  }
+
+  async function activateBusiness(business: Business) {
+    try {
+      setActivatingBusiness(true);
+      setMessage(null);
+      const response = await fetch(`/api/business/${business.id}/activate`, {
+        method: "POST",
+        cache: "no-store",
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          data?.code === "BUSINESS_NOT_READY"
+            ? tBiz("activationIncomplete")
+            : data?.error || tBiz("activationError")
+        );
+      }
+
+      if (data.requiresSubscription) {
+        setShowSubscriptionPanel(true);
+        setMessage(tBiz("subscriptionRequiredToActivate"));
+        window.setTimeout(() => {
+          document.getElementById("subscription-panel")?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }, 100);
+        return;
+      }
+
+      setShowSubscriptionPanel(false);
+      await loadBusinesses({ silent: true });
+      setMessage(tBiz("activated"));
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : tBiz("activationError")
+      );
+    } finally {
+      setActivatingBusiness(false);
+    }
+  }
+
+  async function refreshBusinessesAfterPayment() {
+    await loadBusinesses({ silent: true });
   }
 
   async function reactivateBusiness(business: Business) {
@@ -801,6 +988,11 @@ function Dashboard({ user }: { user: TelegramUser }) {
   }
 
   const isArchived = selectedBusiness?.status === "ARCHIVED";
+  const isDisabled = selectedBusiness?.status === "DISABLED";
+  const isClosed = isArchived || isDisabled;
+  const isDraft = selectedBusiness?.status === "DRAFT";
+  const isExpired = selectedBusiness?.status === "EXPIRED";
+  const canActivateSelectedBusiness = isDraft || isExpired;
 
   const selectedBusinessCountry: CountryCode | null =
     selectedBusiness?.country && isCountryCode(selectedBusiness.country)
@@ -813,6 +1005,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
       : selectedBusiness
       ? "/book/" + selectedBusiness.slug
       : "";
+  const previewUrl = bookingUrl ? `${bookingUrl}?preview=1` : "";
 
   const activeServices = selectedBusiness
     ? selectedBusiness.services.filter((s) => s.active).length
@@ -875,7 +1068,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </div>
       </header>
 
-      {!adminView && selectedBusiness && !isArchived && (
+      {!adminView &&
+        !showCreateBusinessForm &&
+        selectedBusiness &&
+        selectedBusiness.status === "ACTIVE" && (
         <OnboardingChecklist
           businessId={selectedBusiness.id}
           hasActiveServices={activeServices > 0}
@@ -883,10 +1079,15 @@ function Dashboard({ user }: { user: TelegramUser }) {
         />
       )}
 
-      {!adminView && (
+      {!adminView &&
+        !showCreateBusinessForm &&
+        selectedBusiness &&
+        !isClosed &&
+        (showSubscriptionPanel || selectedBusiness.status === "ACTIVE") && (
         <SubscriptionPanel
-          businessId={selectedBusiness?.id ?? null}
+          businessId={selectedBusiness.id}
           country={selectedBusinessCountry}
+          onActivated={refreshBusinessesAfterPayment}
         />
       )}
 
@@ -896,22 +1097,33 @@ function Dashboard({ user }: { user: TelegramUser }) {
         </div>
       )}
 
-      {businesses.length === 0 && !adminView ? (
+      {(businesses.length === 0 || showCreateBusinessForm) && !adminView ? (
         <section className={CARD_MAIN}>
           {createStep === 1 ? (
             <>
-              <div className="flex items-start gap-3">
-                <span className={SECTION_ICON}>
-                  <Building2 className="h-5 w-5 text-[#4F5FE8]" />
-                </span>
-                <div>
-                  <h2 className={SECTION_TITLE}>
-                    {tWizard("countryQuestion")}
-                  </h2>
-                  <p className="mt-0.5 text-xs font-medium text-[#1A1F36]/60">
-                    {tWizard("countryHelp")}
-                  </p>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <span className={SECTION_ICON}>
+                    <Building2 className="h-5 w-5 text-[#4F5FE8]" />
+                  </span>
+                  <div>
+                    <h2 className={SECTION_TITLE}>
+                      {tWizard("countryQuestion")}
+                    </h2>
+                    <p className="mt-0.5 text-xs font-medium text-[#1A1F36]/60">
+                      {tWizard("countryHelp")}
+                    </p>
+                  </div>
                 </div>
+                {businesses.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateBusinessForm(false)}
+                    className="ring-focus shrink-0 rounded-md px-2 py-1 text-xs font-medium text-[#1A1F36]/60 underline-offset-4 hover:underline"
+                  >
+                    {tBiz("cancelCreateBusiness")}
+                  </button>
+                )}
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-3">
@@ -946,13 +1158,24 @@ function Dashboard({ user }: { user: TelegramUser }) {
             <form onSubmit={createBusiness} className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className={SECTION_TITLE}>{tWizard("infoTitle")}</h2>
-                <button
-                  type="button"
-                  onClick={() => setCreateStep(1)}
-                  className="ring-focus rounded-md px-2 py-1 text-xs font-medium text-[#1A1F36]/60 underline-offset-4 hover:underline"
-                >
-                  {tWizard("changeCountry")}
-                </button>
+                <div className="flex items-center gap-2">
+                  {businesses.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateBusinessForm(false)}
+                      className="ring-focus rounded-md px-2 py-1 text-xs font-medium text-[#1A1F36]/60 underline-offset-4 hover:underline"
+                    >
+                      {tBiz("cancelCreateBusiness")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setCreateStep(1)}
+                    className="ring-focus rounded-md px-2 py-1 text-xs font-medium text-[#1A1F36]/60 underline-offset-4 hover:underline"
+                  >
+                    {tWizard("changeCountry")}
+                  </button>
+                </div>
               </div>
 
               <p className="text-sm font-medium text-[#1A1F36]/70">
@@ -1001,6 +1224,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 value={businessName}
                 onChange={(event) => setBusinessName(event.target.value)}
                 placeholder={tWizard("namePlaceholder")}
+                required
                 className={INPUT_BASE}
               />
 
@@ -1052,7 +1276,13 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 {businesses.map((business) => (
                   <option key={business.id} value={business.id}>
                     {business.name}
-                    {business.status === "ARCHIVED"
+                    {business.status === "DRAFT"
+                      ? " " + tBiz("draftTag")
+                      : business.status === "EXPIRED"
+                      ? " " + tBiz("expiredTag")
+                      : business.status === "DISABLED"
+                      ? " " + tBiz("disabledTag")
+                      : business.status === "ARCHIVED"
                       ? " " + tBiz("archivedTag")
                       : ""}
                   </option>
@@ -1060,6 +1290,22 @@ function Dashboard({ user }: { user: TelegramUser }) {
               </select>
               <ChevronDown className="pointer-events-none absolute inset-y-0 end-3 my-auto h-4 w-4 text-[#1A1F36]/40" />
             </div>
+            {!adminView && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateStep(1);
+                  setShowCreateBusinessForm(true);
+                  setBusinessName("");
+                  setBusinessDescription("");
+                  setBusinessCountry(null);
+                }}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-[#4F5FE8] shadow-soft transition-transform active:scale-[0.98]"
+              >
+                <Plus className="h-4 w-4" />
+                {tBiz("createAnotherButton")}
+              </button>
+            )}
           </div>
 
           {selectedBusiness && (
@@ -1075,10 +1321,18 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         <h2 className="truncate text-lg font-bold tracking-tight text-[#1A1F36]">
                           {selectedBusiness.name}
                         </h2>
-                        {isArchived && (
+                        {selectedBusiness.status !== "ACTIVE" && (
                           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#FCA311] px-2.5 py-1 text-[10px] font-bold text-white shadow-soft">
                             <ShieldAlert className="h-3 w-3" />
-                            {tBiz("archivedTag")}
+                            {isArchived
+                              ? tBiz("archivedTag")
+                              : isDisabled
+                              ? tBiz("disabledTag")
+                              : isDraft
+                              ? tBiz("draftTag")
+                              : isExpired
+                              ? tBiz("expiredTag")
+                              : selectedBusiness.status}
                           </span>
                         )}
                       </div>
@@ -1139,10 +1393,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                   </div>
                 </div>
 
-                {isArchived && (
+                {isClosed && (
                   <div className="flex items-start gap-2 bg-[#FCA311]/15 p-4 text-sm font-medium text-[#1A1F36]/80">
                     <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#FCA311]" />
-                    <span>{tBiz("archivedBanner")}</span>
+                    <span>{isDisabled ? tBiz("disabledBanner") : tBiz("archivedBanner")}</span>
                   </div>
                 )}
 
@@ -1256,43 +1510,76 @@ function Dashboard({ user }: { user: TelegramUser }) {
                       <div className={CARD_INNER}>
                         <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-[#1A1F36]/60">
                           <LinkIcon className="h-3.5 w-3.5" />
-                          {tBiz("bookingLinkLabel")}
+                          {isDraft
+                            ? tBiz("privatePreviewLinkLabel")
+                            : tBiz("bookingLinkLabel")}
                         </div>
 
                         <p className="mt-2 break-all text-sm font-bold text-[#1A1F36]">
-                          {bookingUrl}
+                          {isDraft ? previewUrl : bookingUrl}
                         </p>
 
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => copyBookingLink(bookingUrl)}
-                            className={BTN_GHOST}
-                          >
-                            {linkCopied ? (
-                              <>
-                                <Check className="h-4 w-4 text-[#34C759]" />
-                                {tBiz("copied")}
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-4 w-4" />
-                                {tBiz("copyLink")}
-                              </>
-                            )}
-                          </button>
+                        {(selectedBusiness.status === "ACTIVE" || isDraft) && (
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                copyBookingLink(isDraft ? previewUrl : bookingUrl)
+                              }
+                              className={BTN_GHOST}
+                            >
+                              {linkCopied ? (
+                                <>
+                                  <Check className="h-4 w-4 text-[#34C759]" />
+                                  {tBiz("copied")}
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-4 w-4" />
+                                  {tBiz("copyLink")}
+                                </>
+                              )}
+                            </button>
 
-                          <a
-                            href={"/book/" + selectedBusiness.slug}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={BTN_GHOST}
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                            {tBiz("openPage")}
-                          </a>
-                        </div>
+                            <a
+                              href={
+                                isDraft
+                                  ? previewUrl
+                                  : "/book/" + selectedBusiness.slug
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={BTN_GHOST}
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                              {isDraft
+                                ? tBiz("previewButton")
+                                : tBiz("openPage")}
+                            </a>
+                          </div>
+                        )}
                       </div>
+
+                      {!adminView && canActivateSelectedBusiness && (
+                        <BusinessSetupReview
+                          businessId={selectedBusiness.id}
+                          name={selectedBusiness.name}
+                          description={selectedBusiness.description}
+                          timezone={selectedBusiness.timezone}
+                          services={selectedBusiness.services}
+                          actionLabel={
+                            activatingBusiness
+                              ? tBiz("activating")
+                              : isDraft
+                              ? selectedBusiness.setupCompletedAt
+                                ? tBiz("continueSubscription")
+                                : tBiz("completeSetupAndBuy")
+                              : tBiz("renewActivateButton")
+                          }
+                          actionLoading={activatingBusiness}
+                          onComplete={() => activateBusiness(selectedBusiness)}
+                        />
+                      )}
 
                       {!adminView && (
                         <div className="mt-4 grid grid-cols-2 gap-2">
@@ -1312,6 +1599,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                                 ? tBiz("reactivating")
                                 : tBiz("reactivateButton")}
                             </button>
+                          ) : isDisabled ? (
+                            <p className="col-span-2 rounded-2xl bg-[#FCA311]/15 p-3 text-sm font-medium text-[#1A1F36]/80">
+                              {tBiz("disabledBanner")}
+                            </p>
                           ) : (
                             <>
                               <button
@@ -1362,7 +1653,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                 </div>
               </section>
 
-              {!isArchived && (
+              {!isClosed && (
                 <>
                   <section className={CARD_MAIN}>
                     <div className="flex items-start justify-between gap-3">
@@ -1847,6 +2138,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                         businessId={selectedBusiness.id}
                       />
                       <TimeOffPanel businessId={selectedBusiness.id} />
+                      <HolidayPanel businessId={selectedBusiness.id} />
                     </>
                   )}
 

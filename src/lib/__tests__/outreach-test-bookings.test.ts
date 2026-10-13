@@ -122,7 +122,7 @@ function baseBody(overrides: Record<string, unknown> = {}) {
     serviceId: "svc-1",
     startAt: START_AT,
     customerName: "Real Customer",
-    customerPhone: "+1 555 0100",
+    customerPhone: "+989123456789",
     ...overrides,
   };
 }
@@ -186,7 +186,7 @@ describe("an unauthenticated caller", () => {
 
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({
-      error: expect.stringMatching(/administrator/i),
+      error: expect.stringMatching(/مدیر/),
     });
     expect(table("booking")).toHaveLength(0);
     expect(state.attributionCalls).toHaveLength(0);
@@ -209,6 +209,49 @@ describe("an unauthenticated caller", () => {
     expect(state.notified[0].text).toMatch(/رزرو جدید/);
     // The schedule is still locked before any slot check.
     expect(state.txQueries).toContain("lock:biz-1");
+  });
+});
+
+describe("booking input and lifecycle validation", () => {
+  it("normalizes a mixed-script Iranian phone on the server and preserves the exact customer name", async () => {
+    const customerName = "  فاطمه رضایی  ";
+    const response = await POST(
+      bookingRequest(
+        baseBody({ customerName, customerPhone: "۰۹1 (۲۳۴) ۵۶۷-۸۹" })
+      ),
+      { params: Promise.resolve({ slug: "sample-barber" }) }
+    );
+
+    expect(response.status).toBe(201);
+    const [booking] = table("booking");
+    expect(booking.customerName).toBe(customerName);
+    expect(booking.customerPhone).toBe("+989123456789");
+  });
+
+  it("rejects draft businesses from the public booking endpoint", async () => {
+    table("business")[0].status = "DRAFT";
+    const response = await POST(bookingRequest(baseBody()), {
+      params: Promise.resolve({ slug: "sample-barber" }),
+    });
+
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toMatch(/فعال نیست/);
+    expect(table("booking")).toHaveLength(0);
+  });
+
+  it("rejects booking dates that are business holidays", async () => {
+    table("holiday").push({
+      id: "holiday-1",
+      businessId: "biz-1",
+      date: new Date("2026-10-12T00:00:00.000Z"),
+    });
+    const response = await POST(bookingRequest(baseBody()), {
+      params: Promise.resolve({ slug: "sample-barber" }),
+    });
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatch(/تعطیل است/);
+    expect(table("booking")).toHaveLength(0);
   });
 });
 

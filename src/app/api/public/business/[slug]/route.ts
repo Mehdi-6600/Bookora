@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth/session";
+import { isBusinessPubliclyActive } from "@/lib/business/lifecycle";
 
 export async function GET(
   req: NextRequest,
@@ -19,6 +21,9 @@ export async function GET(
         country: true,
         timezone: true,
         status: true,
+        expiresAt: true,
+        deletedAt: true,
+        ownerId: true,
         services: {
           where: { active: true },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
@@ -36,32 +41,51 @@ export async function GET(
       },
     });
 
-    if (!business || business.status !== "ACTIVE") {
+    if (!business) {
       return NextResponse.json(
         { error: "کسب‌وکار پیدا نشد." },
-        { status: 404 }
+        { status: 404, headers: { "Cache-Control": "no-store" } }
       );
     }
 
-    return NextResponse.json({
-      business: {
-        name: business.name,
-        description: business.description,
-        currency: business.currency,
-        country: business.country,
-        timezone: business.timezone || "UTC",
-        services: business.services.map((service) => ({
-          id: service.id,
-          name: service.name,
-          description: service.description,
-          price: service.price.toString(),
-          currency: service.currency,
-          durationMinutes: service.durationMinutes,
-          depositType: service.depositType,
-          depositValue: service.depositValue.toString(),
-        })),
+    let previewOnly = false;
+    if (!isBusinessPubliclyActive(business)) {
+      const wantsPreview = req.nextUrl.searchParams.get("preview") === "1";
+      const viewer = wantsPreview && business.status === "DRAFT" && !business.deletedAt
+        ? await getCurrentUser()
+        : null;
+      if (!viewer || viewer.id !== business.ownerId) {
+        return NextResponse.json(
+          { error: "این کسب‌وکار هنوز فعال نیست." },
+          { status: 404, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      previewOnly = true;
+    }
+
+    return NextResponse.json(
+      {
+        business: {
+          name: business.name,
+          description: business.description,
+          currency: business.currency,
+          country: business.country,
+          timezone: business.timezone || "UTC",
+          previewOnly,
+          services: business.services.map((service) => ({
+            id: service.id,
+            name: service.name,
+            description: service.description,
+            price: service.price.toString(),
+            currency: service.currency,
+            durationMinutes: service.durationMinutes,
+            depositType: service.depositType,
+            depositValue: service.depositValue.toString(),
+          })),
+        },
       },
-    });
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (error) {
     console.error(
       "GET /api/public/business/[slug] failed:",

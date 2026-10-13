@@ -13,6 +13,7 @@ import {
   resolvePaymentMethod,
 } from "@/lib/subscription/payment-method";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
+import { isBusinessPubliclyActive } from "@/lib/business/lifecycle";
 
 const checkoutSchema = z.object({
   plan: z.string().refine(isPlanCode, "پلن نامعتبر است."),
@@ -50,14 +51,58 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const now = new Date();
     const business = await prisma.business.findFirst({
-      where: { id: parsed.data.businessId, ownerId: user.id },
-      select: { id: true, country: true },
+      where: {
+        id: parsed.data.businessId,
+        ownerId: user.id,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        country: true,
+        status: true,
+        expiresAt: true,
+        setupCompletedAt: true,
+      },
     });
     if (!business) {
       return NextResponse.json(
         { error: "کسب‌وکار پیدا نشد." },
         { status: 404 }
+      );
+    }
+    if (!["DRAFT", "ACTIVE", "EXPIRED"].includes(business.status)) {
+      return NextResponse.json(
+        { error: "برای این کسب‌وکار امکان خرید اشتراک وجود ندارد." },
+        { status: 409 }
+      );
+    }
+    if (!isBusinessPubliclyActive(business, now) && !business.setupCompletedAt) {
+      return NextResponse.json(
+        {
+          error: "برای شروع پرداخت، تکمیل نهایی تنظیمات کسب‌وکار را تأیید کنید.",
+          code: "SETUP_NOT_FINALIZED",
+        },
+        { status: 409 }
+      );
+    }
+
+    const [activeServices, enabledDays] = await Promise.all([
+      prisma.service.count({
+        where: { businessId: business.id, active: true },
+      }),
+      prisma.workingHour.count({
+        where: { businessId: business.id, enabled: true },
+      }),
+    ]);
+    if (activeServices < 1 || enabledDays < 1) {
+      return NextResponse.json(
+        {
+          error: "ابتدا دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید.",
+          code: "BUSINESS_NOT_READY",
+        },
+        { status: 409 }
       );
     }
 
@@ -108,7 +153,7 @@ export async function POST(req: NextRequest) {
       invoiceLink = await bot.api.createInvoiceLink(
         plan.titleEn,
         plan.titleEn,
-        buildInvoicePayload(plan.code, user.id),
+        buildInvoicePayload(plan.code, user.id, business.id),
         "",
         "XTR",
         [{ label: plan.titleEn, amount: plan.starsPrice }]

@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { PLANS, isPlanCode } from "@/lib/subscription/plans";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
-import { lockUserSubscriptions } from "@/lib/booking/schedule";
+import { lockBusinessSchedule, lockUserSubscriptions } from "@/lib/booking/schedule";
 import { nextSubscriptionPeriod } from "@/lib/subscription/entitlement";
 
 const reviewSchema = z.object({
@@ -49,13 +49,16 @@ export async function POST(
 
     const reference = await prisma.subscription.findUnique({
       where: { id },
-      select: { userId: true },
+      select: { userId: true, businessId: true },
     });
     if (!reference) {
       return NextResponse.json({ error: "درخواست پیدا نشد." }, { status: 404 });
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      if (reference.businessId) {
+        await lockBusinessSchedule(tx, reference.businessId);
+      }
       await lockUserSubscriptions(tx, reference.userId);
       const subscription = await tx.subscription.findUnique({ where: { id } });
       if (!subscription || subscription.userId !== reference.userId) {
@@ -102,7 +105,8 @@ export async function POST(
         tx,
         subscription.userId,
         plan.durationDays,
-        now
+        now,
+        subscription.businessId ?? undefined
       );
       const updated = await tx.subscription.updateMany({
         where: { id, userId: reference.userId, status: "PENDING" },
@@ -115,6 +119,48 @@ export async function POST(
         },
       });
       if (updated.count !== 1) throw new ReviewConflictError();
+
+      if (subscription.businessId) {
+        const business = await tx.business.findFirst({
+          where: {
+            id: subscription.businessId,
+            ownerId: subscription.userId,
+            deletedAt: null,
+            status: { in: ["DRAFT", "ACTIVE", "EXPIRED"] },
+          },
+          select: { id: true, status: true, setupCompletedAt: true },
+        });
+        if (business) {
+          const [activeServices, enabledDays] = await Promise.all([
+            tx.service.count({
+              where: { businessId: business.id, active: true },
+            }),
+            tx.workingHour.count({
+              where: { businessId: business.id, enabled: true },
+            }),
+          ]);
+          if (
+            (business.status !== "DRAFT" || business.setupCompletedAt) &&
+            activeServices > 0 &&
+            enabledDays > 0
+          ) {
+            await tx.business.updateMany({
+              where: {
+                id: business.id,
+                ownerId: subscription.userId,
+                deletedAt: null,
+                status: { in: ["DRAFT", "ACTIVE", "EXPIRED"] },
+              },
+              data: {
+                status: "ACTIVE",
+                expiresAt: period.expiresAt,
+                setupCompletedAt: business.setupCompletedAt ?? now,
+              },
+            });
+          }
+        }
+      }
+
       return { status: "ACTIVE", expiresAt: period.expiresAt };
     });
 

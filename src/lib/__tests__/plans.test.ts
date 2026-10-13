@@ -20,6 +20,22 @@ describe("plans", () => {
     expect(payload).toBe("sub:PRO_MONTHLY:clx1234567890abcdefghij");
   });
 
+  it("binds new invoice payloads to the business being activated", () => {
+    const payload = buildInvoicePayload(
+      "PRO_MONTHLY",
+      "clx1234567890abcdefghij",
+      "clx9876543210abcdefghij"
+    );
+    expect(payload).toBe(
+      "sub:PRO_MONTHLY:clx1234567890abcdefghij:clx9876543210abcdefghij"
+    );
+    expect(parseInvoicePayload(payload)).toEqual({
+      plan: "PRO_MONTHLY",
+      userId: "clx1234567890abcdefghij",
+      businessId: "clx9876543210abcdefghij",
+    });
+  });
+
   it("parseInvoicePayload accepts valid payloads", () => {
     const result = parseInvoicePayload(
       "sub:PRO_MONTHLY:clx1234567890abcdefghij"

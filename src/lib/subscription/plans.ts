@@ -28,33 +28,40 @@ export const PLANS: Record<PlanCode, PlanDefinition> = {
   },
 };
 
-export const FREE_BUSINESS_LIMIT = 1;
-
 export function isPlanCode(value: string): value is PlanCode {
   return value === "PRO_MONTHLY" || value === "PRO_YEARLY";
 }
 
 const USER_ID_PATTERN = /^[a-z0-9]{20,40}$/;
 
-export function buildInvoicePayload(plan: PlanCode, userId: string): string {
-  return "sub:" + plan + ":" + userId;
+export function buildInvoicePayload(
+  plan: PlanCode,
+  userId: string,
+  businessId?: string
+): string {
+  return businessId
+    ? `sub:${plan}:${userId}:${businessId}`
+    : `sub:${plan}:${userId}`;
 }
 
 export function parseInvoicePayload(
   payload: string
-): { plan: PlanCode; userId: string } | null {
+): { plan: PlanCode; userId: string; businessId: string | null } | null {
   if (typeof payload !== "string") return null;
-  if (payload.length > 200) return null;
+  if (payload.length > 128) return null;
 
   const parts = payload.split(":");
-  if (parts.length !== 3) return null;
-  if (parts[0] !== "sub") return null;
+  if ((parts.length !== 3 && parts.length !== 4) || parts[0] !== "sub") {
+    return null;
+  }
 
   const plan = parts[1];
   const userId = parts[2];
+  const businessId = parts.length === 4 ? parts[3] : null;
 
   if (!isPlanCode(plan)) return null;
   if (!USER_ID_PATTERN.test(userId)) return null;
+  if (businessId !== null && !USER_ID_PATTERN.test(businessId)) return null;
 
-  return { plan, userId };
+  return { plan, userId, businessId };
 }

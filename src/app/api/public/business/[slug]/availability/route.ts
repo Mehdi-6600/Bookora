@@ -10,6 +10,7 @@ import {
   isWithinBookingWindow,
 } from "@/lib/booking/time";
 import { activeBookingOverlapWhere } from "@/lib/booking/schedule";
+import { isBusinessPubliclyActive } from "@/lib/business/lifecycle";
 
 export async function GET(
   req: NextRequest,
@@ -41,14 +42,26 @@ export async function GET(
       );
     }
 
-    const business = await prisma.business.findFirst({
-      where: { slug, status: "ACTIVE" },
-      select: { id: true, timezone: true },
+    const business = await prisma.business.findUnique({
+      where: { slug },
+      select: {
+        id: true,
+        timezone: true,
+        status: true,
+        expiresAt: true,
+        deletedAt: true,
+      },
     });
 
     if (!business) {
       return NextResponse.json(
         { error: "کسب‌وکار پیدا نشد." },
+        { status: 404 }
+      );
+    }
+    if (!isBusinessPubliclyActive(business)) {
+      return NextResponse.json(
+        { error: "این کسب‌وکار هنوز فعال نیست." },
         { status: 404 }
       );
     }
@@ -73,6 +86,22 @@ export async function GET(
     }
 
     const dayOfWeek = getBusinessDayOfWeek(date);
+    const holiday = await prisma.holiday.findUnique({
+      where: {
+        businessId_date: {
+          businessId: business.id,
+          date: new Date(`${date}T00:00:00.000Z`),
+        },
+      },
+      select: { id: true },
+    });
+    if (holiday) {
+      return NextResponse.json(
+        { error: "این روز تعطیل است." },
+        { status: 409 }
+      );
+    }
+
     const workingHour = await prisma.workingHour.findUnique({
       where: {
         businessId_dayOfWeek: { businessId: business.id, dayOfWeek },

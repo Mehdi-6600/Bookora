@@ -16,6 +16,8 @@ import {
   User,
 } from "lucide-react";
 import { formatPrice } from "@/lib/currency";
+import { normalizePhoneNumber } from "@/lib/normalize-phone";
+import { customerNameSchema } from "@/lib/booking/customer-validation";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 
 type Service = {
@@ -36,6 +38,7 @@ type BusinessInfo = {
   country: string | null;
   timezone: string | null;
   services: Service[];
+  previewOnly?: boolean;
 };
 
 type PaymentMethodInfo = {
@@ -138,6 +141,9 @@ export default function PublicBookingPage() {
   const tSvc = useTranslations("service");
   const params = useParams<{ slug: string }>();
   const slug = params.slug;
+  const previewRequested =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("preview") === "1";
 
   const [business, setBusiness] = useState<BusinessInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,9 +188,10 @@ export default function PublicBookingPage() {
       try {
         setLoading(true);
 
-        const response = await fetch(`/api/public/business/${slug}`, {
-          cache: "no-store",
-        });
+        const response = await fetch(
+          `/api/public/business/${slug}${previewRequested ? "?preview=1" : ""}`,
+          { cache: "no-store" }
+        );
 
         const data = await response.json();
 
@@ -206,7 +213,7 @@ export default function PublicBookingPage() {
 
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug]);
+  }, [slug, previewRequested]);
 
   useEffect(() => {
     if (!business) return;
@@ -215,8 +222,9 @@ export default function PublicBookingPage() {
   }, [business?.timezone]);
 
   useEffect(() => {
-    if (!selectedServiceId) {
+    if (!selectedServiceId || business?.previewOnly) {
       setSlots([]);
+      setLoadingSlots(false);
       return;
     }
     const serviceId = selectedServiceId;
@@ -252,13 +260,25 @@ export default function PublicBookingPage() {
     loadSlots();
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServiceId, date, slug]);
+  }, [selectedServiceId, date, slug, business?.previewOnly]);
 
   async function submitBooking() {
     if (bookingSubmitLock.current || !selectedServiceId || !selectedSlot) return;
 
     if (!customerName.trim() || !customerPhone.trim()) {
       setError(t("nameRequired"));
+      return;
+    }
+    if (!customerNameSchema.safeParse(customerName).success) {
+      setError(t("invalidName"));
+      return;
+    }
+
+    let normalizedPhone: string;
+    try {
+      normalizedPhone = normalizePhoneNumber(customerPhone);
+    } catch {
+      setError(t("invalidPhone"));
       return;
     }
 
@@ -272,8 +292,8 @@ export default function PublicBookingPage() {
       const requestBody = {
         serviceId: selectedServiceId,
         startAt: selectedSlot,
-        customerName: customerName.trim(),
-        customerPhone: customerPhone.trim(),
+        customerName,
+        customerPhone: normalizedPhone,
         customerEmail: customerEmail.trim() || null,
       };
       const idempotencyKey = await getIdempotencyKey(
@@ -294,6 +314,12 @@ export default function PublicBookingPage() {
       if (!response.ok) {
         if (response.status === 409) {
           clearStoredIdempotencyKey(storageKey, idempotencyKey);
+        }
+        if (data?.code === "INVALID_CUSTOMER_NAME") {
+          throw new Error(t("invalidName"));
+        }
+        if (data?.code === "INVALID_CUSTOMER_PHONE") {
+          throw new Error(t("invalidPhone"));
         }
         throw new Error(data?.error || t("bookingError"));
       }
@@ -530,6 +556,12 @@ export default function PublicBookingPage() {
         <LocaleSwitcher />
       </div>
 
+      {business.previewOnly && (
+        <div className="rounded-2xl border border-[#4F5FE8]/25 bg-[#4F5FE8]/10 p-4 text-sm font-medium text-[#1A1F36]">
+          {t("previewOnly")}
+        </div>
+      )}
+
       {error && <div className={ERROR_BOX}>{error}</div>}
 
       <div className={CARD_MAIN}>
@@ -595,6 +627,8 @@ export default function PublicBookingPage() {
         </div>
       </div>
 
+      {!business.previewOnly && (
+        <>
       <div className={CARD_MAIN}>
         <div className="mb-4 flex items-center gap-2">
           <span className={SECTION_ICON}>
@@ -678,13 +712,19 @@ export default function PublicBookingPage() {
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder={t("namePlaceholder")}
+              autoComplete="name"
+              required
               className={INPUT_BASE}
             />
             <input
               value={customerPhone}
               onChange={(e) => setCustomerPhone(e.target.value)}
               placeholder={t("phonePlaceholder")}
+              type="tel"
               inputMode="tel"
+              autoComplete="tel"
+              required
+              dir="ltr"
               className={INPUT_BASE}
             />
             <input
@@ -722,6 +762,8 @@ export default function PublicBookingPage() {
             </button>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

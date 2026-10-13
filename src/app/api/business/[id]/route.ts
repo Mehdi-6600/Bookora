@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { COUNTRY_CURRENCY, isCountryCode } from "@/lib/currency";
 import { normalizeTimeZone } from "@/lib/booking/time";
+import { isBusinessPubliclyActive } from "@/lib/business/lifecycle";
 
 const updateBusinessSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -50,8 +51,14 @@ export async function PUT(
     }
 
     const existing = await prisma.business.findFirst({
-      where: { id, ownerId: user.id },
-      select: { id: true, country: true, status: true, timezone: true },
+      where: { id, ownerId: user.id, deletedAt: null },
+      select: {
+        id: true,
+        country: true,
+        status: true,
+        timezone: true,
+        expiresAt: true,
+      },
     });
 
     if (!existing) {
@@ -75,7 +82,7 @@ export async function PUT(
       : existing.timezone;
 
     const status =
-      reactivate && existing.status === "ARCHIVED" ? "ACTIVE" : undefined;
+      reactivate && existing.status === "ARCHIVED" ? "DRAFT" : undefined;
 
     const result = await prisma.$transaction(async (tx) => {
       const business = await tx.business.update({
@@ -164,9 +171,11 @@ export async function DELETE(
     }
 
     const existing = await prisma.business.findFirst({
-      where: { id, ownerId: user.id },
+      where: { id, ownerId: user.id, deletedAt: null },
       select: {
         id: true,
+        status: true,
+        expiresAt: true,
         _count: { select: { bookings: true } },
       },
     });
@@ -178,18 +187,26 @@ export async function DELETE(
       );
     }
 
-    if (existing._count.bookings > 0) {
-      await prisma.business.update({
-        where: { id },
-        data: { status: "ARCHIVED" },
+    if (isBusinessPubliclyActive(existing)) {
+      await prisma.business.updateMany({
+        where: { id, ownerId: user.id, status: "ACTIVE", deletedAt: null },
+        data: { status: "DISABLED" },
       });
-
-      return NextResponse.json({ archived: true });
+      return NextResponse.json({ disabled: true, bookingCount: existing._count.bookings });
     }
 
-    await prisma.business.delete({ where: { id } });
+    const removed = await prisma.business.updateMany({
+      where: { id, ownerId: user.id, deletedAt: null },
+      data: { deletedAt: new Date(), creationKey: null },
+    });
+    if (removed.count !== 1) {
+      return NextResponse.json(
+        { error: "کسب‌وکار پیدا نشد." },
+        { status: 404 }
+      );
+    }
 
-    return NextResponse.json({ deleted: true });
+    return NextResponse.json({ archived: true, bookingCount: existing._count.bookings });
   } catch (error) {
     console.error(
       "DELETE /api/business/[id] failed:",
