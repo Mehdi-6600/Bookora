@@ -567,7 +567,7 @@
     "existingTemplates": "Saved templates",
     "firstBookings": "first bookings",
     "followUp": "Next follow-up",
-    "funnelSubtitle": "Anonymous counts. No IP, user agent or personal data is stored.",
+    "funnelSubtitle": "Acquisition-funnel events, not panel purchases: registration means account creation, not payment. No IP, user agent or personal data is stored.",
     "funnelTitle": "Acquisition funnel (last 7 days)",
     "group": "Group",
     "inactive": "Inactive",

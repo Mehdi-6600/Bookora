@@ -59,6 +59,14 @@ export async function POST(req: NextRequest) {
   const adminConfig = getAdminTelegramConfig();
   const isConfiguredAdmin = adminConfig.ids.includes(BigInt(tg.id));
 
+  // Authentication runs whenever the Mini App is opened, not only when an
+  // account is first created. Keep the registration funnel metric tied to a
+  // genuinely new user rather than counting every login as a registration.
+  const existingUser = await prisma.user.findUnique({
+    where: { telegramId: String(tg.id) },
+    select: { id: true },
+  });
+
   const user = await prisma.user.upsert({
     where: { telegramId: String(tg.id) },
     update: {
@@ -110,14 +118,17 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Funnel: registration completed. Server-side so it cannot be spoofed.
-  await recordFunnelEvent({
-    event: "registration_completed",
-    ip: getClientIp(req),
-    userAgent: req.headers.get("user-agent") ?? "",
-    ref: startParam ?? null,
-    campaignId: null,
-  });
+  // Funnel: record only the first account creation. Reopening/authenticating
+  // the Mini App is a login, not another completed registration.
+  if (!existingUser) {
+    await recordFunnelEvent({
+      event: "registration_completed",
+      ip: getClientIp(req),
+      userAgent: req.headers.get("user-agent") ?? "",
+      ref: startParam ?? null,
+      campaignId: null,
+    });
+  }
 
   return NextResponse.json({
     user: {
