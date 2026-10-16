@@ -91,7 +91,6 @@ export function TelegramAuthGate({ children }: Props) {
           setUser(data.user);
           setError(null);
           setLoading(false);
-          track("registration_completed", { locale });
         }
       } catch {
         if (!cancelled) {
