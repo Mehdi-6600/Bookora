@@ -1,14 +1,21 @@
+import { InlineKeyboard } from "grammy";
 import { getBot } from "@/lib/telegram/bot";
+
+export type NotifyOptions = {
+  parseMode?: "HTML" | "Markdown";
+  replyMarkup?: InlineKeyboard;
+};
 
 export async function notifyUser(
   telegramId: string,
   text: string,
-  options?: { parseMode?: "HTML" | "Markdown" }
+  options?: NotifyOptions
 ): Promise<void> {
   try {
     const bot = getBot();
     await bot.api.sendMessage(telegramId, text, {
       parse_mode: options?.parseMode,
+      reply_markup: options?.replyMarkup,
     });
   } catch (error) {
     const err = error as { error_code?: number; description?: string };
@@ -36,11 +43,15 @@ export type DeliveryResult =
  */
 export async function deliverTelegramMessage(
   telegramId: string,
-  text: string
+  text: string,
+  options?: NotifyOptions
 ): Promise<DeliveryResult> {
   try {
     const bot = getBot();
-    const message = await bot.api.sendMessage(telegramId, text);
+    const message = await bot.api.sendMessage(telegramId, text, {
+      parse_mode: options?.parseMode,
+      reply_markup: options?.replyMarkup,
+    });
     return { ok: true, messageId: message.message_id };
   } catch (error) {
     const err = error as {

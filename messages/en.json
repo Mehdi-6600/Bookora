@@ -342,6 +342,10 @@
     "compareProSupport": "Priority support",
     "compareProBadge": "No limit on bookings and services",
     "submittedNotice": "Payment request submitted for review.",
+    "rejectedTitle": "Your previous subscription request was rejected",
+    "rejectReason": "Rejection reason",
+    "defaultRejectReason": "The tracking code or payment could not be verified.",
+    "receiptReferenceLabel": "Tracking code",
     "setupNotFinalized": "Review this business setup and confirm the final step before paying.",
     "businessNotReady": "Add at least one active service and one active working day before paying."
   },

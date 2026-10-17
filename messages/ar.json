@@ -342,6 +342,10 @@
     "compareProSupport": "دعم ذو أولوية",
     "compareProBadge": "بدون حد للحجوزات والخدمات",
     "submittedNotice": "تم إرسال طلب الدفع للمراجعة.",
+    "rejectedTitle": "لم تتم الموافقة على طلب الاشتراك السابق",
+    "rejectReason": "سبب الرفض",
+    "defaultRejectReason": "تعذر التحقق من رمز التتبع أو الدفعة.",
+    "receiptReferenceLabel": "رمز التتبع",
     "setupNotFinalized": "راجع إعداد هذا النشاط وأكّد الخطوة النهائية قبل الدفع.",
     "businessNotReady": "أضف خدمة نشطة واحدة على الأقل ويوم عمل نشطاً واحداً قبل الدفع."
   },

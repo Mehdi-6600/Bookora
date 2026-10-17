@@ -24,20 +24,29 @@ export async function GET(req: NextRequest) {
     }
 
     const now = new Date();
-    const [activeSubscription, pendingSubscription] = await Promise.all([
-      prisma.subscription.findFirst({
-        where: activePaidSubscriptionWhere(user.id, now, business.id),
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.subscription.findFirst({
-        where: {
-          userId: user.id,
-          businessId: business.id,
-          status: "PENDING",
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
+    const [activeSubscription, pendingSubscription, lastRejectedSubscription] =
+      await Promise.all([
+        prisma.subscription.findFirst({
+          where: activePaidSubscriptionWhere(user.id, now, business.id),
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.subscription.findFirst({
+          where: {
+            userId: user.id,
+            businessId: business.id,
+            status: "PENDING",
+          },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.subscription.findFirst({
+          where: {
+            userId: user.id,
+            businessId: business.id,
+            status: "REJECTED",
+          },
+          orderBy: { reviewedAt: "desc" },
+        }),
+      ]);
 
     return NextResponse.json(
       {
@@ -55,6 +64,15 @@ export async function GET(req: NextRequest) {
               createdAt: pendingSubscription.createdAt,
             }
           : null,
+        lastRejected:
+          !activeSubscription && !pendingSubscription && lastRejectedSubscription
+            ? {
+                plan: lastRejectedSubscription.plan,
+                receiptReference: lastRejectedSubscription.receiptReference,
+                adminNote: lastRejectedSubscription.adminNote,
+                reviewedAt: lastRejectedSubscription.reviewedAt,
+              }
+            : null,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

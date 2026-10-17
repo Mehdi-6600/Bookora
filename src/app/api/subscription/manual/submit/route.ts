@@ -15,6 +15,7 @@ import {
 } from "@/lib/booking/schedule";
 import { normalizePaymentReference } from "@/lib/payment-reference";
 import { isBusinessPubliclyActive } from "@/lib/business/lifecycle";
+import { notifyAdminsNewManualSubscription } from "@/lib/subscription/manual-review";
 
 const referencePattern = /^[\p{L}\p{N}][\p{L}\p{N} .#/_-]*[\p{L}\p{N}]$/u;
 
@@ -201,6 +202,17 @@ export async function POST(req: NextRequest) {
       });
       return { subscription, created: true };
     });
+
+    if (result.created) {
+      void notifyAdminsNewManualSubscription({
+        subscriptionId: result.subscription.id,
+        userId: user.id,
+        businessId: businessRef.id,
+        plan: parsed.data.plan,
+        receiptReference: normalizedReference,
+        receiptNote: parsed.data.note || null,
+      });
+    }
 
     return NextResponse.json(
       {
