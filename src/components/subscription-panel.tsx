@@ -35,6 +35,13 @@ type PendingSubscription = {
   createdAt: string;
 } | null;
 
+type RejectedSubscription = {
+  plan: string;
+  receiptReference: string | null;
+  adminNote: string | null;
+  reviewedAt: string | null;
+} | null;
+
 type ManualInstructions = {
   configured: boolean;
   cardNumber: string | null;
@@ -125,6 +132,7 @@ export function SubscriptionPanel({
 
   const [subscription, setSubscription] = useState<SubscriptionStatus>(null);
   const [pending, setPending] = useState<PendingSubscription>(null);
+  const [rejected, setRejected] = useState<RejectedSubscription>(null);
   const [preference, setPreference] = useState<PaymentPreference | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState<PlanCode | null>(null);
@@ -190,6 +198,7 @@ export function SubscriptionPanel({
 
       setSubscription(statusData.subscription);
       setPending(statusData.pendingSubscription);
+      setRejected(statusData.lastRejected ?? null);
 
       if (preferenceResponse.ok) {
         const preferenceData = await preferenceResponse.json();
@@ -550,6 +559,24 @@ export function SubscriptionPanel({
               })}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Rejected subscription alert */}
+      {!loading && !subscription && !pending && rejected && (
+        <div className="mt-4 rounded-2xl bg-[#FF4D5E]/15 p-4 text-xs font-medium text-[#1A1F36]/90 shadow-soft">
+          <p className="font-bold text-[#FF4D5E]">
+            {t("rejectedTitle")}
+          </p>
+          <p className="mt-1">
+            <span className="font-semibold">{t("rejectReason")}:</span>{" "}
+            {rejected.adminNote?.trim() || t("defaultRejectReason")}
+          </p>
+          {rejected.receiptReference && (
+            <p className="mt-1 text-[11px] text-[#1A1F36]/60">
+              {t("receiptReferenceLabel")}: {rejected.receiptReference}
+            </p>
+          )}
         </div>
       )}
 

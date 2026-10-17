@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth/session";
-import { prisma } from "@/lib/prisma";
-import { PLANS, isPlanCode } from "@/lib/subscription/plans";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
-import { lockBusinessSchedule, lockUserSubscriptions } from "@/lib/booking/schedule";
-import { nextSubscriptionPeriod } from "@/lib/subscription/entitlement";
+import {
+  InvalidManualSubscriptionError,
+  ReviewConflictError,
+  SubscriptionNotFoundError,
+  reviewManualSubscription,
+} from "@/lib/subscription/manual-review";
 
 const reviewSchema = z.object({
   action: z.enum(["approve", "reject"]),
   note: z.string().trim().max(500).nullable().optional(),
 });
-
-class SubscriptionNotFoundError extends Error {}
-class ReviewConflictError extends Error {}
-class InvalidManualSubscriptionError extends Error {}
 
 export async function POST(
   req: NextRequest,
@@ -47,121 +45,17 @@ export async function POST(
       return NextResponse.json({ error: "اطلاعات معتبر نیست." }, { status: 400 });
     }
 
-    const reference = await prisma.subscription.findUnique({
-      where: { id },
-      select: { userId: true, businessId: true },
-    });
-    if (!reference) {
-      return NextResponse.json({ error: "درخواست پیدا نشد." }, { status: 404 });
-    }
+    const reviewerName = user.firstName
+      ? `${user.firstName} ${user.lastName ?? ""}`.trim()
+      : user.username
+      ? `@${user.username}`
+      : "مدیر وب";
 
-    const result = await prisma.$transaction(async (tx) => {
-      if (reference.businessId) {
-        await lockBusinessSchedule(tx, reference.businessId);
-      }
-      await lockUserSubscriptions(tx, reference.userId);
-      const subscription = await tx.subscription.findUnique({ where: { id } });
-      if (!subscription || subscription.userId !== reference.userId) {
-        throw new SubscriptionNotFoundError();
-      }
-
-      if (subscription.status !== "PENDING") {
-        const requestedFinalState =
-          parsed.data.action === "approve" ? "ACTIVE" : "REJECTED";
-        if (subscription.status === requestedFinalState) {
-          return {
-            status: subscription.status,
-            expiresAt: subscription.expiresAt,
-          };
-        }
-        throw new ReviewConflictError();
-      }
-
-      if (subscription.provider !== "MANUAL_IRAN") {
-        throw new InvalidManualSubscriptionError();
-      }
-
-      if (parsed.data.action === "reject") {
-        const now = new Date();
-        const updated = await tx.subscription.updateMany({
-          where: { id, userId: reference.userId, status: "PENDING" },
-          data: {
-            status: "REJECTED",
-            reviewedAt: now,
-            adminNote: parsed.data.note || null,
-          },
-        });
-        if (updated.count !== 1) throw new ReviewConflictError();
-        return { status: "REJECTED", expiresAt: null };
-      }
-
-      if (!isPlanCode(subscription.plan) || !subscription.receiptReference?.trim()) {
-        throw new InvalidManualSubscriptionError();
-      }
-
-      const plan = PLANS[subscription.plan];
-      const now = new Date();
-      const period = await nextSubscriptionPeriod(
-        tx,
-        subscription.userId,
-        plan.durationDays,
-        now,
-        subscription.businessId ?? undefined
-      );
-      const updated = await tx.subscription.updateMany({
-        where: { id, userId: reference.userId, status: "PENDING" },
-        data: {
-          status: "ACTIVE",
-          startedAt: period.startedAt,
-          expiresAt: period.expiresAt,
-          reviewedAt: now,
-          adminNote: parsed.data.note || null,
-        },
-      });
-      if (updated.count !== 1) throw new ReviewConflictError();
-
-      if (subscription.businessId) {
-        const business = await tx.business.findFirst({
-          where: {
-            id: subscription.businessId,
-            ownerId: subscription.userId,
-            deletedAt: null,
-            status: { in: ["DRAFT", "ACTIVE", "EXPIRED"] },
-          },
-          select: { id: true, status: true, setupCompletedAt: true },
-        });
-        if (business) {
-          const [activeServices, enabledDays] = await Promise.all([
-            tx.service.count({
-              where: { businessId: business.id, active: true },
-            }),
-            tx.workingHour.count({
-              where: { businessId: business.id, enabled: true },
-            }),
-          ]);
-          if (
-            (business.status !== "DRAFT" || business.setupCompletedAt) &&
-            activeServices > 0 &&
-            enabledDays > 0
-          ) {
-            await tx.business.updateMany({
-              where: {
-                id: business.id,
-                ownerId: subscription.userId,
-                deletedAt: null,
-                status: { in: ["DRAFT", "ACTIVE", "EXPIRED"] },
-              },
-              data: {
-                status: "ACTIVE",
-                expiresAt: period.expiresAt,
-                setupCompletedAt: business.setupCompletedAt ?? now,
-              },
-            });
-          }
-        }
-      }
-
-      return { status: "ACTIVE", expiresAt: period.expiresAt };
+    const result = await reviewManualSubscription({
+      subscriptionId: id,
+      action: parsed.data.action,
+      note: parsed.data.note,
+      reviewerName,
     });
 
     return NextResponse.json({

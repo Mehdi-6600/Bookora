@@ -342,6 +342,10 @@
     "compareProSupport": "پشتیبانی اولویت‌دار",
     "compareProBadge": "بدون محدودیت رزرو و سرویس",
     "submittedNotice": "درخواست پرداخت برای بررسی ارسال شد.",
+    "rejectedTitle": "درخواست قبلی شما تأیید نشد",
+    "rejectReason": "علت عدم تأیید",
+    "defaultRejectReason": "کد پیگیری یا مبلغ واریزی مورد تأیید قرار نگرفت.",
+    "receiptReferenceLabel": "کد پیگیری",
     "setupNotFinalized": "ابتدا خلاصهٔ تنظیمات این کسب‌وکار را بررسی و دکمهٔ نهایی را انتخاب کنید.",
     "businessNotReady": "برای پرداخت دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید."
   },
