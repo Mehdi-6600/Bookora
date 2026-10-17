@@ -214,10 +214,13 @@ function registerPaymentHandlers(instance: Bot) {
         }),
       ]);
       if (activeServices < 1 || enabledDays < 1) {
-        await ctx.answerPreCheckoutQuery(
-          false,
-          "برای ادامه دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید."
-        );
+        const errorMessage =
+          activeServices < 1 && enabledDays < 1
+            ? "برای ادامه دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید."
+            : activeServices < 1
+            ? "برای ادامه دست‌کم یک سرویس فعال ثبت کنید."
+            : "برای ادامه دست‌کم یک روز کاری فعال ثبت کنید.";
+        await ctx.answerPreCheckoutQuery(false, errorMessage);
         return;
       }
     }

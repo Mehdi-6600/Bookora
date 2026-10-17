@@ -252,6 +252,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [linkCopied, setLinkCopied] = useState(false);
+  const [setupReviewTrigger, setSetupReviewTrigger] = useState(0);
 
   const [message, setMessage] = useState<string | null>(null);
 
@@ -1575,6 +1576,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
                           description={selectedBusiness.description}
                           timezone={selectedBusiness.timezone}
                           services={selectedBusiness.services}
+                          refreshTrigger={setupReviewTrigger}
                           actionLabel={
                             activatingBusiness
                               ? tBiz("activating")
@@ -1682,7 +1684,7 @@ function Dashboard({ user }: { user: TelegramUser }) {
 
               {!isClosed && (
                 <>
-                  <section className={CARD_MAIN}>
+                  <section id="services-section" className={CARD_MAIN}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
                         <span className={SECTION_ICON}>
@@ -2169,7 +2171,10 @@ function Dashboard({ user }: { user: TelegramUser }) {
                     </>
                   )}
 
-                  <WorkingHoursEditor businessId={selectedBusiness.id} />
+                  <WorkingHoursEditor
+                    businessId={selectedBusiness.id}
+                    onSaved={() => setSetupReviewTrigger((v) => v + 1)}
+                  />
                 </>
               )}
             </>

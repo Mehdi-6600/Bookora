@@ -88,8 +88,10 @@ function isValidTime(value: string): boolean {
 
 export function WorkingHoursEditor({
   businessId,
+  onSaved,
 }: {
   businessId: string;
+  onSaved?: () => void;
 }) {
   const t = useTranslations("workingHours");
   const dayLabels = [0, 1, 2, 3, 4, 5, 6].map((i) => t(`days.${i}`));
@@ -229,6 +231,7 @@ export function WorkingHoursEditor({
         setDays(mergeWithDefaults(data.workingHours as WorkingHour[]));
       }
       setMessage(t("saved"));
+      onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("saved"));
     } finally {
@@ -239,7 +242,7 @@ export function WorkingHoursEditor({
   const enabledCount = days.filter((day) => day.enabled).length;
 
   return (
-    <section className={CARD_MAIN}>
+    <section id="working-hours-editor" className={CARD_MAIN}>
       {/* Header */}
       <header className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">

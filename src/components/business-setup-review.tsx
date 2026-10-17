@@ -41,6 +41,7 @@ type Props = {
   actionLabel: string;
   actionLoading: boolean;
   onComplete: () => void;
+  refreshTrigger?: number;
 };
 
 const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-5 shadow-soft";
@@ -56,6 +57,7 @@ export function BusinessSetupReview({
   actionLabel,
   actionLoading,
   onComplete,
+  refreshTrigger = 0,
 }: Props) {
   const t = useTranslations("businessSetup");
   const tHours = useTranslations("workingHours");
@@ -113,7 +115,7 @@ export function BusinessSetupReview({
     return () => {
       cancelled = true;
     };
-  }, [businessId, reloadKey, t]);
+  }, [businessId, reloadKey, refreshTrigger, t]);
 
   const activeServices = services.filter((service) => service.active);
   const enabledHours = hours.filter((day) => day.enabled);
@@ -166,7 +168,20 @@ export function BusinessSetupReview({
             {t("services", { count: activeServices.length })}
           </h3>
           {services.length === 0 ? (
-            <p className="mt-2 text-xs text-[#1A1F36]/60">{t("noServices")}</p>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-[#1A1F36]/60">{t("noServices")}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  document
+                    .getElementById("services-section")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                className="text-xs font-bold text-[#4F5FE8] underline-offset-2 hover:underline"
+              >
+                {t("goToServices")}
+              </button>
+            </div>
           ) : (
             <ul className="mt-2 space-y-2">
               {services.map((service) => (
@@ -212,7 +227,20 @@ export function BusinessSetupReview({
               {t("loading")}
             </p>
           ) : enabledHours.length === 0 ? (
-            <p className="mt-2 text-xs text-[#1A1F36]/60">{t("noWorkingDays")}</p>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-[#1A1F36]/60">{t("noWorkingDays")}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  document
+                    .getElementById("working-hours-editor")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                className="text-xs font-bold text-[#4F5FE8] underline-offset-2 hover:underline"
+              >
+                {t("goToWorkingHours")}
+              </button>
+            </div>
           ) : (
             <ul className="mt-2 space-y-1">
               {enabledHours.map((day) => (
@@ -266,9 +294,41 @@ export function BusinessSetupReview({
       </div>
 
       {!isReady && !loading && (
-        <p className="mt-4 rounded-xl bg-[#FCA311]/15 p-3 text-xs font-medium text-[#1A1F36]/75">
-          {t("notReady")}
-        </p>
+        <div className="mt-4 rounded-xl bg-[#FCA311]/15 p-3 text-xs font-medium text-[#1A1F36]/85">
+          <p>
+            {activeServices.length === 0 && enabledHours.length === 0
+              ? t("notReady")
+              : activeServices.length === 0
+              ? t("notReadyServices")
+              : t("notReadyHours")}
+          </p>
+          {enabledHours.length === 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                document
+                  .getElementById("working-hours-editor")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+              className="mt-2 inline-flex items-center gap-1 font-bold text-[#4F5FE8] underline-offset-2 hover:underline"
+            >
+              {t("goToWorkingHours")} &darr;
+            </button>
+          )}
+          {activeServices.length === 0 && enabledHours.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                document
+                  .getElementById("services-section")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+              className="mt-2 inline-flex items-center gap-1 font-bold text-[#4F5FE8] underline-offset-2 hover:underline"
+            >
+              {t("goToServices")} &darr;
+            </button>
+          )}
+        </div>
       )}
 
       <button
