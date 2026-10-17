@@ -15,7 +15,7 @@ export const PLANS: Record<PlanCode, PlanDefinition> = {
     titleFa: "اشتراک حرفه‌ای ماهانه",
     titleEn: "Pro Monthly",
     starsPrice: 200,
-    manualPriceToman: 699000,
+    manualPriceToman: 399000,
     durationDays: 30,
   },
   PRO_YEARLY: {
@@ -23,7 +23,7 @@ export const PLANS: Record<PlanCode, PlanDefinition> = {
     titleFa: "اشتراک حرفه‌ای سالانه",
     titleEn: "Pro Yearly",
     starsPrice: 2000,
-    manualPriceToman: 6990000,
+    manualPriceToman: 3990000,
     durationDays: 365,
   },
 };
