@@ -97,9 +97,15 @@ export async function POST(req: NextRequest) {
       }),
     ]);
     if (activeServices < 1 || enabledDays < 1) {
+      const errorMessage =
+        activeServices < 1 && enabledDays < 1
+          ? "ابتدا دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید."
+          : activeServices < 1
+          ? "ابتدا دست‌کم یک سرویس فعال ثبت کنید."
+          : "ابتدا دست‌کم یک روز کاری فعال ثبت کنید.";
       return NextResponse.json(
         {
-          error: "ابتدا دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید.",
+          error: errorMessage,
           code: "BUSINESS_NOT_READY",
         },
         { status: 409 }

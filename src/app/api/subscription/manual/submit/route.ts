@@ -26,7 +26,11 @@ const submitSchema = z.object({
 });
 
 class BusinessNotFoundError extends Error {}
-class BusinessNotReadyError extends Error {}
+class BusinessNotReadyError extends Error {
+  constructor(public readonly missingReason?: "BOTH" | "SERVICES" | "HOURS") {
+    super();
+  }
+}
 class SetupNotFinalizedError extends Error {}
 class PaymentMethodUnavailableError extends Error {}
 class PendingSubscriptionError extends Error {}
@@ -114,7 +118,13 @@ export async function POST(req: NextRequest) {
         }),
       ]);
       if (activeServices < 1 || enabledDays < 1) {
-        throw new BusinessNotReadyError();
+        throw new BusinessNotReadyError(
+          activeServices < 1 && enabledDays < 1
+            ? "BOTH"
+            : activeServices < 1
+            ? "SERVICES"
+            : "HOURS"
+        );
       }
 
       const userRecord = await tx.user.findUnique({
@@ -207,9 +217,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
     }
     if (error instanceof BusinessNotReadyError) {
+      const errorMessage =
+        error.missingReason === "HOURS"
+          ? "ابتدا دست‌کم یک روز کاری فعال ثبت کنید."
+          : error.missingReason === "SERVICES"
+          ? "ابتدا دست‌کم یک سرویس فعال ثبت کنید."
+          : "ابتدا دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید.";
       return NextResponse.json(
         {
-          error: "ابتدا دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید.",
+          error: errorMessage,
           code: "BUSINESS_NOT_READY",
         },
         { status: 409 }

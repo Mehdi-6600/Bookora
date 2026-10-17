@@ -832,6 +832,10 @@
     "noWorkingDays": "No working days are enabled yet.",
     "noHolidays": "No holidays or closures added.",
     "notReady": "Enable at least one active service and one working day to continue. Your draft changes remain saved.",
+    "notReadyServices": "Enable at least one active service to continue. Your draft changes remain saved.",
+    "notReadyHours": "Your service is ready. Enable at least one working day to continue. Your draft changes remain saved.",
+    "goToWorkingHours": "Set working hours",
+    "goToServices": "Add or enable service",
     "loadError": "Could not load the setup summary.",
     "refresh": "Refresh summary"
   }

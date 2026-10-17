@@ -10,7 +10,11 @@ import {
 } from "@/lib/business/lifecycle";
 
 class BusinessNotFoundError extends Error {}
-class BusinessNotReadyError extends Error {}
+class BusinessNotReadyError extends Error {
+  constructor(public readonly missingReason?: "BOTH" | "SERVICES" | "HOURS") {
+    super();
+  }
+}
 
 export async function POST(
   _req: NextRequest,
@@ -58,7 +62,13 @@ export async function POST(
         tx.workingHour.count({ where: { businessId: business.id, enabled: true } }),
       ]);
       if (activeServices < 1 || enabledDays < 1) {
-        throw new BusinessNotReadyError();
+        throw new BusinessNotReadyError(
+          activeServices < 1 && enabledDays < 1
+            ? "BOTH"
+            : activeServices < 1
+            ? "SERVICES"
+            : "HOURS"
+        );
       }
 
       if (!business.setupCompletedAt) {
@@ -111,9 +121,15 @@ export async function POST(
       return NextResponse.json({ error: "کسب‌وکار پیدا نشد." }, { status: 404 });
     }
     if (error instanceof BusinessNotReadyError) {
+      const errorMessage =
+        error.missingReason === "HOURS"
+          ? "ابتدا دست‌کم یک روز کاری فعال ثبت کنید."
+          : error.missingReason === "SERVICES"
+          ? "ابتدا دست‌کم یک سرویس فعال ثبت کنید."
+          : "ابتدا دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید.";
       return NextResponse.json(
         {
-          error: "ابتدا دست‌کم یک سرویس فعال و یک روز کاری فعال ثبت کنید.",
+          error: errorMessage,
           code: "BUSINESS_NOT_READY",
         },
         { status: 409 }
