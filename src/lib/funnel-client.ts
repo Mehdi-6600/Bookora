@@ -26,7 +26,7 @@ export function track(
   const payload = JSON.stringify({
     event,
     locale: options?.locale ?? document.documentElement.lang ?? null,
-    ref: safeRef(options?.ref),
+    ref: safeRef(options?.ref ?? readRefFromLocation()),
   });
 
   try {

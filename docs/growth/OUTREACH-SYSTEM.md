@@ -6,7 +6,7 @@ Implemented 2026-10-10 · branch `arena/b3951939-bookora`
 
 ## 1. What was built
 
-> **Update:** this system was extended with a 100-city approval registry, a
+> **Update:** this system now uses a 130-city registry: all 100 Iranian cities and seven language-ready global markets activate automatically; the other 23 global candidates remain gated until localization is supported. It also includes a
 > per-campaign message builder, an audit trail and measured-vs-estimated
 > analytics. See [GROWTH-EXPANSION.md](./GROWTH-EXPANSION.md); the safety
 > model below still applies unchanged (and is now also audited).
@@ -126,14 +126,21 @@ t.me/Bookora_App_bot?start=p.<24-char-base32-token>
 Attribution is counted **only when it is verifiable** — a `BotStart` row is
 written only when Telegram actually delivers a start with that parameter.
 
-### ⚠️ Known attribution gap
+### Attribution status and remaining limits
 
-`src/app/api/auth/telegram/route.ts` does not forward `start_param` on the
-callback after a successful login, so **`auth_success` and `business_created`
-cannot currently be attributed to a specific invitation.** Bot starts are
-attributed correctly. Fixing this properly needs a live Telegram client to
-verify the WebApp `initDataUnsafe.start_param` field, which I do not have. It is
-the first item in "remaining blockers".
+The signed Telegram Mini App `start_param` is now read from validated
+`initData` by `src/app/api/auth/telegram/route.ts` and passed to
+`recordAttributedStart()`. This preserves the prospect/campaign link through
+Mini App authentication without trusting a client-supplied unsigned parameter.
+Campaign landing views are recorded only when the `?ref=` value resolves to a
+real campaign code. Admin-verified manual subscription approvals record a
+privacy-preserving `paid_conversion` event; other payment providers must add an
+equivalent verified server-side hook before their conversions are counted.
+
+Campaign-level registration and activation counts still come from the
+attributed prospect record. Browser funnel events use daily-rotating anonymous
+IDs, while system-side paid conversions use random, non-linkable event IDs; the
+system does not store a buyer ID in the funnel table.
 
 ---
 

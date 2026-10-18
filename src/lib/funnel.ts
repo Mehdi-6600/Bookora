@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getClientIp } from "@/lib/get-client-ip";
 
@@ -11,7 +11,7 @@ import { getClientIp } from "@/lib/get-client-ip";
  *  - `anonId` is a salted hash of (IP + user-agent + date). The salt rotates
  *    daily, so the same visitor has a different id tomorrow and cannot be
  *    tracked across days.
- *  - Only the 9 funnnel steps required to measure onboarding are recorded.
+ *  - Only the 11 funnel steps required to measure acquisition and activation are recorded.
  */
 
 /**
@@ -121,6 +121,36 @@ export async function recordFunnelEvent(
     // Analytics must never break a user-facing request.
     console.error(
       "recordFunnelEvent failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+  }
+}
+
+/**
+ * Record a verified server-side paid conversion without storing buyer identity.
+ *
+ * The random id is intentionally un-linkable to browser events. The campaign
+ * association, when available, comes from the verified outreach prospect row.
+ */
+export async function recordSystemPaidConversion(input: {
+  campaignId?: string | null;
+  now?: Date;
+}): Promise<void> {
+  try {
+    await prisma.funnelEvent.create({
+      data: {
+        event: "paid_conversion",
+        anonId: randomBytes(16).toString("hex"),
+        locale: null,
+        ref: null,
+        campaignId: input.campaignId?.slice(0, 64) ?? null,
+        ...(input.now ? { createdAt: input.now } : {}),
+      },
+    });
+  } catch (error) {
+    // A measurement failure must never reverse a verified payment approval.
+    console.error(
+      "recordSystemPaidConversion failed:",
       error instanceof Error ? error.name : "UnknownError"
     );
   }

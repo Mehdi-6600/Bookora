@@ -326,7 +326,7 @@ model OutreachCampaign {
   status       String   @default("DRAFT")
   /// Approved market scope: TEHRAN | MASHHAD | SHIRAZ | KARAJ
   cities       String[] @default([])
-  /// MENS_BARBER | WOMENS_SALON
+  /// MENS_BARBER | WOMENS_SALON | WOMENS_BEAUTY | MEDICAL_PRACTICE
   segments     String[] @default([])
   language     String   @default("fa")
   objective    String?
@@ -364,7 +364,7 @@ model OutreachProspect {
   category    String    @default("OTHER")
   /// Approved city code: TEHRAN | MASHHAD | SHIRAZ | KARAJ. Never free text.
   city        String?
-  /// MENS_BARBER | WOMENS_SALON
+  /// MENS_BARBER | WOMENS_SALON | WOMENS_BEAUTY | MEDICAL_PRACTICE
   segment     String?
   neighborhood String?
   country     String?

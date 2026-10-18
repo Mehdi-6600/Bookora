@@ -1,10 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// These suites cover pure logic only; keep them runnable without a database.
-vi.mock("@/lib/prisma", () => ({ prisma: {} }));
+// These suites use a tiny in-memory delegate; no database is touched.
+const state = vi.hoisted(() => ({ records: [] as Array<Record<string, any>> }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    funnelEvent: {
+      create: async (args: any) => {
+        state.records.push(args.data);
+        return args.data;
+      },
+    },
+  },
+}));
 
 import {
   buildAnonId,
+  recordSystemPaidConversion,
   FUNNEL_EVENTS,
   FUNNEL_STEP_LABELS,
   isFunnelEvent,
@@ -39,6 +50,29 @@ describe("funnel event vocabulary", () => {
     expect(isFunnelEvent("password_reset")).toBe(false);
     expect(isFunnelEvent("")).toBe(false);
     expect(isFunnelEvent(42)).toBe(false);
+  });
+});
+
+describe("server-side paid conversion tracking", () => {
+  beforeEach(() => {
+    state.records.length = 0;
+  });
+
+  it("stores an un-linkable anonymous event and the resolved campaign id", async () => {
+    const now = new Date("2026-10-18T12:00:00.000Z");
+    await recordSystemPaidConversion({ campaignId: "campaign-1", now });
+
+    expect(state.records).toHaveLength(1);
+    expect(state.records[0]).toMatchObject({
+      event: "paid_conversion",
+      campaignId: "campaign-1",
+      createdAt: now,
+      locale: null,
+      ref: null,
+    });
+    expect(state.records[0].anonId).toMatch(/^[0-9a-f]{32}$/);
+    expect(state.records[0]).not.toHaveProperty("userId");
+    expect(state.records[0]).not.toHaveProperty("telegramId");
   });
 });
 

@@ -21,7 +21,7 @@ import {
   type SourceIssue,
 } from "@/lib/outreach/sources";
 import { isSuppressed } from "@/lib/outreach/eligibility";
-import { resolveCity, detectCity, detectSegment } from "@/lib/outreach/cities";
+import { cityDefinition, resolveCity, detectCity, detectSegment } from "@/lib/outreach/cities";
 import { recordAuditEvent } from "@/lib/outreach/audit";
 import { runDateFor, type OutreachSettings } from "@/lib/outreach/settings";
 
@@ -637,6 +637,7 @@ export async function promoteCandidates(options: {
         publicName: candidate.publicName,
         category: candidate.group,
         city,
+        country: city ? cityDefinition(city)?.country ?? null : null,
         segment,
         language: candidate.language,
         publicUrl: publicUrl && publicUrl.ok ? publicUrl.url : null,

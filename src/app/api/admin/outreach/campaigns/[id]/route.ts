@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/auth/admin-api";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { buildBotDeepLink, buildCampaignStartParam } from "@/lib/outreach/deeplink";
 import {
+  BUSINESS_SEGMENTS,
   isBusinessSegment,
   parseCampaignCities,
   getEffectiveApprovedCities,
@@ -67,7 +68,7 @@ const patchSchema = z.object({
   description: z.string().trim().max(500).nullable().optional(),
   active: z.boolean().optional(),
   cities: z.array(z.string()).max(MAX_CAMPAIGN_CITIES).optional(),
-  segments: z.array(z.string()).max(2).optional(),
+  segments: z.array(z.string()).max(BUSINESS_SEGMENTS.length).optional(),
   language: z.string().trim().max(8).optional(),
   objective: z.string().trim().max(200).nullable().optional(),
   templateId: z.string().trim().max(64).nullable().optional(),

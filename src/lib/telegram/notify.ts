@@ -32,7 +32,14 @@ export async function notifyUser(
 
 export type DeliveryResult =
   | { ok: true; messageId: number }
-  | { ok: false; errorCode?: number; error: string; blocked: boolean };
+  | {
+      ok: false;
+      errorCode?: number;
+      error: string;
+      blocked: boolean;
+      /** Telegram's retry_after in seconds, when returned with HTTP 429. */
+      retryAfterSeconds?: number;
+    };
 
 /**
  * Send a message and report the outcome instead of swallowing it.
@@ -58,9 +65,17 @@ export async function deliverTelegramMessage(
       error_code?: number;
       description?: string;
       name?: string;
+      parameters?: { retry_after?: number };
     };
 
     const errorCode = typeof err?.error_code === "number" ? err.error_code : undefined;
+    const retryAfterSeconds =
+      errorCode === 429 &&
+      typeof err?.parameters?.retry_after === "number" &&
+      Number.isFinite(err.parameters.retry_after) &&
+      err.parameters.retry_after > 0
+        ? Math.ceil(err.parameters.retry_after)
+        : undefined;
 
     // Log the error class and code only - never the recipient or the body.
     console.error(
@@ -79,6 +94,7 @@ export async function deliverTelegramMessage(
           ? "Telegram rate limit reached."
           : "Delivery failed.",
       blocked: errorCode === 403,
+      ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
     };
   }
 }

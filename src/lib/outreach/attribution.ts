@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { parseStartPayload } from "@/lib/outreach/deeplink";
+import { recordSystemPaidConversion } from "@/lib/funnel";
 
 /**
  * Conversion attribution.
@@ -39,6 +40,40 @@ async function latestProspectForUser(userId: string): Promise<string | null> {
   });
 
   return start?.prospectId ?? null;
+}
+
+/** Record an admin-verified paid conversion, preserving campaign attribution when known. */
+export async function markPaidConversion(
+  userId: string,
+  businessId?: string | null
+): Promise<void> {
+  let campaignId: string | null = null;
+
+  try {
+    const businessProspect = businessId
+      ? await prisma.outreachProspect.findFirst({
+          where: { convertedBusinessId: businessId, convertedUserId: userId },
+          select: { campaignId: true },
+        })
+      : null;
+    const prospectId = businessProspect ? null : await latestProspectForUser(userId);
+    const prospect = businessProspect ??
+      (prospectId
+        ? await prisma.outreachProspect.findUnique({
+            where: { id: prospectId },
+            select: { campaignId: true },
+          })
+        : null);
+    campaignId = prospect?.campaignId ?? null;
+  } catch (error) {
+    // Still record the verified conversion globally if attribution lookup fails.
+    console.error(
+      "markPaidConversion attribution lookup failed:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+  }
+
+  await recordSystemPaidConversion({ campaignId });
 }
 
 /** Called after a business is successfully created. */

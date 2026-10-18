@@ -5,19 +5,22 @@ import { requireAdmin } from "@/lib/auth/admin-api";
 import { isRateLimited, triggerRateLimitCleanup } from "@/lib/rate-limit";
 import { prisma } from "@/lib/prisma";
 import {
+  AUTO_APPROVED_INTERNATIONAL_CITY_CODES,
   DEFAULT_APPROVED_CITIES,
+  INTERNATIONAL_TELEGRAM_CANDIDATE_CODES,
   cityDefinition,
   mergeApprovedCities,
 } from "@/lib/outreach/city-registry";
 import { recordAuditEvent } from "@/lib/outreach/audit";
+import { OUTREACH_LANGUAGES } from "@/lib/outreach/types";
 
 /**
- * Market approval — the ONLY way a city becomes targetable beyond the four
- * launch cities. There is no bulk "enable everything": each approval is an
- * explicit administrator action, stored as minimal overrides in
- * `admin_settings` (no schema change), and audit-logged.
+ * Market policy overrides. Language-ready international candidates become
+ * targetable automatically; candidates whose local outreach language is not
+ * supported cannot be manually enabled. The four launch markets and optional
+ * Iranian-market overrides remain stored in `admin_settings` and audit-logged.
  *
- * Approving a market enables campaign targeting ONLY. It creates no
+ * Enabling a market only allows explicit campaign targeting. It creates no
  * prospects, starts no outreach and sends nothing.
  */
 
@@ -62,10 +65,28 @@ async function PUTImpl(req: NextRequest) {
   }
 
   const code = parsed.data.code.trim().toUpperCase();
-  if (!cityDefinition(code)) {
+  const definition = cityDefinition(code);
+  if (!definition) {
     return NextResponse.json(
       { error: "unknown city code", hint: "Add the city to the market registry first." },
       { status: 400 }
+    );
+  }
+
+  if (
+    parsed.data.approved &&
+    INTERNATIONAL_TELEGRAM_CANDIDATE_CODES.some((candidate) => candidate === code) &&
+    !AUTO_APPROVED_INTERNATIONAL_CITY_CODES.includes(code)
+  ) {
+    return NextResponse.json(
+      {
+        error: "market_language_unsupported",
+        city: code,
+        requiredLanguages: definition.outreachLanguages ?? [],
+        supportedLanguages: [...OUTREACH_LANGUAGES],
+        hint: "This market becomes campaign-ready automatically when its outreach language is supported.",
+      },
+      { status: 409 }
     );
   }
 

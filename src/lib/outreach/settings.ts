@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeTimeZone } from "@/lib/booking/time";
 import {
-  MAX_CAMPAIGN_CITIES,
+  MAX_REGISTRY_CITIES,
   normalizeCityCodeList,
 } from "@/lib/outreach/city-registry";
 
@@ -12,6 +12,8 @@ import {
  * is required. Every read falls back to a documented default, and every write
  * is validated before it is persisted.
  */
+
+export const TELEGRAM_COOLDOWN_SETTING_KEY = "outreach.telegram_cooldown_until";
 
 export const OUTREACH_SETTING_KEYS = [
   "outreach.enabled",
@@ -70,6 +72,8 @@ export type OutreachSettings = {
   /// means "not configured yet"; the builder then refuses to enable the
   /// channel destination instead of fabricating a link.
   channelUrl: string;
+  /** Persisted flood-control hold after Telegram responds with HTTP 429. */
+  telegramCooldownUntil: number | null;
   /**
    * Provenance of the two kill switches, so the UI and the API can tell a
    * genuine administrator decision apart from a fallback.
@@ -103,6 +107,7 @@ export const DEFAULT_OUTREACH_SETTINGS: Omit<
   feedEnabled: false,
   minScore: DEFAULT_MIN_SCORE,
   channelUrl: "",
+  telegramCooldownUntil: null,
 };
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -139,6 +144,12 @@ function readKillSwitch(
     source: "default",
     warning: `${key} holds an unrecognised value. Treating outreach as switched off; store "true" or "false".`,
   };
+}
+
+function readTimestamp(value: string | undefined): number | null {
+  if (value === undefined || value.trim().length === 0) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function readInt(
@@ -221,7 +232,7 @@ export function coerceSettingValue(
     }
     case "outreach.cities_enabled":
     case "outreach.cities_disabled": {
-      const normalized = normalizeCityCodeList(raw, MAX_CAMPAIGN_CITIES);
+      const normalized = normalizeCityCodeList(raw, MAX_REGISTRY_CITIES);
       if (normalized === null) return null;
       return normalized.join(",");
     }
@@ -238,7 +249,7 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
 
   try {
     rows = await prisma.adminSetting.findMany({
-      where: { key: { in: [...OUTREACH_SETTING_KEYS] } },
+      where: { key: { in: [...OUTREACH_SETTING_KEYS, TELEGRAM_COOLDOWN_SETTING_KEY] } },
       select: { key: true, value: true },
     });
   } catch {
@@ -282,6 +293,7 @@ export async function getOutreachSettings(): Promise<OutreachSettings> {
     feedEnabled: readBoolean(map.get("outreach.feed_enabled"), false),
     minScore: readInt(map.get("outreach.min_score"), DEFAULT_OUTREACH_SETTINGS.minScore, 0, 100),
     channelUrl: map.get("outreach.channel_url") ?? "",
+    telegramCooldownUntil: readTimestamp(map.get(TELEGRAM_COOLDOWN_SETTING_KEY)),
     sources: {
       enabled: enabledSwitch.source,
       autoSendEnabled: autoSendSwitch.source,
@@ -302,7 +314,8 @@ export type OutreachDeliveryGate =
  * operation — never cached from an earlier step in the same request.
  */
 export function outreachDeliveryGate(
-  settings: OutreachSettings
+  settings: OutreachSettings,
+  now: number = Date.now()
 ): OutreachDeliveryGate {
   if (settings.readError) return { ok: false, reason: settings.readError };
   if (!settings.enabled) {
@@ -317,6 +330,12 @@ export function outreachDeliveryGate(
       ok: false,
       reason:
         "Automatic delivery is off (outreach.auto_send_enabled is not set to true). Nothing is sent.",
+    };
+  }
+  if (settings.telegramCooldownUntil && settings.telegramCooldownUntil > now) {
+    return {
+      ok: false,
+      reason: "Telegram rate-limit cooldown is active. Delivery is paused until it expires.",
     };
   }
   return { ok: true };
@@ -346,8 +365,8 @@ export async function getCityApprovalOverrides(): Promise<{
 
   const map = new Map(rows.map((row) => [row.key, row.value]));
   return {
-    enabled: normalizeCityCodeList(map.get("outreach.cities_enabled") ?? "", MAX_CAMPAIGN_CITIES) ?? [],
-    disabled: normalizeCityCodeList(map.get("outreach.cities_disabled") ?? "", MAX_CAMPAIGN_CITIES) ?? [],
+    enabled: normalizeCityCodeList(map.get("outreach.cities_enabled") ?? "", MAX_REGISTRY_CITIES) ?? [],
+    disabled: normalizeCityCodeList(map.get("outreach.cities_disabled") ?? "", MAX_REGISTRY_CITIES) ?? [],
   };
 }
 

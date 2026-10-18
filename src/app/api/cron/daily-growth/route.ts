@@ -72,6 +72,7 @@ export async function GET(req: NextRequest) {
   let invitationsPrepared = 0;
   let messagesSent = 0;
   let messagesDelivered = 0;
+  let rateLimited = false;
 
   const discovery = await runDailyDiscovery({ settings, now, mode: "scheduled" });
 
@@ -110,16 +111,23 @@ export async function GET(req: NextRequest) {
       messagesDelivered = outcomes.filter(
         (outcome) => outcome.status === "DELIVERED"
       ).length;
+      rateLimited = outcomes.some(
+        (outcome) => outcome.reason === "telegram_rate_limited"
+      );
 
       for (const outcome of outcomes) {
-        if (outcome.status === "FAILED") {
+        if (outcome.status === "FAILED" && outcome.reason !== "telegram_rate_limited") {
           errors.push(`delivery: ${outcome.reason}`);
         }
       }
     } catch (error) {
-      errors.push(
-        `delivery: ${error instanceof Error ? error.name : "UnknownError"}`
-      );
+      if (error instanceof Error && /rate-limit cooldown/i.test(error.message)) {
+        rateLimited = true;
+      } else {
+        errors.push(
+          `delivery: ${error instanceof Error ? error.name : "UnknownError"}`
+        );
+      }
     }
   }
 
@@ -143,7 +151,12 @@ export async function GET(req: NextRequest) {
   await prisma.discoveryRun.update({
     where: { runDate },
     data: {
-      status: errors.length > 0 ? "FAILED" : discoveryBlocked ? "BLOCKED" : "OK",
+      status:
+        errors.length > 0
+          ? "FAILED"
+          : discoveryBlocked || rateLimited
+            ? "BLOCKED"
+            : "OK",
       timezone: settings.timezone,
       discovered,
       matched,
@@ -156,7 +169,12 @@ export async function GET(req: NextRequest) {
       registrations: conversions.registrations,
       activations: conversions.activations,
       firstBookings: conversions.firstBookings,
-      error: errors.length > 0 ? errors.join(" | ").slice(0, 900) : null,
+      error:
+        errors.length > 0
+          ? errors.join(" | ").slice(0, 900)
+          : rateLimited
+            ? "Telegram rate limit reached; delivery paused until cooldown expires."
+            : null,
       finishedAt: new Date(),
     },
   });
@@ -176,6 +194,7 @@ export async function GET(req: NextRequest) {
     activations: conversions.activations,
     firstBookings: conversions.firstBookings,
     pendingReview,
+    rateLimited,
     errors,
   };
 
@@ -196,6 +215,7 @@ export async function GET(req: NextRequest) {
     messagesDelivered,
     conversions,
     pendingReview,
+    rateLimited,
     reportsSent,
     discoveryBlockers: discovery.blockers,
     errors,

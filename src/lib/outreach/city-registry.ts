@@ -7,25 +7,25 @@
  *    `[A-Z0-9_]+`), never as free text. Codes of existing campaigns and
  *    prospects are never renamed or reused, so history stays queryable
  *    while the registry grows.
- *  - The registry can hold up to 100 cities (`MAX_REGISTRY_CITIES`); a
+ *  - The registry can hold up to 150 cities (`MAX_REGISTRY_CITIES`); a
  *    campaign may select up to 100 of them (`MAX_CAMPAIGN_CITIES`).
- *  - `approved` marks the cities an administrator has signed off for
- *    outreach. The four launch cities are approved by default; every
- *    other entry starts DISABLED and only an administrator can approve
- *    it (Admin → Outreach → Campaigns → Markets, persisted in
- *    `admin_settings` as `outreach.cities_enabled` /
- *    `outreach.cities_disabled`).
+ *  - Iranian cities are automatically eligible for Persian outreach. Global
+ *    candidates become eligible only when their declared local outreach
+ *    languages overlap the app's supported invitation languages; the rest stay
+ *    dormant until localization support is added. Admin overrides remain
+ *    available to pause a market, but no per-city approval is needed.
  *  - Free-text city DETECTION (auto-assigning a discovery hit to a city)
- *    is deliberately limited to the default-approved set so a 100-city
- *    registry cannot widen the misclassification surface. Exact admin
- *    input ("اصفهان", "Isfahan", "ISFAHAN") resolves across the whole
- *    registry; an unapproved city then fails campaign validation with an
- *    explicit error — it is never silently swapped for another city.
+ *    stays limited to the four initial Iranian launch cities, even when a
+ *    language-ready market is campaign-eligible. Exact admin input resolves
+ *    across the registry; a dormant market still fails campaign validation
+ *    explicitly and is never silently swapped for another city.
  *
  * This is market configuration only. It asserts nothing about specific
  * businesses and never implies that outreach in a city is authorised;
  * unapproved cities are simply *known*, not *usable*.
  */
+
+import { OUTREACH_LANGUAGES } from "@/lib/outreach/types";
 
 export type CityDefinition = {
   /** Stable code stored in the database. Never reused, never renamed. */
@@ -34,18 +34,69 @@ export type CityDefinition = {
   fa: string;
   /** English display name. */
   en: string;
-  /** ISO 3166 alpha-2 country code; the registry is Iran-only for now. */
+  /** ISO 3166 alpha-2 country code. */
   country: string;
   /** Province / region label for admin surfaces and reports. */
   region: string;
-  /** Default approval state — `true` only for the launch cities. */
+  /** Languages suitable for local business outreach; used by auto-readiness. */
+  outreachLanguages?: readonly string[];
+  /** Static default approval state — `true` only for initial launch cities. */
   approved: boolean;
   /** Extra spellings, matched after `compactPersian`. */
   aliases: readonly string[];
 };
 
-export const MAX_REGISTRY_CITIES = 100;
+export const MAX_REGISTRY_CITIES = 150;
 export const MAX_CAMPAIGN_CITIES = 100;
+
+/**
+ * Globally distributed pilot candidates selected by a proxy, not an audited
+ * city-level Telegram ranking. Readiness is computed from each city's listed
+ * outreach languages and the app's supported invitation languages; it does
+ * not auto-create a campaign or authorize message delivery.
+ */
+export const INTERNATIONAL_TELEGRAM_CANDIDATE_CODES = [
+  "ISTANBUL",
+  "ANKARA",
+  "IZMIR",
+  "BURSA",
+  "MOSCOW",
+  "SAINT_PETERSBURG",
+  "KAZAN",
+  "NOVOSIBIRSK",
+  "TASHKENT",
+  "SAMARKAND",
+  "KYIV",
+  "KHARKIV",
+  "ODESA",
+  "CAIRO",
+  "ALEXANDRIA",
+  "SAO_PAULO",
+  "RIO_DE_JANEIRO",
+  "JAKARTA",
+  "KARACHI",
+  "LAHORE",
+  "ALMATY",
+  "ASTANA",
+  "BAKU",
+  "TBILISI",
+  "YEREVAN",
+  "DUBAI",
+  "MUMBAI",
+  "DELHI",
+  "MINSK",
+  "BUENOS_AIRES",
+] as const;
+
+export const INITIAL_LAUNCH_CITY_CODES = [
+  "TEHRAN",
+  "MASHHAD",
+  "KARAJ",
+  "SHIRAZ",
+] as const;
+
+const SUPPORTED_OUTREACH_LANGUAGE_SET = new Set<string>(OUTREACH_LANGUAGES);
+const INTERNATIONAL_CANDIDATE_SET = new Set<string>(INTERNATIONAL_TELEGRAM_CANDIDATE_CODES);
 
 export const CITY_REGISTRY: readonly CityDefinition[] = [
   {
@@ -948,6 +999,308 @@ export const CITY_REGISTRY: readonly CityDefinition[] = [
     approved: false,
     aliases: [],
   },
+  // International candidate shortlist. Auto-readiness is calculated below
+  // from each market's outreach languages and supported app locales.
+  {
+    code: "ISTANBUL",
+    fa: "استانبول",
+    en: "Istanbul",
+    country: "TR",
+    region: "Istanbul",
+    outreachLanguages: ["tr"],
+    approved: false,
+    aliases: ["İstanbul"],
+  },
+  {
+    code: "ANKARA",
+    fa: "آنکارا",
+    en: "Ankara",
+    country: "TR",
+    region: "Ankara",
+    outreachLanguages: ["tr"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "IZMIR",
+    fa: "ازمیر",
+    en: "Izmir",
+    country: "TR",
+    region: "Izmir",
+    outreachLanguages: ["tr"],
+    approved: false,
+    aliases: ["İzmir"],
+  },
+  {
+    code: "BURSA",
+    fa: "بورسا",
+    en: "Bursa",
+    country: "TR",
+    region: "Bursa",
+    outreachLanguages: ["tr"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "MOSCOW",
+    fa: "مسکو",
+    en: "Moscow",
+    country: "RU",
+    region: "Moscow",
+    outreachLanguages: ["ru"],
+    approved: false,
+    aliases: ["Moskva"],
+  },
+  {
+    code: "SAINT_PETERSBURG",
+    fa: "سن پترزبورگ",
+    en: "Saint Petersburg",
+    country: "RU",
+    region: "Saint Petersburg",
+    outreachLanguages: ["ru"],
+    approved: false,
+    aliases: ["St Petersburg", "St. Petersburg", "Sankt Peterburg"],
+  },
+  {
+    code: "KAZAN",
+    fa: "قازان",
+    en: "Kazan",
+    country: "RU",
+    region: "Tatarstan",
+    outreachLanguages: ["ru"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "NOVOSIBIRSK",
+    fa: "نووسیبیرسک",
+    en: "Novosibirsk",
+    country: "RU",
+    region: "Novosibirsk Oblast",
+    outreachLanguages: ["ru"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "TASHKENT",
+    fa: "تاشکند",
+    en: "Tashkent",
+    country: "UZ",
+    region: "Tashkent",
+    outreachLanguages: ["uz", "ru"],
+    approved: false,
+    aliases: ["Toshkent"],
+  },
+  {
+    code: "SAMARKAND",
+    fa: "سمرقند",
+    en: "Samarkand",
+    country: "UZ",
+    region: "Samarkand",
+    outreachLanguages: ["uz", "ru"],
+    approved: false,
+    aliases: ["Samarqand"],
+  },
+  {
+    code: "KYIV",
+    fa: "کی‌یف",
+    en: "Kyiv",
+    country: "UA",
+    region: "Kyiv",
+    outreachLanguages: ["uk", "ru"],
+    approved: false,
+    aliases: ["Kiev"],
+  },
+  {
+    code: "KHARKIV",
+    fa: "خارکیف",
+    en: "Kharkiv",
+    country: "UA",
+    region: "Kharkiv",
+    outreachLanguages: ["uk", "ru"],
+    approved: false,
+    aliases: ["Kharkov"],
+  },
+  {
+    code: "ODESA",
+    fa: "اودسا",
+    en: "Odesa",
+    country: "UA",
+    region: "Odesa",
+    outreachLanguages: ["uk", "ru"],
+    approved: false,
+    aliases: ["Odessa"],
+  },
+  {
+    code: "CAIRO",
+    fa: "قاهره",
+    en: "Cairo",
+    country: "EG",
+    region: "Cairo",
+    outreachLanguages: ["ar"],
+    approved: false,
+    aliases: ["Al-Qahirah"],
+  },
+  {
+    code: "ALEXANDRIA",
+    fa: "اسکندریه",
+    en: "Alexandria",
+    country: "EG",
+    region: "Alexandria",
+    outreachLanguages: ["ar"],
+    approved: false,
+    aliases: ["Al Iskandariyya"],
+  },
+  {
+    code: "SAO_PAULO",
+    fa: "سائو پائولو",
+    en: "Sao Paulo",
+    country: "BR",
+    region: "Sao Paulo",
+    outreachLanguages: ["pt"],
+    approved: false,
+    aliases: ["São Paulo"],
+  },
+  {
+    code: "RIO_DE_JANEIRO",
+    fa: "ریو دو ژانیرو",
+    en: "Rio de Janeiro",
+    country: "BR",
+    region: "Rio de Janeiro",
+    outreachLanguages: ["pt"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "JAKARTA",
+    fa: "جاکارتا",
+    en: "Jakarta",
+    country: "ID",
+    region: "Jakarta",
+    outreachLanguages: ["id"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "KARACHI",
+    fa: "کراچی",
+    en: "Karachi",
+    country: "PK",
+    region: "Sindh",
+    outreachLanguages: ["ur", "en"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "LAHORE",
+    fa: "لاهور",
+    en: "Lahore",
+    country: "PK",
+    region: "Punjab",
+    outreachLanguages: ["ur", "en"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "ALMATY",
+    fa: "آلماتی",
+    en: "Almaty",
+    country: "KZ",
+    region: "Almaty",
+    outreachLanguages: ["kk", "ru"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "ASTANA",
+    fa: "آستانه",
+    en: "Astana",
+    country: "KZ",
+    region: "Astana",
+    outreachLanguages: ["kk", "ru"],
+    approved: false,
+    aliases: ["Nur-Sultan"],
+  },
+  {
+    code: "BAKU",
+    fa: "باکو",
+    en: "Baku",
+    country: "AZ",
+    region: "Baku",
+    outreachLanguages: ["az", "ru"],
+    approved: false,
+    aliases: ["Baki"],
+  },
+  {
+    code: "TBILISI",
+    fa: "تفلیس",
+    en: "Tbilisi",
+    country: "GE",
+    region: "Tbilisi",
+    outreachLanguages: ["ka"],
+    approved: false,
+    aliases: ["Tiflis"],
+  },
+  {
+    code: "YEREVAN",
+    fa: "ایروان",
+    en: "Yerevan",
+    country: "AM",
+    region: "Yerevan",
+    outreachLanguages: ["hy"],
+    approved: false,
+    aliases: ["Erevan"],
+  },
+  {
+    code: "DUBAI",
+    fa: "دبی",
+    en: "Dubai",
+    country: "AE",
+    region: "Dubai",
+    outreachLanguages: ["ar", "en"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "MUMBAI",
+    fa: "بمبئی",
+    en: "Mumbai",
+    country: "IN",
+    region: "Maharashtra",
+    outreachLanguages: ["hi", "en"],
+    approved: false,
+    aliases: ["Bombay"],
+  },
+  {
+    code: "DELHI",
+    fa: "دهلی",
+    en: "Delhi",
+    country: "IN",
+    region: "Delhi",
+    outreachLanguages: ["hi", "en"],
+    approved: false,
+    aliases: ["New Delhi"],
+  },
+  {
+    code: "MINSK",
+    fa: "مینسک",
+    en: "Minsk",
+    country: "BY",
+    region: "Minsk",
+    outreachLanguages: ["be", "ru"],
+    approved: false,
+    aliases: [],
+  },
+  {
+    code: "BUENOS_AIRES",
+    fa: "بوئنوس آیرس",
+    en: "Buenos Aires",
+    country: "AR",
+    region: "Buenos Aires",
+    outreachLanguages: ["es"],
+    approved: false,
+    aliases: [],
+  },
 ];
 
 if (CITY_REGISTRY.length > MAX_REGISTRY_CITIES) {
@@ -959,6 +1312,46 @@ if (CITY_REGISTRY.length > MAX_REGISTRY_CITIES) {
 const REGISTRY_BY_CODE = new Map<string, CityDefinition>(
   CITY_REGISTRY.map((entry) => [entry.code, entry])
 );
+
+/** Iranian cities inherit Persian as their local outreach language. */
+export function outreachLanguagesForCity(
+  entry: CityDefinition
+): readonly string[] {
+  if (entry.outreachLanguages) return entry.outreachLanguages;
+  return entry.country === "IR" ? ["fa"] : [];
+}
+
+const isLanguageReady = (entry: CityDefinition) =>
+  outreachLanguagesForCity(entry).some((language) =>
+    SUPPORTED_OUTREACH_LANGUAGE_SET.has(language)
+  );
+
+/** Iranian cities are campaign-ready automatically because Persian is supported. */
+export const AUTO_APPROVED_IRANIAN_CITY_CODES = CITY_REGISTRY
+  .filter((entry) => entry.country === "IR" && isLanguageReady(entry))
+  .map((entry) => entry.code);
+
+/**
+ * Automatically eligible global markets are derived from real template
+ * support, not an admin checklist. Adding a locale to OUTREACH_LANGUAGES can
+ * make matching candidate cities ready without enabling any sending.
+ */
+export const AUTO_APPROVED_INTERNATIONAL_CITY_CODES = CITY_REGISTRY
+  .filter(
+    (entry) =>
+      INTERNATIONAL_CANDIDATE_SET.has(entry.code) && isLanguageReady(entry)
+  )
+  .map((entry) => entry.code);
+
+export const AUTO_APPROVED_CITY_CODES = CITY_REGISTRY
+  .filter(
+    (entry) =>
+      AUTO_APPROVED_IRANIAN_CITY_CODES.includes(entry.code) ||
+      AUTO_APPROVED_INTERNATIONAL_CITY_CODES.includes(entry.code)
+  )
+  .map((entry) => entry.code);
+
+const AUTO_APPROVED_CITY_SET = new Set(AUTO_APPROVED_CITY_CODES);
 
 /**
  * Duplicate-code guard evaluated at module load. A duplicate would make
@@ -983,13 +1376,21 @@ export function isRegistryCityCode(value: unknown): value is string {
   return typeof value === "string" && REGISTRY_BY_CODE.has(value);
 }
 
+/** Hard policy gate: unsupported global candidates cannot be enabled by overrides. */
+export function isCampaignEligibleCityCode(code: string): boolean {
+  return (
+    REGISTRY_BY_CODE.has(code) &&
+    (!INTERNATIONAL_CANDIDATE_SET.has(code) || AUTO_APPROVED_CITY_SET.has(code))
+  );
+}
+
 export function registryCityCodes(): string[] {
   return CITY_REGISTRY.map((entry) => entry.code);
 }
 
 /** Cities approved for outreach by default, in registry order. */
 export const DEFAULT_APPROVED_CITIES: string[] = CITY_REGISTRY.filter(
-  (entry) => entry.approved
+  (entry) => entry.approved || AUTO_APPROVED_CITY_SET.has(entry.code)
 ).map((entry) => entry.code);
 
 /**
@@ -997,8 +1398,8 @@ export const DEFAULT_APPROVED_CITIES: string[] = CITY_REGISTRY.filter(
  * effective approved set. Pure and order-stable so it can be unit
  * tested and reused by every surface (validation, UI, reports).
  *
- *  - `enabledExtra`  force-approves registry codes (an admin pressed
- *    "approve"), and can never enable a code that is not in the registry.
+ *  - Language-ready candidate cities are included automatically; `enabledExtra`
+ *    is only an optional administrator override and cannot add unknown codes.
  *  - `disabledCodes` force-rejects registry codes (an admin pressed
  *    "disable"); disabling wins over enabling so a kill switch is reliable.
  *
@@ -1012,10 +1413,17 @@ export function mergeApprovedCities(
   const disabled = new Set(disabledCodes);
   const approved = new Set<string>();
   for (const entry of CITY_REGISTRY) {
-    if (entry.approved && !disabled.has(entry.code)) approved.add(entry.code);
+    if (
+      (entry.approved || AUTO_APPROVED_CITY_SET.has(entry.code)) &&
+      !disabled.has(entry.code)
+    ) {
+      approved.add(entry.code);
+    }
   }
   for (const code of enabledExtra) {
-    if (REGISTRY_BY_CODE.has(code) && !disabled.has(code)) approved.add(code);
+    if (isCampaignEligibleCityCode(code) && !disabled.has(code)) {
+      approved.add(code);
+    }
   }
   return CITY_REGISTRY.map((entry) => entry.code).filter((code) => approved.has(code));
 }

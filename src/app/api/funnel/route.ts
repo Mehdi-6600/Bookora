@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/lib/prisma";
 import { isFunnelEvent } from "@/lib/funnel";
 import { recordFunnelEvent } from "@/lib/funnel";
 import { getClientIp } from "@/lib/get-client-ip";
@@ -48,12 +49,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
 
+  let campaignId: string | null = null;
+  if (parsed.data.ref) {
+    try {
+      const campaign = await prisma.outreachCampaign.findUnique({
+        where: { code: parsed.data.ref },
+        select: { id: true },
+      });
+      campaignId = campaign?.id ?? null;
+    } catch {
+      // A failed attribution lookup must not break page analytics or visitors.
+    }
+  }
+
+  if (parsed.data.event === "campaign_view" && !campaignId) {
+    // A campaign view only counts when the code resolves to a real campaign.
+    return NextResponse.json(
+      { ok: true },
+      { status: 202, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   await recordFunnelEvent({
     event: parsed.data.event,
     ip,
     userAgent: req.headers.get("user-agent") ?? "",
     locale: parsed.data.locale ?? null,
     ref: parsed.data.ref ?? null,
+    campaignId,
   });
 
   return NextResponse.json(

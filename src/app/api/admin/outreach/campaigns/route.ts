@@ -9,12 +9,14 @@ import {
   buildCampaignStartParam,
 } from "@/lib/outreach/deeplink";
 import {
+  AUTO_APPROVED_CITY_CODES,
   BUSINESS_SEGMENTS,
   CITY_REGISTRY,
   isBusinessSegment,
   parseCampaignCities,
   getEffectiveApprovedCities,
   MAX_CAMPAIGN_CITIES,
+  outreachLanguagesForCity,
 } from "@/lib/outreach/cities";
 import { normalizeLanguage } from "@/lib/outreach/types";
 import { validateDestinationUrl } from "@/lib/outreach/message";
@@ -55,6 +57,8 @@ async function GETImpl() {
         en: entry.en,
         region: entry.region,
         country: entry.country,
+        outreachLanguages: outreachLanguagesForCity(entry),
+        autoReady: AUTO_APPROVED_CITY_CODES.includes(entry.code),
         approved: approved.includes(entry.code),
       })),
       messageDefaults: {
@@ -106,7 +110,7 @@ const createSchema = z.object({
   description: z.string().trim().max(500).nullable().optional(),
   active: z.boolean().default(true),
   cities: z.array(z.string()).max(MAX_CAMPAIGN_CITIES).default([]),
-  segments: z.array(z.string()).max(2).default([]),
+  segments: z.array(z.string()).max(BUSINESS_SEGMENTS.length).default([]),
   language: z.string().trim().max(8).default("fa"),
   objective: z.string().trim().max(200).nullable().optional(),
   templateId: z.string().trim().max(64).nullable().optional(),

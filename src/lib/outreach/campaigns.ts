@@ -19,6 +19,7 @@ import {
 } from "@/lib/outreach/types";
 import {
   APPROVED_CITIES,
+  DEFAULT_CAMPAIGN_SEGMENTS,
   cityLabel,
   parseCampaignCities,
   SEGMENT_LABELS,
@@ -51,7 +52,7 @@ import {
  * Hard rules enforced here, in order:
  *
  *  1. Targeting is limited to administrator-approved cities (the registry in
- *     `city-registry.ts`, up to 100) and to the two segments.
+ *     `city-registry.ts`, up to 100) and to registered business segments.
  *  2. Only VERIFIED prospects are ever eligible. A discovery hit is not a
  *     prospect; a verified prospect is not automatically eligible.
  *  3. A dry run validates everything and writes nothing but a timestamp.
@@ -274,7 +275,14 @@ export async function planCampaign(
   const warnings: string[] = [];
 
   const cities = campaign.cities.filter(isCityCode);
-  const segments = campaign.segments.filter(isBusinessSegment);
+  const selectedSegments = campaign.segments.filter(isBusinessSegment);
+  // Preserve the historical default. New beauty-specialist and medical
+  // segments require an explicit campaign selection; they are never swept in
+  // by an older campaign with an empty segment list.
+  const segments: BusinessSegment[] =
+    selectedSegments.length > 0
+      ? selectedSegments
+      : [...DEFAULT_CAMPAIGN_SEGMENTS];
 
   if (campaign.cities.length === 0) {
     warnings.push(
@@ -288,9 +296,10 @@ export async function planCampaign(
       `Stored cities not present in the registry are ignored: ${invalidStoredCities.join(", ")}.`
     );
   }
-  if (segments.length === 0) {
+  if (selectedSegments.length === 0) {
     warnings.push(
-      "No segment selected. Targeting defaults to both men's barbershops and women's salons."
+      "No segment selected. Targeting defaults to men's barbershops and women's hair salons. " +
+      "Beauty specialists and medical practices require an explicit selection."
     );
   }
   if (campaign.status === "DRAFT") {
@@ -522,7 +531,7 @@ export async function planCampaign(
     name: campaign.name,
     status: campaign.status,
     cities: cities.length > 0 ? cities : [...APPROVED_CITIES],
-    segments: segments.length > 0 ? segments : ["MENS_BARBER", "WOMENS_SALON"],
+    segments,
     language: normalizeLanguage(campaign.language),
     templateCode: template?.code ?? null,
     destinationUrl:
@@ -896,8 +905,15 @@ export async function sendCampaignInvitations(options: {
   campaignId: string;
   limit: number;
 }): Promise<
-  { ok: true; sent: number; delivered: number; failed: number; skipped: number }
-  | { ok: false; error: string }
+  {
+    ok: true;
+    sent: number;
+    delivered: number;
+    failed: number;
+    skipped: number;
+    rateLimited: boolean;
+  }
+  | { ok: false; error: string; rateLimited?: boolean }
 > {
   const campaign = await prisma.outreachCampaign.findUnique({
     where: { id: options.campaignId },
@@ -931,12 +947,17 @@ export async function sendCampaignInvitations(options: {
     const delivered = outcomes.filter((o) => o.status === "DELIVERED").length;
     const failed = outcomes.filter((o) => o.status === "FAILED").length;
     const skipped = outcomes.filter((o) => o.status === "SKIPPED").length;
+    const rateLimited = outcomes.some((outcome) => outcome.reason === "telegram_rate_limited");
 
     await prisma.$transaction(async (tx) => {
     await tx.outreachCampaign.update({
       where: { id: options.campaignId },
       data: {
-        status: failed > 0 && sent === 0 ? "FAILED" : "COMPLETED",
+        status: rateLimited
+          ? "APPROVED"
+          : failed > 0 && sent === 0
+            ? "FAILED"
+            : "COMPLETED",
       },
     });
 
@@ -944,28 +965,34 @@ export async function sendCampaignInvitations(options: {
       scope: "campaign",
       entityId: options.campaignId,
       action: "campaign.delivery",
-      detail: `sent=${sent} delivered=${delivered} failed=${failed} skipped=${skipped}`,
+      detail: `sent=${sent} delivered=${delivered} failed=${failed} skipped=${skipped} rateLimited=${rateLimited}`,
     }, tx);
     });
 
-    return { ok: true, sent, delivered, failed, skipped };
+    return { ok: true, sent, delivered, failed, skipped, rateLimited };
   } catch (error) {
+    const rateLimited =
+      error instanceof Error && /rate-limit cooldown/i.test(error.message);
     await prisma.$transaction(async (tx) => {
-    await tx.outreachCampaign.update({
-      where: { id: options.campaignId },
-      data: { status: "FAILED" },
-    });
-    await recordAuditEvent({
-      scope: "campaign",
-      entityId: options.campaignId,
-      action: "campaign.delivery_failed",
-      detail: `error=${error instanceof Error ? error.name : "UnknownError"}`,
-    }, tx);
+      await tx.outreachCampaign.update({
+        where: { id: options.campaignId },
+        data: { status: rateLimited ? "APPROVED" : "FAILED" },
+      });
+      await recordAuditEvent(
+        {
+          scope: "campaign",
+          entityId: options.campaignId,
+          action: rateLimited ? "campaign.delivery_paused" : "campaign.delivery_failed",
+          detail: `error=${error instanceof Error ? error.name : "UnknownError"}`,
+        },
+        tx
+      );
     });
 
     return {
       ok: false,
-      error: error instanceof Error ? error.name : "UnknownError",
+      error: error instanceof Error ? error.message : "UnknownError",
+      ...(rateLimited ? { rateLimited: true } : {}),
     };
   }
 }

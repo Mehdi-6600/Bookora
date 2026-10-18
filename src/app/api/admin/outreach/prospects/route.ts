@@ -27,6 +27,7 @@ import {
   isVerificationStatus,
   isBookingRelevance,
   resolveCity,
+  cityDefinition,
   detectSegment,
   getEffectiveApprovedCities,
 } from "@/lib/outreach/cities";
@@ -297,7 +298,7 @@ export async function POST(req: NextRequest) {
       city: cityCode ?? null,
       segment: segmentValue,
       neighborhood: data.neighborhood ?? null,
-      country: data.country ?? null,
+      country: data.country ?? (cityCode ? cityDefinition(cityCode)?.country : null) ?? null,
       language: normalizeLanguage(data.language),
       publicUrl: publicUrlCheck?.ok ? publicUrlCheck.url : null,
       telegramUsername: username,

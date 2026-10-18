@@ -15,6 +15,7 @@ const state = {
   services: [] as any[],
   workingHours: [] as any[],
   sentMessages: [] as any[],
+  paidConversions: [] as Array<{ userId: string; businessId: string | null }>,
 };
 
 vi.mock("@/lib/env", () => ({
@@ -37,6 +38,12 @@ vi.mock("@/lib/telegram/notify", () => ({
 vi.mock("@/lib/booking/schedule", () => ({
   lockBusinessSchedule: vi.fn().mockResolvedValue(undefined),
   lockUserSubscriptions: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/outreach/attribution", () => ({
+  markPaidConversion: vi.fn(async (userId: string, businessId: string | null) => {
+    state.paidConversions.push({ userId, businessId });
+  }),
 }));
 
 vi.mock("@/lib/prisma", () => {
@@ -189,6 +196,7 @@ describe("manual-review subscription service", () => {
     ];
 
     state.sentMessages = [];
+    state.paidConversions = [];
   });
 
   it("checks admin authorization correctly via env and db", async () => {
@@ -227,6 +235,7 @@ describe("manual-review subscription service", () => {
 
     expect(result.status).toBe("ACTIVE");
     expect(result.expiresAt).toBeDefined();
+    expect(state.paidConversions).toEqual([{ userId: "buyer-1", businessId: "biz-1" }]);
 
     // Verify DB update
     const updatedSub = state.subscriptions.find((s) => s.id === "sub-1");
@@ -278,6 +287,7 @@ describe("manual-review subscription service", () => {
       action: "approve",
     });
     expect(result.alreadyReviewed).toBe(true);
+    expect(state.paidConversions).toHaveLength(0);
 
     // Trying to reject an ACTIVE subscription throws ReviewConflictError
     await expect(

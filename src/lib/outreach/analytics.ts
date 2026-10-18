@@ -225,20 +225,25 @@ export type CampaignTotals = {
   status: string;
   cities: string[];
   language: string;
+  campaignViews: number;
   prospects: number;
   invitationsDrafted: number;
   invitationsApproved: number;
   invitationsDelivered: number;
   botStarts: number;
   registrations: number;
+  activations: number;
+  paidConversions: number;
+  /** Delivered invitation → bot start response rate. */
+  botStartRate: number | null;
+  /** Delivered invitation → first genuine booking (ACTIVATED) rate. */
   activationRate: number | null;
 };
 
 /**
- * Per-campaign conversion table from plain group-by counts. `botStarts` is
- * measured (bot_starts rows); `registrations` counts invited prospects that
- * reached REGISTERED/ACTIVATED through attribution, and activationRate is
- * delivered→botStarts — null when delivery was never measured.
+ * Per-campaign conversion table from plain group-by counts. Bot starts are
+ * measured from `bot_starts`; registrations and activations are measured from
+ * attributed prospects. Rates use confirmed deliveries as their denominator.
  */
 export function buildCampaignReport(
   campaigns: Array<
@@ -251,7 +256,12 @@ export function buildCampaignReport(
     campaignId: string | null;
     status: string;
     count: number;
-  }>
+  }>,
+  funnelEvents: Array<{
+    campaignId: string | null;
+    event: string;
+    count: number;
+  }> = []
 ): CampaignTotals[] {
   return campaigns.map((campaign) => {
     const statuses = invitationStatuses.filter(
@@ -276,6 +286,19 @@ export function buildCampaignReport(
         ["REGISTERED", "ACTIVATED"].includes(row.status) ? total + row.count : total,
       0
     );
+    const activations = prospects.reduce(
+      (total, row) => (row.status === "ACTIVATED" ? total + row.count : total),
+      0
+    );
+    const botStarts = campaign._count?.botStarts ?? 0;
+    const eventCount = (event: string) =>
+      funnelEvents.reduce(
+        (total, row) =>
+          row.campaignId === campaign.id && row.event === event ? total + row.count : total,
+        0
+      );
+    const campaignViews = eventCount("campaign_view");
+    const paidConversions = eventCount("paid_conversion");
 
     return {
       id: campaign.id,
@@ -284,13 +307,17 @@ export function buildCampaignReport(
       status: campaign.status,
       cities: campaign.cities,
       language: campaign.language ?? "fa",
+      campaignViews,
       prospects: prospectCount,
       invitationsDrafted: drafted,
       invitationsApproved: approved,
       invitationsDelivered: delivered,
-      botStarts: campaign._count?.botStarts ?? 0,
+      botStarts,
       registrations,
-      activationRate: delivered > 0 ? roundRate((campaign._count?.botStarts ?? 0) / delivered) : null,
+      activations,
+      paidConversions,
+      botStartRate: delivered > 0 ? roundRate(botStarts / delivered) : null,
+      activationRate: delivered > 0 ? roundRate(activations / delivered) : null,
     };
   });
 }

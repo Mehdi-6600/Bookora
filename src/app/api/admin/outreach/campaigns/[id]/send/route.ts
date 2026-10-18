@@ -39,7 +39,25 @@ async function POSTImpl(_req: NextRequest, { params }: Params) {
 
   const result = await sendCampaignInvitations({ campaignId: id, limit });
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    const rateLimited =
+      result.rateLimited === true || /rate-limit cooldown/i.test(result.error);
+    const retryAfterSeconds = settings.telegramCooldownUntil
+      ? Math.max(0, Math.ceil((settings.telegramCooldownUntil - Date.now()) / 1000))
+      : null;
+    return NextResponse.json(
+      {
+        error: result.error,
+        ...(rateLimited
+          ? { rateLimited: true, retryAfterSeconds: retryAfterSeconds || null }
+          : {}),
+      },
+      {
+        status: rateLimited ? 429 : 400,
+        ...(rateLimited && retryAfterSeconds
+          ? { headers: { "Retry-After": String(retryAfterSeconds) } }
+          : {}),
+      }
+    );
   }
 
   return NextResponse.json({ ...result, limit });
