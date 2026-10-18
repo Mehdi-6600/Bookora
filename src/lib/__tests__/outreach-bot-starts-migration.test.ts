@@ -25,7 +25,8 @@ function read(path: string): string {
 
 function sqlFiles(): string[] {
   return readdirSync(sqlDir)
-    .filter((name) => name.endsWith(".sql"))
+    // `_ci_...` files are disposable CI state checks, not ordered migrations.
+    .filter((name) => /^\d{4}_.+\.sql$/.test(name))
     .sort();
 }
 

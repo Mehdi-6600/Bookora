@@ -14,6 +14,7 @@ import {
   type FunnelStageKey,
   type MeasurableCount,
 } from "@/lib/outreach/analytics";
+import { recommendGrowthActions } from "@/lib/outreach/growth-advisor";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -25,7 +26,15 @@ export async function GET() {
   const since7d = new Date(now.getTime() - 7 * DAY);
   const since24h = new Date(now.getTime() - DAY);
 
-  const [statusCounts, funnel, settings, conversions, invitationCounts, verificationCounts] =
+  const [
+    statusCounts,
+    funnel,
+    settings,
+    conversions,
+    invitationCounts,
+    verificationCounts,
+    campaignFunnelEvents,
+  ] =
     await Promise.all([
       prisma.outreachProspect.groupBy({
         by: ["status"],
@@ -40,6 +49,14 @@ export async function GET() {
       }),
       prisma.outreachProspect.groupBy({
         by: ["verificationStatus"],
+        _count: { _all: true },
+      }),
+      prisma.funnelEvent.groupBy({
+        by: ["campaignId", "event"],
+        where: {
+          campaignId: { not: null },
+          event: { in: ["campaign_view", "paid_conversion"] },
+        },
         _count: { _all: true },
       }),
     ]);
@@ -174,6 +191,11 @@ export async function GET() {
       campaignId: row.campaignId,
       status: row.status,
       count: row._count._all,
+    })),
+    campaignFunnelEvents.map((row) => ({
+      campaignId: row.campaignId,
+      event: row.event,
+      count: row._count._all,
     }))
   );
 
@@ -242,6 +264,20 @@ export async function GET() {
         manualSeedCandidates: preflight.seed.candidates,
       },
       last24h: conversions,
+      growthAgent: {
+        mode: "rules",
+        recommendations: recommendGrowthActions({
+          discoveryEnabled: settings.enabled,
+          discoveryBlockers: preflight.blockers,
+          lastRunStatus: lastRun?.status ?? null,
+          newCandidates: candidateNew,
+          pendingVerification: byVerification.DISCOVERED ?? 0,
+          dueFollowUps,
+          draftInvitations: byInvitation.DRAFT ?? 0,
+          targetableProspects: targetable,
+          campaignCount: campaignRows.length,
+        }),
+      },
       acquisition: {
         note: "Counts come from recorded events only. Prepared ≠ delivered: a message counts as delivered only when the Telegram API accepted it (or the recipient started the bot).",
         stages: acquisitionStages,

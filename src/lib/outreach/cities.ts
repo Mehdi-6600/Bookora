@@ -3,7 +3,8 @@
  *
  * Everything city-related flows through the central registry in
  * `city-registry.ts` — this module keeps the historical public API stable
- * while the underlying list grows from four cities to up to 100.
+ * while the underlying list grows to 150 registered cities; a campaign is
+ * still capped at 100 selected cities.
  *
  *  - `city` is stored as a stable CODE (e.g. TEHRAN / MASHHAD / SHIRAZ /
  *    KARAJ / ISFAHAN …), never as free text, so reporting can group reliably
@@ -14,43 +15,56 @@
  *    separate approved cities and must be reported separately. If a source
  *    mentions more than one detectable city, the result is AMBIGUOUS and a
  *    human must assign it — we do not guess.
- *  - Free-text DETECTION is limited to the default-approved cities on purpose:
- *    registering 100 city names must not silently widen what the discovery
- *    pipeline auto-assigns. Exact input (an admin typing "اصفهان" or
+ *  - Free-text DETECTION remains limited to the original four Iranian launch
+ *    cities even when a market becomes campaign-eligible; this avoids silently
+ *    widening the discovery pipeline's misclassification surface. Exact input
+ *    (an admin typing "اصفهان" or
  *    "ISFAHAN") resolves across the whole registry.
  */
 
 import {
+  AUTO_APPROVED_CITY_CODES,
+  AUTO_APPROVED_INTERNATIONAL_CITY_CODES,
+  AUTO_APPROVED_IRANIAN_CITY_CODES,
   CITY_REGISTRY,
   DEFAULT_APPROVED_CITIES,
+  INITIAL_LAUNCH_CITY_CODES,
   MAX_CAMPAIGN_CITIES,
   MAX_REGISTRY_CITIES,
   cityDefinition,
+  outreachLanguagesForCity,
   isRegistryCityCode,
+  isCampaignEligibleCityCode,
   mergeApprovedCities,
   normalizeCityCodeList,
   registryCityCodes,
 } from "@/lib/outreach/city-registry";
 
 export {
+  AUTO_APPROVED_CITY_CODES,
+  AUTO_APPROVED_INTERNATIONAL_CITY_CODES,
+  AUTO_APPROVED_IRANIAN_CITY_CODES,
   CITY_REGISTRY,
   DEFAULT_APPROVED_CITIES,
+  INITIAL_LAUNCH_CITY_CODES,
   MAX_CAMPAIGN_CITIES,
   MAX_REGISTRY_CITIES,
   cityDefinition,
+  outreachLanguagesForCity,
   isRegistryCityCode,
+  isCampaignEligibleCityCode,
   mergeApprovedCities,
   normalizeCityCodeList,
   registryCityCodes,
 };
 
 /**
- * The cities approved for outreach by default (the original four). The
- * campaign-wide meaning of "approved" is: an administrator signed this city
- * off; additional cities can be enabled per deployment through
- * `admin_settings` (see `getEffectiveApprovedCities`).
+ * Legacy fallback for campaigns with no explicit city selection. Keep it at
+ * the original four launch cities so old empty campaigns never widen silently.
+ * Other language-ready markets may be auto-eligible for explicit campaign
+ * targeting via DEFAULT_APPROVED_CITIES.
  */
-export const APPROVED_CITIES = DEFAULT_APPROVED_CITIES;
+export const APPROVED_CITIES = INITIAL_LAUNCH_CITY_CODES;
 
 /**
  * Every code the database may legitimately contain. Stored rows keep working
@@ -83,8 +97,19 @@ export const CITY_LABELS: Record<string, { en: string; fa: string }> =
   );
 
 /** Business segments tracked separately in every report. */
-export const BUSINESS_SEGMENTS = ["MENS_BARBER", "WOMENS_SALON"] as const;
+export const BUSINESS_SEGMENTS = [
+  "MENS_BARBER",
+  "WOMENS_SALON",
+  "WOMENS_BEAUTY",
+  "MEDICAL_PRACTICE",
+] as const;
 export type BusinessSegment = (typeof BUSINESS_SEGMENTS)[number];
+
+/** Legacy campaign default retained so adding new segments never widens old campaigns. */
+export const DEFAULT_CAMPAIGN_SEGMENTS: readonly BusinessSegment[] = [
+  "MENS_BARBER",
+  "WOMENS_SALON",
+];
 
 export function isBusinessSegment(value: unknown): value is BusinessSegment {
   return (
@@ -100,8 +125,16 @@ export const SEGMENT_LABELS: Record<BusinessSegment, { en: string; fa: string }>
       fa: "آرایشگاه مردانه",
     },
     WOMENS_SALON: {
-      en: "Women's hair & beauty salon",
-      fa: "سالن زیبایی زنانه",
+      en: "Women's hair salon",
+      fa: "آرایشگاه زنانه",
+    },
+    WOMENS_BEAUTY: {
+      en: "Women's beauty services",
+      fa: "خدمات زیبایی بانوان",
+    },
+    MEDICAL_PRACTICE: {
+      en: "Medical practice",
+      fa: "مطب و خدمات پزشکی",
     },
   };
 
@@ -193,10 +226,10 @@ function registryDefs(codes: readonly string[]): CityDef[] {
 /**
  * DETECTION universe: the default-approved cities only. Auto-assignment must
  * stay as conservative as it was when the campaign covered four cities, even
- * after 100 cities are registered. Admin-approved extras are matched for
+ * after the registry expands. Admin-approved extras are matched for
  * exact input (below) but never guessed from free text.
  */
-const DETECTION_DEFS: CityDef[] = registryDefs(DEFAULT_APPROVED_CITIES);
+const DETECTION_DEFS: CityDef[] = registryDefs(INITIAL_LAUNCH_CITY_CODES);
 
 /** Exact-resolution universe: every registered city, approved or not. */
 const ALL_CITY_DEFS: CityDef[] = registryDefs(KNOWN_CITY_CODES);
@@ -245,7 +278,7 @@ export function resolveCity(input: unknown): CityResolution {
 
 /**
  * Scan free text (a directory listing, an address, a bio) for a detectable
- * city (the default-approved set — see `DETECTION_DEFS`).
+ * city (the original launch set — see `DETECTION_DEFS`).
  *
  * Returns AMBIGUOUS when more than one detectable city is mentioned. This is
  * the Karaj-vs-Tehran guard: a listing that says "تهران، کرج" gets no
@@ -308,29 +341,109 @@ const MENS_TERMS = [
   "men's salon",
 ];
 
-/** Women's hair & beauty salon signals. */
-const WOMENS_TERMS = [
+/** General women's hair salons and hairdressing signals. */
+const WOMENS_SALON_TERMS = [
   "آرایشگاه زنانه",
+  "آرایشگر زنانه",
+  "آرایشگاه بانوان",
+  "آرایشگر بانوان",
+  "سالن بانوان",
+  "سالن مو زنانه",
   "سالن زیبایی زنانه",
   "سالن زیبایی",
+  "beauty salon",
   "سالن رنگ و مش",
   "سالن کوتاهی مو",
-  "سالن ناخن",
-  "خدمات مژه و ابرو",
-  "میکاپ و شینیون",
   "شینیون",
   "سالن عروس",
   "عروس",
-  "کاشت ناخن",
-  "میکاپ",
-  "ناخن",
-  "مژه",
-  "ابرو",
-  "beauty salon",
   "hair salon",
-  "nail",
-  "makeup",
+  "women's hair salon",
+  "women's hairdresser",
+  "ladies hair salon",
+  "women's salon",
+  "womens salon",
   "bridal salon",
+];
+
+/** Specialized women's beauty services, kept separate for campaign reporting. */
+const WOMENS_BEAUTY_TERMS = [
+  "سالن ناخن",
+  "ناخن کار",
+  "ناخن‌کار",
+  "ناخنکار",
+  "طراح ناخن",
+  "کاشت ناخن",
+  "خدمات مژه و ابرو",
+  "مژه کار",
+  "میکاپ و شینیون",
+  "میکاپ آرتیست",
+  "میکاپ",
+  "اکستنشن مژه",
+  "لیفت مژه",
+  "پاکسازی پوست",
+  "فیشیال",
+  "اپیلاسیون",
+  "ابرو",
+  "مژه",
+  "اسپا",
+  "nail technician",
+  "nail tech",
+  "nail artist",
+  "nail designer",
+  "nail salon",
+  "makeup artist",
+  "lash artist",
+  "eyelash extensions",
+  "brow artist",
+  "esthetician",
+  "cosmetologist",
+  "beauty therapist",
+  "facial",
+  "skincare",
+  "waxing",
+];
+
+/** Publicly described medical practices and independent clinicians. */
+const MEDICAL_TERMS = [
+  "doctor",
+  "physician",
+  "general practitioner",
+  "medical practice",
+  "surgeon",
+  "gynecologist",
+  "ob/gyn",
+  "urologist",
+  "neurologist",
+  "dentist",
+  "dental clinic",
+  "dermatologist",
+  "pediatrician",
+  "ophthalmologist",
+  "psychologist",
+  "physiotherapist",
+  "clinic",
+  "پزشک",
+  "پزشک عمومی",
+  "پزشک متخصص",
+  "دکتر",
+  "مطب",
+  "جراح",
+  "متخصص زنان",
+  "اورولوژیست",
+  "دندانپزشک",
+  "دندان پزشکی",
+  "متخصص پوست",
+  "متخصص کودکان",
+  "چشم پزشک",
+  "روانشناس",
+  "فیزیوتراپیست",
+  "کلینیک",
+  "طبيب",
+  "طبيبة",
+  "عيادة",
+  "طبيب أسنان",
+  "طبيبة أسنان",
 ];
 
 export type SegmentResolution =
@@ -351,15 +464,17 @@ export function detectSegment(text: unknown): SegmentResolution {
   }
 
   const compact = compactPersian(text);
+  const includesAny = (terms: string[]) =>
+    terms.some((term) => compact.includes(compactPersian(term)));
 
-  const hasMens = MENS_TERMS.some((t) => compact.includes(compactPersian(t)));
-  const hasWomens = WOMENS_TERMS.some((t) =>
-    compact.includes(compactPersian(t))
-  );
+  const matched: BusinessSegment[] = [];
+  if (includesAny(MENS_TERMS)) matched.push("MENS_BARBER");
+  if (includesAny(WOMENS_SALON_TERMS)) matched.push("WOMENS_SALON");
+  if (includesAny(WOMENS_BEAUTY_TERMS)) matched.push("WOMENS_BEAUTY");
+  if (includesAny(MEDICAL_TERMS)) matched.push("MEDICAL_PRACTICE");
 
-  if (hasMens && hasWomens) return { segment: null, reason: "AMBIGUOUS" };
-  if (hasMens) return { segment: "MENS_BARBER", confidence: "HIGH" };
-  if (hasWomens) return { segment: "WOMENS_SALON", confidence: "HIGH" };
+  if (matched.length > 1) return { segment: null, reason: "AMBIGUOUS" };
+  if (matched.length === 1) return { segment: matched[0], confidence: "HIGH" };
   return { segment: null, reason: "NONE" };
 }
 
@@ -402,7 +517,7 @@ export type CampaignCityParse = {
   cities: CityCode[];
   /** Codes that are not in the registry at all. */
   unknown: string[];
-  /** Registry codes an administrator has not approved for outreach. */
+  /** Registry codes not enabled by the automatic locale policy or an override. */
   unapproved: string[];
   /** The list was longer than MAX_CAMPAIGN_CITIES. */
   tooMany: boolean;
@@ -425,7 +540,8 @@ export function parseCampaignCities(
       ? value.split(",")
       : [];
 
-  const approved = new Set(approvedCodes);
+  // Never let a caller-supplied approval list bypass the language-readiness gate.
+  const approved = new Set(approvedCodes.filter(isCampaignEligibleCityCode));
   const cities: CityCode[] = [];
   const unknown: string[] = [];
   const unapproved: string[] = [];

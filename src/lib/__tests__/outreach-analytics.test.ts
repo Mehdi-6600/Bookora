@@ -131,29 +131,37 @@ describe("campaign report", () => {
           status: "APPROVED",
           cities: ["TEHRAN"],
           language: "fa",
-          _count: { botStarts: 1 },
+          _count: { botStarts: 2 },
         },
       ],
       [
         { campaignId: "c1", status: "DRAFT", count: 3 },
         { campaignId: "c1", status: "APPROVED", count: 2 },
-        { campaignId: "c1", status: "DELIVERED", count: 2 },
+        { campaignId: "c1", status: "DELIVERED", count: 4 },
       ],
       [
         { campaignId: "c1", status: "NEW", count: 8 },
         { campaignId: "c1", status: "REGISTERED", count: 1 },
         { campaignId: "c1", status: "ACTIVATED", count: 1 },
+      ],
+      [
+        { campaignId: "c1", event: "campaign_view", count: 25 },
+        { campaignId: "c1", event: "paid_conversion", count: 1 },
+        { campaignId: "other", event: "campaign_view", count: 100 },
       ]
     );
 
     const report = rows[0];
-    expect(report.invitationsDrafted).toBe(7); // 3 DRAFT + 2 APPROVED + 2 DELIVERED
-    expect(report.invitationsApproved).toBe(4); // 2 APPROVED + 2 DELIVERED
-    expect(report.invitationsDelivered).toBe(2); // only actually delivered
+    expect(report.invitationsDrafted).toBe(9); // 3 DRAFT + 2 APPROVED + 4 DELIVERED
+    expect(report.invitationsApproved).toBe(6); // 2 APPROVED + 4 DELIVERED
+    expect(report.invitationsDelivered).toBe(4); // only actually delivered
     expect(report.prospects).toBe(10);
     expect(report.registrations).toBe(2);
-    expect(report.botStarts).toBe(1);
-    // delivered→bot-start ratio; null instead of a fake 0 when undelivered.
-    expect(report.activationRate).toBe(0.5);
+    expect(report.campaignViews).toBe(25);
+    expect(report.paidConversions).toBe(1);
+    expect(report.botStarts).toBe(2);
+    expect(report.activations).toBe(1);
+    expect(report.botStartRate).toBe(0.5);
+    expect(report.activationRate).toBe(0.25);
   });
 });

@@ -7,6 +7,7 @@ import { lockBusinessSchedule, lockUserSubscriptions } from "@/lib/booking/sched
 import { nextSubscriptionPeriod } from "@/lib/subscription/entitlement";
 import { bookingPageUrl, miniAppUrl } from "@/lib/telegram/onboarding";
 import { notifyUser } from "@/lib/telegram/notify";
+import { markPaidConversion } from "@/lib/outreach/attribution";
 
 export class SubscriptionNotFoundError extends Error {}
 export class ReviewConflictError extends Error {}
@@ -318,6 +319,10 @@ export async function reviewManualSubscription(params: {
       plan: subscription.plan,
     };
   });
+
+  if (!result.alreadyReviewed && result.status === "ACTIVE") {
+    await markPaidConversion(reference.userId, reference.businessId);
+  }
 
   if (!result.alreadyReviewed && result.buyer?.telegramId) {
     if (result.status === "ACTIVE") {

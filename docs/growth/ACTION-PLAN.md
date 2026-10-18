@@ -1,5 +1,10 @@
 # Recommended niche, 7-day plan, and the exact next action
 
+> **Historical plan:** this 2026-10-10 document originally deferred medical. The
+> current sector scope is updated in [TARGET-MARKETS.md](./TARGET-MARKETS.md):
+> men's and women's hairdressers, women's beauty specialists, and medical
+> practices. This file remains as the record of the earlier pilot recommendation.
+
 Prepared 2026-10-10
 
 ---

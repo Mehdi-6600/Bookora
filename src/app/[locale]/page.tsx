@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import Image from "next/image";
 import {
@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import { LocaleSwitcher } from "@/components/locale-switcher";
-import { track } from "@/lib/funnel-client";
+import { readRefFromLocation, track } from "@/lib/funnel-client";
+import { buildCampaignStartParam } from "@/lib/outreach/start-param";
 
 const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-6 shadow-soft";
 const CARD_INNER = "rounded-2xl bg-white p-4 shadow-soft";
@@ -44,9 +45,18 @@ export default function LandingPage() {
   const t = useTranslations("home");
   const tNew = useTranslations("homeNew");
   const locale = useLocale();
+  const [telegramUrl, setTelegramUrl] = useState(TELEGRAM_URL);
 
   useEffect(() => {
-    track("landing_view", { locale });
+    const ref = readRefFromLocation();
+    const campaignCode = new URLSearchParams(window.location.search).get("ref");
+    track("landing_view", { locale, ref });
+    if (ref) track("campaign_view", { locale, ref });
+    if (campaignCode) {
+      const botLink = new URL(TELEGRAM_URL);
+      botLink.searchParams.set("start", buildCampaignStartParam(campaignCode));
+      setTelegramUrl(botLink.toString());
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -97,7 +107,7 @@ export default function LandingPage() {
           </p>
 
           <a
-            href={TELEGRAM_URL}
+            href={telegramUrl}
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => track("signup_cta_click", { locale })}
@@ -221,7 +231,7 @@ export default function LandingPage() {
             </p>
 
             <a
-              href={TELEGRAM_URL}
+              href={telegramUrl}
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => track("signup_cta_click", { locale })}
@@ -290,7 +300,7 @@ export default function LandingPage() {
           </p>
 
           <a
-            href={TELEGRAM_URL}
+            href={telegramUrl}
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => track("signup_cta_click", { locale })}

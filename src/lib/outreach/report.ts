@@ -18,6 +18,7 @@ export type DailyReport = {
   activations: number;
   firstBookings: number;
   pendingReview: number;
+  rateLimited: boolean;
   errors: string[];
 };
 
@@ -51,6 +52,12 @@ export function formatDailyReport(report: DailyReport): string {
     `🎉 First bookings: ${report.firstBookings}`,
     `⏳ Awaiting your review: ${report.pendingReview}`,
   ];
+
+  if (report.rateLimited) {
+    lines.push(
+      "⏸️ Telegram rate limit reached; automated delivery is paused until the cooldown expires."
+    );
+  }
 
   if (report.errors.length > 0) {
     lines.push("", "⚠️ Needs attention:");

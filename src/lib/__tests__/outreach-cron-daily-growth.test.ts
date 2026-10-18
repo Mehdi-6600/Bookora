@@ -11,6 +11,8 @@ const state = vi.hoisted(() => ({
   tables: {} as Record<string, Array<Record<string, any>>>,
   seq: 0,
   reports: [] as unknown[],
+  deliveryOutcomes: [] as Array<Record<string, any>>,
+  deliveryError: null as string | null,
 }));
 
 vi.mock("@/lib/prisma", async () => {
@@ -18,9 +20,20 @@ vi.mock("@/lib/prisma", async () => {
   return { prisma: createPrismaDouble(state) };
 });
 
+vi.mock("@prisma/client", () => ({
+  Prisma: {
+    PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
+      code = "";
+    },
+  },
+}));
+
 vi.mock("@/lib/outreach/invitations", () => ({
   prepareInvitations: async () => ({ prepared: [] }),
-  sendApprovedInvitations: async () => [],
+  sendApprovedInvitations: async () => {
+    if (state.deliveryError) throw new Error(state.deliveryError);
+    return state.deliveryOutcomes;
+  },
 }));
 
 vi.mock("@/lib/outreach/attribution", () => ({
@@ -51,6 +64,8 @@ beforeEach(() => {
   // administrator explicitly switched outreach on.
   state.tables.adminSetting = outreachSettingsRows();
   state.reports.length = 0;
+  state.deliveryOutcomes = [];
+  state.deliveryError = null;
   vi.stubEnv("CRON_SECRET", SECRET);
 });
 
@@ -82,6 +97,37 @@ describe("cron daily growth: BLOCKED discovery", () => {
     expect(run.error).toBeNull();
     expect(state.tables.discoveryCandidate ?? []).toHaveLength(0);
     expect(state.reports).toHaveLength(1);
+  });
+
+  it("records a Telegram 429 as a delivery pause, not a failed daily run", async () => {
+    state.deliveryOutcomes = [
+      { status: "FAILED", reason: "telegram_rate_limited" },
+      { status: "SKIPPED", reason: "telegram_rate_limited" },
+    ];
+
+    const response = await dailyGrowth(cronRequest(`Bearer ${SECRET}`));
+    const body = await response.json();
+    const [run] = state.tables.discoveryRun ?? [];
+
+    expect(response.status).toBe(200);
+    expect(body.rateLimited).toBe(true);
+    expect(body.errors).toEqual([]);
+    expect(run.status).toBe("BLOCKED");
+    expect(run.error).toMatch(/Telegram rate limit reached/i);
+    expect(state.reports[0]).toMatchObject({ rateLimited: true, errors: [] });
+  });
+
+  it("treats an already-active Telegram cooldown as a pause, not a failure", async () => {
+    state.deliveryError = "Telegram rate-limit cooldown is active.";
+
+    const response = await dailyGrowth(cronRequest(`Bearer ${SECRET}`));
+    const body = await response.json();
+    const [run] = state.tables.discoveryRun ?? [];
+
+    expect(response.status).toBe(200);
+    expect(body.rateLimited).toBe(true);
+    expect(body.errors).toEqual([]);
+    expect(run.status).toBe("BLOCKED");
   });
 
   it("does not run twice for the same date once a run row exists", async () => {

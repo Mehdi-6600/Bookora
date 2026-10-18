@@ -19,7 +19,11 @@ const db = {
   users: [] as Row[],
   consents: [] as Row[],
   deliveries: [] as Array<{ id: string; text: string }>,
+  deliveryAttempts: [] as Array<{ id: string; text: string }>,
+  settings: {} as Record<string, string>,
   deliveryShouldFail: false,
+  deliveryErrorCode: undefined as number | undefined,
+  deliveryRetryAfterSeconds: undefined as number | undefined,
 };
 
 vi.mock("@/lib/prisma", () => {
@@ -115,7 +119,14 @@ vi.mock("@/lib/prisma", () => {
         return row;
       },
     },
-    adminSetting: { findMany: async () => outreachSettingsRows() },
+    adminSetting: {
+      findMany: async () => outreachSettingsRows(db.settings),
+      upsert: async ({ where, update, create }: any) => {
+        const value = db.settings[where.key] === undefined ? create.value : update.value;
+        db.settings[where.key] = value;
+        return { key: where.key, value };
+      },
+    },
     outreachAuditEvent: { create: async ({ data }: any) => data },
     telegramBotOptIn: {
       // Supports both the "current consent" query (with a freshness bound) and
@@ -155,8 +166,18 @@ vi.mock("@/lib/prisma", () => {
 
 vi.mock("@/lib/telegram/notify", () => ({
   deliverTelegramMessage: async (id: string, text: string) => {
+    db.deliveryAttempts.push({ id, text });
     if (db.deliveryShouldFail) {
-      return { ok: false as const, errorCode: 403, error: "blocked", blocked: true };
+      const errorCode = db.deliveryErrorCode ?? 403;
+      return {
+        ok: false as const,
+        errorCode,
+        error: errorCode === 429 ? "Telegram rate limit reached." : "blocked",
+        blocked: errorCode === 403,
+        ...(db.deliveryRetryAfterSeconds === undefined
+          ? {}
+          : { retryAfterSeconds: db.deliveryRetryAfterSeconds }),
+      };
     }
     db.deliveries.push({ id, text });
     return { ok: true as const, messageId: 1 };
@@ -207,7 +228,11 @@ beforeEach(() => {
   db.users = [];
   db.consents = [];
   db.deliveries = [];
+  db.deliveryAttempts = [];
+  db.settings = {};
   db.deliveryShouldFail = false;
+  db.deliveryErrorCode = undefined;
+  db.deliveryRetryAfterSeconds = undefined;
 });
 
 describe("preparing invitations", () => {
@@ -470,6 +495,56 @@ describe("sending approved invitations", () => {
 
     expect(db.deliveries).toHaveLength(0);
     expect(db.invitations[0].status).toBe("DRAFT");
+  });
+
+  it("opens a persistent circuit breaker on Telegram 429 and makes no further sends", async () => {
+    db.prospects.push(
+      prospect({
+        id: "p-rate-1",
+        publicName: "Barber One",
+        publicUrl: "https://instagram.com/barber_one",
+        telegramUsername: "barber_one",
+      }),
+      prospect({
+        id: "p-rate-2",
+        publicName: "Barber Two",
+        publicUrl: "https://instagram.com/barber_two",
+        telegramUsername: "barber_two",
+      })
+    );
+    db.users.push(
+      { id: "u1", telegramId: "555001", telegramUsername: "barber_one" },
+      { id: "u2", telegramId: "555002", telegramUsername: "barber_two" }
+    );
+    db.consents.push(
+      { prospectId: "p-rate-1", telegramId: "555001", startedAt: new Date(), revokedAt: null },
+      { prospectId: "p-rate-2", telegramId: "555002", startedAt: new Date(), revokedAt: null }
+    );
+    db.deliveryShouldFail = true;
+    db.deliveryErrorCode = 429;
+    db.deliveryRetryAfterSeconds = 17;
+
+    await prepareInvitations({ limit: 2 });
+    db.invitations.forEach((invitation: Row) => {
+      invitation.status = "APPROVED";
+      invitation.approvedAt = new Date();
+    });
+    const before = Date.now();
+
+    const outcomes = await sendApprovedInvitations({ limit: 10 });
+    const cooldownUntil = Number(db.settings["outreach.telegram_cooldown_until"]);
+
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes[0]).toMatchObject({ status: "FAILED", reason: "telegram_rate_limited" });
+    expect(outcomes[1]).toMatchObject({ status: "SKIPPED", reason: "telegram_rate_limited" });
+    expect(db.deliveryAttempts).toHaveLength(1);
+    expect(db.deliveries).toHaveLength(0);
+    expect(db.invitations.every((invitation: Row) => invitation.status === "APPROVED")).toBe(true);
+    expect(cooldownUntil).toBeGreaterThanOrEqual(before + 17_000);
+    expect(cooldownUntil).toBeLessThanOrEqual(Date.now() + 17_000);
+
+    await expect(sendApprovedInvitations({ limit: 10 })).rejects.toThrow(/rate-limit cooldown/i);
+    expect(db.deliveryAttempts).toHaveLength(1);
   });
 
   it("skips approved invitations whose prospect is no longer verified", async () => {

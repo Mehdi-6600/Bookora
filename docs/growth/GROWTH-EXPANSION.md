@@ -1,5 +1,12 @@
 # Growth expansion — 100-city registry, message builder, audit, honest analytics
 
+> **Registry update:** this document describes the original Iran-only 100-city
+> registry. It now contains 100 Iranian cities and 30 global candidates (130
+> total; capacity 150). All Iranian cities and seven language-ready global
+> markets activate automatically; campaigns remain capped at 100 cities.
+> The global shortlist and its data limitations are documented in
+> [GLOBAL-MARKETS.md](./GLOBAL-MARKETS.md).
+
 Branch: `arena/c7eef417-bookora` (extends the outreach system in
 [OUTREACH-SYSTEM.md](./OUTREACH-SYSTEM.md)). Everything here is **additive**:
 the four launch cities behave exactly as before, and one new table

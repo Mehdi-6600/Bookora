@@ -24,6 +24,7 @@ import {
   currentOutreachDeliveryGate,
   getOutreachSettings,
   outreachDeliveryGate,
+  TELEGRAM_COOLDOWN_SETTING_KEY,
 } from "@/lib/outreach/settings";
 import { recordAuditEvent } from "@/lib/outreach/audit";
 
@@ -306,6 +307,20 @@ async function recordSkippedDelivery(
   );
 }
 
+const DEFAULT_TELEGRAM_RETRY_AFTER_SECONDS = 60;
+const MAX_TELEGRAM_RETRY_AFTER_SECONDS = 24 * 60 * 60;
+
+function telegramCooldownUntilMs(now: Date, retryAfterSeconds?: number): number {
+  const requested =
+    typeof retryAfterSeconds === "number" &&
+    Number.isFinite(retryAfterSeconds) &&
+    retryAfterSeconds > 0
+      ? Math.ceil(retryAfterSeconds)
+      : DEFAULT_TELEGRAM_RETRY_AFTER_SECONDS;
+  const bounded = Math.min(MAX_TELEGRAM_RETRY_AFTER_SECONDS, Math.max(1, requested));
+  return now.getTime() + bounded * 1000;
+}
+
 /**
  * Deliver APPROVED invitations.
  *
@@ -514,15 +529,33 @@ export async function sendApprovedInvitations(options: {
     const now = new Date();
 
     if (!result.ok) {
+      const telegramRateLimited = result.errorCode === 429;
+      const cooldownUntil = telegramRateLimited
+        ? telegramCooldownUntilMs(now, result.retryAfterSeconds)
+        : null;
       const failure = await prisma.$transaction(async (tx) => {
         await tx.outreachInvitation.update({
           where: { id: invitation.id },
           data: {
-            status: "FAILED",
+            // Telegram 429 explicitly means this request was not accepted. Keep
+            // it retryable, but persist a bot-wide cooldown before any retry.
+            status: telegramRateLimited ? "APPROVED" : "FAILED",
             failureReason: result.error,
-            sentAt: now,
+            sentAt: telegramRateLimited ? null : now,
           },
         });
+
+        if (telegramRateLimited && cooldownUntil) {
+          await tx.adminSetting.upsert({
+            where: { key: TELEGRAM_COOLDOWN_SETTING_KEY },
+            update: { value: String(cooldownUntil) },
+            create: {
+              key: TELEGRAM_COOLDOWN_SETTING_KEY,
+              value: String(cooldownUntil),
+              description: "Automatic pause after Telegram rate limiting",
+            },
+          });
+        }
 
         if (result.blocked) {
           await tx.telegramBotOptIn.updateMany({
@@ -543,8 +576,12 @@ export async function sendApprovedInvitations(options: {
           {
             scope: "invitation",
             entityId: invitation.id,
-            action: "invitation.delivery_failed",
-            detail: `code=${result.errorCode ?? "unknown"}`,
+            action: telegramRateLimited
+              ? "invitation.delivery_rate_limited"
+              : "invitation.delivery_failed",
+            detail:
+              `code=${result.errorCode ?? "unknown"}` +
+              (cooldownUntil ? ` cooldownUntil=${cooldownUntil}` : ""),
           },
           tx
         );
@@ -559,8 +596,22 @@ export async function sendApprovedInvitations(options: {
       outcomes.push({
         invitationId: invitation.id,
         status: "FAILED",
-        reason: result.error,
+        reason: telegramRateLimited ? "telegram_rate_limited" : result.error,
       });
+      if (telegramRateLimited) {
+        const currentIndex = pending.findIndex((item) => item.id === invitation.id);
+        for (const unattempted of pending.slice(currentIndex + 1)) {
+          outcomes.push({
+            invitationId: unattempted.id,
+            status: "SKIPPED",
+            reason: "telegram_rate_limited",
+          });
+        }
+        // Do not risk the bot with another API call in this batch. Remaining
+        // invitations keep APPROVED state and the persisted cooldown gates the
+        // next worker or manual send attempt.
+        break;
+      }
       continue;
     }
 

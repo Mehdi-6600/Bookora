@@ -1,12 +1,32 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// These suites cover pure logic only; keep them runnable without a database.
-vi.mock("@/lib/prisma", () => ({ prisma: {} }));
+const settingsMock = vi.hoisted(() => ({
+  rows: [] as Array<{ key: string; value: string }>,
+  fail: false,
+}));
 
+// These suites cover pure logic and settings parsing without a database.
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    adminSetting: {
+      findMany: async () => {
+        if (settingsMock.fail) throw new Error("settings unavailable");
+        return settingsMock.rows;
+      },
+    },
+  },
+}));
+
+import {
+  CITY_REGISTRY,
+  MAX_CAMPAIGN_CITIES,
+  MAX_REGISTRY_CITIES,
+} from "@/lib/outreach/city-registry";
 import {
   clampDiscoveryLimit,
   clampInvitationLimit,
   coerceSettingValue,
+  getCityApprovalOverrides,
   DEFAULT_DAILY_DISCOVERY_LIMIT,
   DEFAULT_DAILY_INVITATION_LIMIT,
   DEFAULT_OUTREACH_SETTINGS,
@@ -14,6 +34,11 @@ import {
   MAX_DAILY_INVITATION_LIMIT,
   runDateFor,
 } from "@/lib/outreach/settings";
+
+beforeEach(() => {
+  settingsMock.rows = [];
+  settingsMock.fail = false;
+});
 
 describe("daily quota defaults", () => {
   it("uses 50 discovery and 10 invitations by default", () => {
@@ -88,6 +113,27 @@ describe("setting coercion", () => {
     expect(coerceSettingValue("outreach.channel_url", "not a URL")).toBeNull();
     expect(coerceSettingValue("outreach.channel_url", "https://t.me/" + "x".repeat(500))).toBeNull();
     expect(coerceSettingValue("outreach.channel_url", "")).toBe("");
+  });
+
+  it("allows the approval registry to exceed campaign selection limits", async () => {
+    const enabled = CITY_REGISTRY.filter((city) => !city.approved).map((city) => city.code);
+    expect(enabled.length).toBeGreaterThan(MAX_CAMPAIGN_CITIES);
+    expect(enabled.length).toBeLessThanOrEqual(MAX_REGISTRY_CITIES);
+
+    const persisted = coerceSettingValue("outreach.cities_enabled", enabled.join(","));
+    expect(persisted).toBe(enabled.join(","));
+    settingsMock.rows = [{ key: "outreach.cities_enabled", value: persisted! }];
+
+    const overrides = await getCityApprovalOverrides();
+    expect(overrides.enabled).toEqual(enabled);
+    expect(overrides.disabled).toEqual([]);
+  });
+
+  it("fails closed when stored market overrides cannot be read", async () => {
+    settingsMock.fail = true;
+    await expect(getCityApprovalOverrides()).rejects.toThrow(
+      "Approved markets could not be read"
+    );
   });
 
   it("rejects unknown setting keys", () => {

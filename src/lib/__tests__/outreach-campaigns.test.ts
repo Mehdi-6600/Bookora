@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Tests the rules that keep campaign outreach safe and attributable:
  *  - only VERIFIED prospects are ever eligible,
- *  - targeting is limited to the four approved cities and two segments,
+ *  - targeting is limited to approved cities and registered business segments,
  *  - a dry run writes no invitations and sends nothing,
  *  - approval requires a dry run and at least one recipient,
  *  - preparation is idempotent and respects the send limit / daily quota,
@@ -24,9 +24,15 @@ const db = {
   consents: [] as Row[],
   audit: [] as Row[],
   auditFail: false,
+  deliveryErrorCode: undefined as number | undefined,
 };
 
-vi.mock("@/lib/telegram/notify", () => ({ deliverTelegramMessage: async () => ({ ok: true, messageId: 1 }) }));
+vi.mock("@/lib/telegram/notify", () => ({
+  deliverTelegramMessage: async () =>
+    db.deliveryErrorCode === 429
+      ? { ok: false, errorCode: 429, error: "Telegram rate limited", blocked: false, retryAfterSeconds: 19 }
+      : { ok: true, messageId: 1 },
+}));
 
 vi.mock("@/lib/prisma", () => {
   const prisma: any = {
@@ -108,7 +114,15 @@ vi.mock("@/lib/prisma", () => {
           if (where?.status?.in) return where.status.in.includes(row.status);
           if (where?.status) return row.status === where.status;
           return true;
-        }).map((row: Row) => include?.prospect ? { ...row, prospect: db.prospects.find((p: Row) => p.id === row.prospectId) } : row),
+        }).map((row: Row) => ({
+          ...row,
+          ...(include?.prospect
+            ? { prospect: db.prospects.find((p: Row) => p.id === row.prospectId) }
+            : {}),
+          ...(include?.campaign
+            ? { campaign: db.campaigns.find((campaign: Row) => campaign.id === row.campaignId) }
+            : {}),
+        })),
       findUnique: async ({ where }: any) =>
         db.invitations.find((row: Row) => row.startParam === where.startParam) ?? null,
       create: async ({ data }: any) => {
@@ -196,6 +210,16 @@ vi.mock("@/lib/prisma", () => {
     adminSetting: {
       findMany: async ({ where }: any) =>
         db.settings.filter((row: Row) => where.key.in.includes(row.key)),
+      upsert: async ({ where, update, create }: any) => {
+        let row = db.settings.find((item: Row) => item.key === where.key);
+        if (row) Object.assign(row, update);
+        else {
+          const created: Row = { key: where.key, ...create };
+          db.settings.push(created);
+          row = created;
+        }
+        return row;
+      },
     },
   };
   prisma.$transaction = async (fn: (tx: any) => Promise<any>) => {
@@ -275,6 +299,7 @@ beforeEach(() => {
   db.consents = [];
   db.audit = [];
   db.auditFail = false;
+  db.deliveryErrorCode = undefined;
 
   db.templates.push({
     id: "tpl-1",
@@ -302,7 +327,7 @@ describe("targeting normalisation", () => {
       language: "fa",
     });
 
-    expect(result.cities).toEqual(["TEHRAN", "KARAJ"]);
+    expect(result.cities).toEqual(["TEHRAN", "KARAJ", "ISFAHAN"]);
     expect(result.segments).toEqual(["MENS_BARBER"]);
     expect(result.language).toBe("fa");
   });
@@ -360,6 +385,26 @@ describe("campaign planning", () => {
       baseCampaign({ segments: ["WOMENS_SALON"], cities: [] })
     );
     expect(women.recipients.map((r) => r.prospectId)).toEqual(["p-12"]);
+  });
+
+  it("keeps beauty-specialist and medical sectors out of legacy defaults until explicitly selected", async () => {
+    db.prospects.push(
+      prospect({ id: "p-beauty", publicName: "Nail studio", segment: "WOMENS_BEAUTY" }),
+      prospect({ id: "p-medical", publicName: "Family physician", category: "MEDICAL", segment: "MEDICAL_PRACTICE" })
+    );
+
+    const legacy = await planCampaign(baseCampaign({ segments: [] }));
+    expect(legacy.segments).toEqual(["MENS_BARBER", "WOMENS_SALON"]);
+    expect(legacy.recipients.map((recipient) => recipient.prospectId)).not.toContain("p-beauty");
+    expect(legacy.recipients.map((recipient) => recipient.prospectId)).not.toContain("p-medical");
+
+    const expanded = await planCampaign(
+      baseCampaign({ segments: ["WOMENS_BEAUTY", "MEDICAL_PRACTICE"] })
+    );
+    expect(expanded.recipients.map((recipient) => recipient.prospectId).sort()).toEqual([
+      "p-beauty",
+      "p-medical",
+    ]);
   });
 
   it("reports a city x segment matrix", async () => {
@@ -629,14 +674,17 @@ describe("registry-wide targeting", () => {
     const result = normalizeTargeting({
       cities: [...all, "TEHRAN", "nowhereville"],
     });
-    // Only DEFAULT-approved codes survive normalisation; a campaign could hold
-    // all of them and still be one entry away from the cap.
+    // Every Iranian registry city is automatically ready for Persian outreach;
+    // the campaign cap still bounds the selection to 100 cities.
     expect(result.cities).toEqual(
       expect.arrayContaining(["TEHRAN", "MASHHAD", "SHIRAZ", "KARAJ"])
     );
+    const iranianCodes = CITY_REGISTRY.filter((entry) => entry.country === "IR").map(
+      (entry) => entry.code
+    );
+    expect(result.cities).toEqual(expect.arrayContaining(iranianCodes));
     expect(result.cities.length).toBeLessThanOrEqual(100);
     expect(result.cities).not.toContain("NOWHEREVILLE");
-    expect(result.cities).not.toContain("ISFAHAN"); // registered ≠ approved
   });
 
   it("old four-city campaigns are untouched by the registry", () => {
@@ -848,6 +896,32 @@ describe("delivery safety switches", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/auto/i);
+  });
+
+  it("keeps a campaign approved and reports Telegram 429 as a rate-limit pause", async () => {
+    const campaign = await approvedReadyToDeliver();
+    db.consents.push({
+      prospectId: "p-1",
+      telegramId: "111",
+      startedAt: new Date(),
+      revokedAt: null,
+    });
+    db.deliveryErrorCode = 429;
+
+    const result = await sendCampaignInvitations({ campaignId: campaign.id, limit: 5 });
+
+    expect(result).toMatchObject({
+      ok: true,
+      sent: 0,
+      failed: 1,
+      skipped: 0,
+      rateLimited: true,
+    });
+    expect(db.campaigns[0].status).toBe("APPROVED");
+    expect(db.invitations[0].status).toBe("APPROVED");
+    expect(
+      Number(db.settings.find((row: Row) => row.key === "outreach.telegram_cooldown_until")?.value)
+    ).toBeGreaterThan(Date.now());
   });
 
   it("audit failure rolls back campaign approval", async () => {

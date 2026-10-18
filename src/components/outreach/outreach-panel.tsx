@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   composeCampaignMessage,
@@ -8,6 +8,8 @@ import {
   messageDirection,
   previewCampaignMessage,
 } from "@/lib/outreach/message";
+import { parseProspectCsv } from "@/lib/outreach/prospect-csv";
+import { isBusinessSegment, SEGMENT_LABELS as OUTREACH_SEGMENT_LABELS } from "@/lib/outreach/cities";
 import {
   FUNNEL_STAGE_LABELS,
   type FunnelStageKey,
@@ -133,6 +135,8 @@ type CityEntry = {
   en: string;
   region?: string;
   country?: string;
+  outreachLanguages?: string[];
+  autoReady?: boolean;
   approved: boolean;
 };
 
@@ -157,11 +161,17 @@ function cityLabelFor(code: string | null | undefined, registry: CityEntry[], lo
   if (!entry) return code;
   return cityDisplayName(entry, locale);
 }
-const SEGMENT_OPTIONS = ["MENS_BARBER", "WOMENS_SALON"];
-const SEGMENT_FA: Record<string, string> = {
-  MENS_BARBER: "آرایشگاه مردانه",
-  WOMENS_SALON: "سالن زیبایی زنانه",
-};
+const SEGMENT_OPTIONS = [
+  "MENS_BARBER",
+  "WOMENS_SALON",
+  "WOMENS_BEAUTY",
+  "MEDICAL_PRACTICE",
+];
+function segmentLabel(segment: string, locale: string): string {
+  if (!isBusinessSegment(segment)) return segment;
+  const labels = OUTREACH_SEGMENT_LABELS[segment];
+  return locale === "fa" ? labels.fa : labels.en;
+}
 const VERIFICATION_OPTIONS = ["DISCOVERED", "VERIFIED", "REJECTED"];
 const VERIFICATION_FA: Record<string, string> = {
   DISCOVERED: "کشف‌شده",
@@ -473,7 +483,7 @@ export function OutreachPanel() {
       )}
 
       {tab === "overview" && stats && (
-        <Overview stats={stats} locale={locale} onReload={() => run(loadStats)} />
+        <Overview stats={stats} locale={locale} onReload={() => run(loadStats)} onNavigate={setTab} />
       )}
 
       {tab === "campaigns" && (
@@ -617,18 +627,62 @@ function Overview({
   stats,
   locale,
   onReload,
+  onNavigate,
 }: {
   stats: any;
   locale: string;
   onReload: () => void;
+  onNavigate: (tab: Tab) => void;
 }) {
   const t = useTranslations("outreach");
   const funnel: any[] = stats.funnel ?? [];
   const max = Math.max(1, ...funnel.map((step) => step.count));
   const blockers: string[] = stats.discovery?.blockers ?? [];
 
+  const growthActions = stats.growthAgent?.recommendations ?? [];
+
   return (
     <div className="space-y-4">
+      <section className={CARD_MAIN}>
+        <div className="flex items-start gap-3">
+          <div className="rounded-2xl bg-white p-2 text-[#4F5FE8]">
+            <Sparkles className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-[#1A1F36]">{t("growthAgentTitle")}</h2>
+            <p className="mt-0.5 text-xs text-[#1A1F36]/60">{t("growthAgentNote")}</p>
+          </div>
+        </div>
+        {growthActions.length > 0 ? (
+          <ol className="mt-3 space-y-2">
+            {growthActions.map((action: { code: string; target: Tab; count?: number }, index: number) => (
+              <li key={`${action.code}-${index}`} className="flex items-center justify-between gap-3 rounded-2xl bg-white p-3 shadow-soft">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-[#1A1F36]">
+                    <span className="me-1 text-[#4F5FE8]">{index + 1}.</span>
+                    {t(`growthAction_${action.code}`)}
+                  </p>
+                  {typeof action.count === "number" && (
+                    <p className="mt-0.5 text-xs text-[#1A1F36]/55">{t("growthActionCount", { count: action.count })}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate(action.target)}
+                  className={BTN_NEUTRAL}
+                >
+                  {t("growthAgentOpen")}
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="mt-3 rounded-2xl bg-white p-3 text-sm font-medium text-[#1A1F36]/65">
+            {t("growthAgentNoActions")}
+          </p>
+        )}
+      </section>
+
       <section className={CARD_MAIN}>
         <h2 className="text-base font-bold text-[#1A1F36]">{t("countsTitle")}</h2>
         <p className="mt-0.5 text-xs text-[#1A1F36]/60">{t("countsNote")}</p>
@@ -722,10 +776,16 @@ function Overview({
                 <span className={`${BADGE} shrink-0 bg-[#1A1F36]/10 text-[#1A1F36]/70`}>{row.status}</span>
               </div>
               <p className="mt-1 text-[11px] font-medium text-[#1A1F36]/60" dir="ltr">
-                {row.prospects} {t("pipelineTitle")} · {row.invitationsDrafted} {t("prepared")} ·{" "}
-                {row.invitationsDelivered} {t("delivered")} · {row.botStarts} {t("botStarts")} ·{" "}
-                {row.registrations} {t("registrations")}
-                {row.activationRate != null ? ` · ${(row.activationRate * 100).toFixed(1)}%` : ""}
+                {row.campaignViews} {t("campaignViews")} · {row.prospects} {t("pipelineTitle")} ·{" "}
+                {row.invitationsDrafted} {t("prepared")} · {row.invitationsDelivered} {t("delivered")} ·{" "}
+                {row.botStarts} {t("botStarts")} · {row.registrations} {t("registrations")} ·{" "}
+                {row.activations} {t("activations")} · {row.paidConversions} {t("paidConversions")}
+                {row.botStartRate != null
+                  ? ` · ${t("botStartRate")} ${(row.botStartRate * 100).toFixed(1)}%`
+                  : ""}
+                {row.activationRate != null
+                  ? ` · ${t("activationRate")} ${(row.activationRate * 100).toFixed(1)}%`
+                  : ""}
               </p>
             </div>
           ))}
@@ -851,6 +911,7 @@ function ProspectsTab({
   const t = useTranslations("outreach");
   const locale = useLocale();
   const cityRegistry = cityRegistryOf(cityData);
+  const segmentOptions: string[] = Array.isArray(cityData?.segments) ? cityData.segments : SEGMENT_OPTIONS;
   const approvedCities = cityRegistry.filter((entry) => entry.approved);
   const otherCities = cityRegistry.filter((entry) => !entry.approved);
   const [open, setOpen] = useState(false);
@@ -1062,9 +1123,9 @@ function ProspectsTab({
                   className={INPUT}
                 >
                   <option value="">{t("segmentAuto")}</option>
-                  {SEGMENT_OPTIONS.map((segment) => (
+                  {segmentOptions.map((segment) => (
                     <option key={segment} value={segment}>
-                      {SEGMENT_FA[segment]}
+                      {segmentLabel(segment, locale)}
                     </option>
                   ))}
                 </select>
@@ -1276,7 +1337,7 @@ function ProspectsTab({
                       ? cityLabelFor(prospect.city, cityRegistry, locale) || t("cityUnassigned")
                       : t("cityUnassigned")}
                     {prospect.segment
-                      ? ` · ${SEGMENT_FA[prospect.segment] ?? prospect.segment}`
+                      ? ` · ${segmentLabel(prospect.segment, locale)}`
                       : ""}
                     {prospect.neighborhood ? ` · ${prospect.neighborhood}` : ""}
                     {prospect.language ? ` · ${prospect.language}` : ""}
@@ -2224,6 +2285,54 @@ function DiscoveryTab({
     }
   }
 
+  async function importProspectCsv(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+
+    try {
+      const result = parseProspectCsv(await file.text());
+      if (result.errors.length > 0) {
+        const details = result.errors.map((code) => {
+          if (code === "file_too_large") return t("csvFileTooLarge");
+          if (code === "unclosed_quote") return t("csvMalformed");
+          if (code === "required_headers_missing") return t("csvHeadersMissing");
+          if (code === "too_many_rows") return t("csvTooManyRows");
+          if (code === "header_or_rows_missing") return t("csvNoRows");
+          const rowNumber = /^row_(\d+)_/.exec(code)?.[1];
+          return rowNumber ? t("csvInvalidRow", { line: Number(rowNumber) }) : t("csvMalformed");
+        });
+        setSeedFeedback({ kind: "err", text: t("csvImportFailed"), details });
+        return;
+      }
+
+      const existingLines = seedText.split("\n").map((line) => line.trim()).filter(Boolean);
+      const seen = new Set(existingLines);
+      const addedLines = result.rows
+        .map((row) => formatSeedLine(row))
+        .filter((line) => {
+          if (seen.has(line)) return false;
+          seen.add(line);
+          return true;
+        });
+
+      if (addedLines.length === 0) {
+        setSeedFeedback({ kind: "ok", text: t("csvNothingNew") });
+        return;
+      }
+      if (existingLines.length + addedLines.length > 1_000) {
+        setSeedFeedback({ kind: "err", text: t("csvTotalTooMany") });
+        return;
+      }
+
+      setSeedText([...existingLines, ...addedLines].join("\n"));
+      setSeedDirty(true);
+      setSeedFeedback({ kind: "ok", text: t("csvImported", { count: addedLines.length }) });
+    } catch {
+      setSeedFeedback({ kind: "err", text: t("csvImportFailed"), details: [t("csvMalformed")] });
+    }
+  }
+
   async function saveSeed() {
     const parsed = parseSeedText(seedText);
 
@@ -2553,6 +2662,19 @@ function DiscoveryTab({
       <section className={CARD_MAIN}>
         <h2 className="text-base font-bold text-[#1A1F36]">{t("seedTitle")}</h2>
         <p className="mt-1 text-xs text-[#1A1F36]/60">{t("seedHelp")}</p>
+        <p className="mt-2 text-xs text-[#1A1F36]/55">{t("csvImportHelp")}</p>
+        <label className={BTN_GHOST + " mt-3 w-full cursor-pointer"}>
+          <Plus className="h-4 w-4" />
+          {t("csvImportButton")}
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            className="sr-only"
+            aria-label={t("csvImportButton")}
+            onChange={(event) => void importProspectCsv(event)}
+            disabled={seedSaving || storedSeedItems === undefined}
+          />
+        </label>
         <p className="mt-2 text-xs font-medium text-[#1A1F36]/70">
           {storedSeedItems === undefined
             ? t("seedLoading")
@@ -2836,7 +2958,8 @@ function CityPicker({
         (entry) =>
           entry.code.toLowerCase().includes(needle) ||
           entry.fa.includes(query.trim()) ||
-          (entry.en ?? "").toLowerCase().includes(needle)
+          (entry.en ?? "").toLowerCase().includes(needle) ||
+          (entry.country ?? "").toLowerCase().includes(needle)
       )
     : approved;
 
@@ -2920,6 +3043,7 @@ function MarketsCard({ registry, onSaved }: { registry: CityEntry[]; onSaved: ()
           entry.code.toLowerCase().includes(needle) ||
           entry.fa.includes(query.trim()) ||
           (entry.en ?? "").toLowerCase().includes(needle) ||
+          (entry.country ?? "").toLowerCase().includes(needle) ||
           (entry.region ?? "").toLowerCase().includes(needle)
       )
     : registry;
@@ -2963,29 +3087,50 @@ function MarketsCard({ registry, onSaved }: { registry: CityEntry[]; onSaved: ()
       </div>
 
       <div className="mt-2 max-h-64 space-y-1.5 overflow-y-auto pe-1">
-        {visible.map((entry) => (
+        {visible.map((entry) => {
+          const localizationBlocked = entry.country !== "IR" && !entry.autoReady;
+          return (
           <div key={entry.code} className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 shadow-soft">
             <div className="min-w-0">
               <p className="truncate text-xs font-bold text-[#1A1F36]">
                 {cityDisplayName(entry, locale)}
                 <span className="ms-2 text-[10px] font-medium text-[#1A1F36]/40" dir="ltr">
                   {entry.code}
+                  {entry.country ? ` · ${entry.country}` : ""}
                   {entry.region ? ` · ${entry.region}` : ""}
                 </span>
               </p>
+              {entry.autoReady && entry.approved ? (
+                <p className="mt-0.5 text-[10px] font-medium text-[#16803C]">
+                  {t("marketAutoReady")} · {(entry.outreachLanguages ?? []).join("/")}
+                </p>
+              ) : entry.autoReady ? (
+                <p className="mt-0.5 text-[10px] font-medium text-[#B45309]">
+                  {t("marketPaused")}
+                </p>
+              ) : entry.country !== "IR" && entry.outreachLanguages?.length ? (
+                <p className="mt-0.5 text-[10px] font-medium text-[#1A1F36]/45">
+                  {t("marketLocaleRequired")} · {entry.outreachLanguages.join("/")}
+                </p>
+              ) : null}
             </div>
             <button
               type="button"
-              disabled={busyCode === entry.code}
+              disabled={busyCode === entry.code || localizationBlocked}
               onClick={() => void approve(entry.code, !entry.approved)}
               className={`shrink-0 rounded-lg px-3 py-1.5 text-[10px] font-bold text-white shadow-soft disabled:opacity-50 ${
                 entry.approved ? "bg-[#34C759]" : "bg-[#1A1F36]/30"
               }`}
             >
-              {entry.approved ? t("cityApproved") : t("cityApprove")}
+              {localizationBlocked
+                ? t("marketWaitShort")
+                : entry.approved
+                  ? t("cityApproved")
+                  : t("cityApprove")}
             </button>
           </div>
-        ))}
+          );
+        })}
         {visible.length === 0 && (
           <p className="py-2 text-center text-[11px] font-medium text-[#1A1F36]/50">{t("noCitiesMatch")}</p>
         )}
@@ -3270,6 +3415,7 @@ function CampaignsTab({
   const [auditByCampaign, setAuditByCampaign] = useState<Record<string, any[]>>({});
   const [showMarkets, setShowMarkets] = useState(false);
   const registry: CityEntry[] = cityRegistryOf(cityData);
+  const segmentOptions: string[] = Array.isArray(cityData?.segments) ? cityData.segments : SEGMENT_OPTIONS;
   const maxCities = cityData?.maxCampaignCities ?? 100;
   const messageDefaults = cityData?.messageDefaults ?? null;
   const [form, setForm] = useState({
@@ -3453,7 +3599,7 @@ function CampaignsTab({
           <div>
             <label className={LABEL}>{t("segments")}</label>
             <div className="mt-1 flex flex-wrap gap-2">
-              {SEGMENT_OPTIONS.map((segment) => {
+              {segmentOptions.map((segment) => {
                 const active = form.segments.includes(segment);
                 return (
                   <button
@@ -3472,11 +3618,16 @@ function CampaignsTab({
                         : "bg-[#1A1F36]/5 text-[#1A1F36]/70"
                     }`}
                   >
-                    {SEGMENT_FA[segment]}
+                    {segmentLabel(segment, locale)}
                   </button>
                 );
               })}
             </div>
+            {form.segments.includes("MEDICAL_PRACTICE") && (
+              <p className="mt-2 rounded-xl bg-[#FFF4D6] p-3 text-xs font-medium text-[#7A4B00]">
+                {t("medicalCampaignGuard")}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-2">
@@ -3607,7 +3758,7 @@ function CampaignsTab({
                   {" · "}
                   {campaign.segments.length > 0
                     ? campaign.segments
-                        .map((s: string) => SEGMENT_FA[s] ?? s)
+                        .map((s: string) => segmentLabel(s, locale))
                         .join("، ")
                     : t("allSegments")}
                 </p>
@@ -3624,6 +3775,28 @@ function CampaignsTab({
             <p className="mt-2 text-[11px] font-medium text-[#1A1F36]/50" dir="ltr">
               {campaign.deepLink}
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+              <a
+                className="font-bold text-[#4F5FE8] underline"
+                href={`/${locale}?ref=${encodeURIComponent(campaign.code)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("campaignLandingLink")}
+              </a>
+              <button
+                type="button"
+                className="font-bold text-[#1A1F36]/65 underline"
+                onClick={() => {
+                  const link = new URL(`/${locale}`, window.location.origin);
+                  link.searchParams.set("ref", campaign.code);
+                  void navigator.clipboard?.writeText(link.toString()).catch(() => undefined);
+                  setMessage({ kind: "ok", text: t("copied") });
+                }}
+              >
+                {t("copyCampaignLandingLink")}
+              </button>
+            </div>
 
             <div className="mt-2 flex flex-wrap gap-2">
               <button
@@ -3749,7 +3922,7 @@ function CampaignsTab({
                             <td className="py-1">
                               {cell.segment === "UNASSIGNED"
                                 ? "—"
-                                : SEGMENT_FA[cell.segment] ?? cell.segment}
+                                : segmentLabel(cell.segment, locale)}
                             </td>
                             <td className="py-1 text-end">{cell.eligible}</td>
                             <td className="py-1 text-end">{cell.manualOnly}</td>
@@ -3768,7 +3941,7 @@ function CampaignsTab({
                   dir={isRtl ? "rtl" : "ltr"}
                   cityLabel={(code) => cityLabelFor(code, registry, locale)}
                   segmentLabel={(segment) =>
-                    segment ? SEGMENT_FA[segment] ?? segment : ""
+                    segment ? segmentLabel(segment, locale) : ""
                   }
                   onCopy={(text) => {
                     void navigator.clipboard?.writeText(text).catch(() => undefined);

@@ -56,6 +56,18 @@ describe("keyword matching", () => {
     ).toBe("MEDICAL");
   });
 
+  it("matches women hairdressers and specialist beauty services", () => {
+    expect(matchKeywords({ name: "Women's hair salon" }, DEFAULT_KEYWORDS).group).toBe("BEAUTY");
+    expect(matchKeywords({ name: "ناخن کار و فیشیال" }, DEFAULT_KEYWORDS).group).toBe("BEAUTY");
+    expect(matchKeywords({ name: "Lash artist studio" }, DEFAULT_KEYWORDS).group).toBe("BEAUTY");
+  });
+
+  it("matches doctors and medical specialties in Persian and English", () => {
+    expect(matchKeywords({ name: "Family physician" }, DEFAULT_KEYWORDS).group).toBe("MEDICAL");
+    expect(matchKeywords({ name: "مطب متخصص قلب" }, DEFAULT_KEYWORDS).group).toBe("MEDICAL");
+    expect(matchKeywords({ name: "عيادة طبيبة" }, DEFAULT_KEYWORDS).group).toBe("MEDICAL");
+  });
+
   it("returns no match for an unrelated business", () => {
     const result = matchKeywords({ name: "Corner Grocery Store" }, keywords);
 
@@ -145,7 +157,17 @@ describe("default keyword set", () => {
       "سالن زیبایی",
       "ناخن کار",
       "میکاپ آرتیست",
+      "women's hair salon",
+      "آرایشگر زنانه",
+      "esthetician",
+      "nail artist",
+      "پاکسازی پوست",
       "doctor",
+      "physician",
+      "surgeon",
+      "مطب",
+      "پزشک متخصص",
+      "pediatrician",
       "dentist",
       "dermatologist",
       "physiotherapist",
