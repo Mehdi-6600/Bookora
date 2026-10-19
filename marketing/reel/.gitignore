@@ -1,0 +1,6 @@
+# Rendered deliverables stay out of git (large, reproducible in ~3 minutes)
+output/*.mp4
+output/audio/*.wav
+output/audio/_tmp/
+output/_stills/
+build/__pycache__/
