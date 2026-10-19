@@ -4,3 +4,4 @@ output/audio/*.wav
 output/audio/_tmp/
 output/_stills/
 build/__pycache__/
+bookora-reel-package.zip
