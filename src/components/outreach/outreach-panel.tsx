@@ -9,6 +9,13 @@ import {
   previewCampaignMessage,
 } from "@/lib/outreach/message";
 import { parseProspectCsv } from "@/lib/outreach/prospect-csv";
+import { writeClipboardText } from "@/lib/outreach/clipboard";
+import {
+  ADVANCED_OUTREACH_TABS,
+  isAdvancedOutreachTab,
+  PRIMARY_OUTREACH_TABS,
+  type OutreachPanelTab,
+} from "@/lib/outreach/panel-navigation";
 import { isBusinessSegment, SEGMENT_LABELS as OUTREACH_SEGMENT_LABELS } from "@/lib/outreach/cities";
 import {
   FUNNEL_STAGE_LABELS,
@@ -65,26 +72,7 @@ import {
  * invitations whose recipient has already started the bot.
  */
 
-type Tab =
-  | "overview"
-  | "campaigns"
-  | "prospects"
-  | "invitations"
-  | "templates"
-  | "keywords"
-  | "discovery"
-  | "bot";
 
-const TABS: Tab[] = [
-  "overview",
-  "campaigns",
-  "prospects",
-  "invitations",
-  "templates",
-  "keywords",
-  "discovery",
-  "bot",
-];
 
 const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-5 shadow-soft";
 const CARD_INNER = "rounded-2xl bg-white p-4 shadow-soft";
@@ -258,7 +246,7 @@ export function OutreachPanel() {
   const t = useTranslations("outreach");
   const locale = useLocale();
 
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<OutreachPanelTab>("overview");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(
     null
@@ -439,9 +427,12 @@ export function OutreachPanel() {
     showLoadError,
   ]);
 
-  function copy(text: string) {
-    void navigator.clipboard?.writeText(text).catch(() => undefined);
-    setMessage({ kind: "ok", text: t("copied") });
+  async function copy(text: string) {
+    const copied = await writeClipboardText(text);
+    setMessage({
+      kind: copied ? "ok" : "err",
+      text: copied ? t("copied") : t("copyFailed"),
+    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -456,23 +447,52 @@ export function OutreachPanel() {
       data-settings-unreadable={gate.unreadable ? "true" : "false"}
       className="space-y-4"
     >
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {TABS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={
-              "shrink-0 rounded-2xl px-4 py-2.5 text-xs font-bold transition-all active:scale-95 " +
-              (tab === key
-                ? "btn-selected"
-                : "bg-white text-[#1A1F36] shadow-soft")
-            }
-          >
-            {t(`tab.${key}`)}
-          </button>
-        ))}
-      </div>
+      <nav aria-label={t("panelNavigation")} className="space-y-2">
+        <div className="flex flex-wrap gap-2">
+          {PRIMARY_OUTREACH_TABS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              aria-current={tab === key ? "page" : undefined}
+              onClick={() => setTab(key)}
+              className={
+                "rounded-2xl px-4 py-2.5 text-xs font-bold transition-all active:scale-95 " +
+                (tab === key
+                  ? "btn-selected"
+                  : "bg-white text-[#1A1F36] shadow-soft")
+              }
+            >
+              {t(`tab.${key}`)}
+            </button>
+          ))}
+        </div>
+        <details
+          open={isAdvancedOutreachTab(tab)}
+          className="rounded-2xl bg-white/70 p-2 shadow-soft"
+        >
+          <summary className="cursor-pointer px-2 py-1 text-xs font-bold text-[#1A1F36]/70">
+            {t("moreTools")}
+          </summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {ADVANCED_OUTREACH_TABS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                aria-current={tab === key ? "page" : undefined}
+                onClick={() => setTab(key)}
+                className={
+                  "rounded-xl px-3 py-2 text-xs font-bold transition-all " +
+                  (tab === key
+                    ? "btn-selected"
+                    : "bg-white text-[#1A1F36] shadow-soft")
+                }
+              >
+                {t(`tab.${key}`)}
+              </button>
+            ))}
+          </div>
+        </details>
+      </nav>
 
       <Message state={message} />
 
@@ -483,7 +503,7 @@ export function OutreachPanel() {
       )}
 
       {tab === "overview" && stats && (
-        <Overview stats={stats} locale={locale} onReload={() => run(loadStats)} onNavigate={setTab} />
+        <Overview stats={stats} locale={locale} onReload={() => run(loadStats)} />
       )}
 
       {tab === "campaigns" && (
@@ -499,6 +519,7 @@ export function OutreachPanel() {
               await loadSettings();
             })
           }
+          onCopy={copy}
           setMessage={setMessage}
         />
       )}
@@ -627,62 +648,18 @@ function Overview({
   stats,
   locale,
   onReload,
-  onNavigate,
 }: {
   stats: any;
   locale: string;
   onReload: () => void;
-  onNavigate: (tab: Tab) => void;
 }) {
   const t = useTranslations("outreach");
   const funnel: any[] = stats.funnel ?? [];
   const max = Math.max(1, ...funnel.map((step) => step.count));
   const blockers: string[] = stats.discovery?.blockers ?? [];
 
-  const growthActions = stats.growthAgent?.recommendations ?? [];
-
   return (
     <div className="space-y-4">
-      <section className={CARD_MAIN}>
-        <div className="flex items-start gap-3">
-          <div className="rounded-2xl bg-white p-2 text-[#4F5FE8]">
-            <Sparkles className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-[#1A1F36]">{t("growthAgentTitle")}</h2>
-            <p className="mt-0.5 text-xs text-[#1A1F36]/60">{t("growthAgentNote")}</p>
-          </div>
-        </div>
-        {growthActions.length > 0 ? (
-          <ol className="mt-3 space-y-2">
-            {growthActions.map((action: { code: string; target: Tab; count?: number }, index: number) => (
-              <li key={`${action.code}-${index}`} className="flex items-center justify-between gap-3 rounded-2xl bg-white p-3 shadow-soft">
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-[#1A1F36]">
-                    <span className="me-1 text-[#4F5FE8]">{index + 1}.</span>
-                    {t(`growthAction_${action.code}`)}
-                  </p>
-                  {typeof action.count === "number" && (
-                    <p className="mt-0.5 text-xs text-[#1A1F36]/55">{t("growthActionCount", { count: action.count })}</p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onNavigate(action.target)}
-                  className={BTN_NEUTRAL}
-                >
-                  {t("growthAgentOpen")}
-                </button>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="mt-3 rounded-2xl bg-white p-3 text-sm font-medium text-[#1A1F36]/65">
-            {t("growthAgentNoActions")}
-          </p>
-        )}
-      </section>
-
       <section className={CARD_MAIN}>
         <h2 className="text-base font-bold text-[#1A1F36]">{t("countsTitle")}</h2>
         <p className="mt-0.5 text-xs text-[#1A1F36]/60">{t("countsNote")}</p>
@@ -3398,6 +3375,7 @@ function CampaignsTab({
   run,
   refresh,
   onRetrySettings,
+  onCopy,
   setMessage,
 }: any) {
   const t = useTranslations("outreach");
@@ -3790,8 +3768,7 @@ function CampaignsTab({
                 onClick={() => {
                   const link = new URL(`/${locale}`, window.location.origin);
                   link.searchParams.set("ref", campaign.code);
-                  void navigator.clipboard?.writeText(link.toString()).catch(() => undefined);
-                  setMessage({ kind: "ok", text: t("copied") });
+                  void onCopy(link.toString());
                 }}
               >
                 {t("copyCampaignLandingLink")}
@@ -3943,10 +3920,7 @@ function CampaignsTab({
                   segmentLabel={(segment) =>
                     segment ? segmentLabel(segment, locale) : ""
                   }
-                  onCopy={(text) => {
-                    void navigator.clipboard?.writeText(text).catch(() => undefined);
-                    setMessage({ kind: "ok", text: t("copied") });
-                  }}
+                  onCopy={(text) => void onCopy(text)}
                 />
 
                 <p className="mt-2 text-[11px] font-medium text-[#1A1F36]/60">
