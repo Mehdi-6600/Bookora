@@ -1,5 +1,7 @@
 # Telegram outreach & invitation system (Phases 8 & 9)
 
+> **Historical technical documentation:** This describes existing tooling, not an instruction to send prospect messages. Cold/unsolicited Telegram or Instagram outreach is out of scope; see [ACQUISITION-PLAYBOOK.md](./ACQUISITION-PLAYBOOK.md).
+
 Implemented 2026-10-10 · branch `arena/b3951939-bookora`
 
 ---

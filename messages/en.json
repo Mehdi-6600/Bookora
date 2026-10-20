@@ -487,7 +487,16 @@
     "howOwnersManageTitle": "How you manage availability"
   },
   "outreach": {
-    "acquisitionNote": "Prepared is NOT delivered. A stage is only counted when a table recorded it; anything else says \"no source\". Delivered = Telegram accepted the message (or the person started the bot).",
+    "acquisitionNote": "Recorded analytics only. Organic page metrics are event totals, not unique visitors; tracking does not send outbound messages.",
+    "organicSourcesTitle": "SEO landing pages · last 7 days",
+    "organicSourcesNote": "Page views and signup-button clicks; not unique visitors or external-directory submissions.",
+    "organicPageViews": "views",
+    "organicSignupClicks": "CTA clicks",
+    "noOrganicSourceEvents": "No recorded events in this period.",
+    "seoBarbers": "Barbershops",
+    "seoSalons": "Hair and beauty salons",
+    "seoBeauty": "Independent beauty professionals",
+    "seoClinics": "Medical practices",
     "acquisitionTitle": "Acquisition funnel (measured events)",
     "activations": "activations",
     "active": "Active",

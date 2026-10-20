@@ -9,6 +9,7 @@ import { getConversionCounts } from "@/lib/outreach/attribution";
 import { PROSPECT_STATUSES } from "@/lib/outreach/types";
 import {
   aggregateByDimension,
+  aggregateOrganicSourceSignals,
   buildCampaignReport,
   buildFunnelStages,
   type FunnelStageKey,
@@ -34,6 +35,7 @@ export async function GET() {
     invitationCounts,
     verificationCounts,
     campaignFunnelEvents,
+    organicSourceEvents,
   ] =
     await Promise.all([
       prisma.outreachProspect.groupBy({
@@ -56,6 +58,16 @@ export async function GET() {
         where: {
           campaignId: { not: null },
           event: { in: ["campaign_view", "paid_conversion"] },
+        },
+        _count: { _all: true },
+      }),
+      prisma.funnelEvent.groupBy({
+        by: ["ref", "event"],
+        where: {
+          campaignId: null,
+          createdAt: { gte: since7d },
+          ref: { startsWith: "seo_" },
+          event: { in: ["landing_view", "signup_cta_click"] },
         },
         _count: { _all: true },
       }),
@@ -279,9 +291,18 @@ export async function GET() {
         }),
       },
       acquisition: {
-        note: "Counts come from recorded events only. Prepared ≠ delivered: a message counts as delivered only when the Telegram API accepted it (or the recipient started the bot).",
+        note: "Counts come from recorded events only. Organic page and signup numbers are event totals, not unique visitors; tracking does not send outbound messages.",
         stages: acquisitionStages,
         byCampaign: campaignReport,
+        byOrganicSource: aggregateOrganicSourceSignals(
+          organicSourceEvents.map(
+            (row: { ref: string | null; event: string; _count: { _all: number } }) => ({
+              ref: row.ref,
+              event: row.event,
+              count: row._count._all,
+            })
+          )
+        ),
         byCity: aggregateByDimension(dimensionProspects, dimensionInvitationRows, "city"),
         byLanguage: aggregateByDimension(dimensionProspects, dimensionInvitationRows, "language"),
         bySegment: aggregateByDimension(dimensionProspects, dimensionInvitationRows, "segment"),

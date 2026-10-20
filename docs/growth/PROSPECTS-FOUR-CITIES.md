@@ -1,5 +1,7 @@
 # Verified prospect research — Tehran · Mashhad · Shiraz · Karaj
 
+> **Historical research only:** The previous recommendation to contact these businesses through Instagram DM is superseded. Do not use this prospect list for unsolicited messages; see [ACQUISITION-PLAYBOOK.md](./ACQUISITION-PLAYBOOK.md).
+
 Researched 2026-10-10. **No prospect on this list has been contacted.**
 
 Read the verification tiers before using any row.
@@ -50,7 +52,7 @@ This is the single most important column for the outreach plan, and it is almost
 
 **Of 90 businesses, 5 have any public Telegram presence, and 3 of those are channels or personal accounts that a bot cannot message.** Every other business publishes Instagram, a website, or a phone number.
 
-**Consequence:** automated Telegram outreach will reach essentially nobody. The realistic path is manual, human-sent outreach through Instagram DM — the system prepares the personalised attributed link and the message; you send it from your own account. This matches the platform rule that a bot may only message someone who has already started it.
+**Historical consequence (superseded):** This research originally led to a manual Instagram DM recommendation. Do not use the prospect list or Telegram contact observations for outreach. The current acquisition strategy is opt-in inbound discovery and owner-authorized directory listings only; see [ACQUISITION-PLAYBOOK.md](./ACQUISITION-PLAYBOOK.md).
 
 ---
 
@@ -203,7 +205,7 @@ Source: <https://injakhube.ir/tehran-men-barbershop/>, <https://salonkhobe.com/b
 | Average men's haircut in Karaj ≈ ۷۰۰,۰۰۰ تومان; beard ≈ ۴۰۰,۰۰۰ تومان (market average, not any one salon) | bestinkaraj.ir | Real ticket sizes; useful for ROI framing later |
 | Directory listings compete on "نوبت‌دهی منظم / کاهش انتظار با سیستم رزرو قبلی" ("orderly scheduling / less waiting with a prior-booking system") | behtarintalar.com | **Salons already advertise appointment scheduling as a selling point.** Demand is proven |
 | Salons publish working hours publicly (e.g. "شنبه تا جمعه ۱۰:۰۰ تا ۲۲:۰۰") | bestinkaraj.ir, meidane.com | The data Bookora needs is already public — setup is transcription, not discovery |
-| Publishable Instagram handles are near-universal; Telegram handles are rare | all four cities | Outreach channel = Instagram DM, human-sent |
+| Public contact channels were recorded in the historical research | all four cities | No contact channel is approved for unsolicited outreach |
 | An Iranian salon owner publicly said Telegram is unreliable in Iran | the salon's own Telegram page | Never sell "Telegram"; sell the web booking link |
 
 ---
