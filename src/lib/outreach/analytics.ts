@@ -120,6 +120,35 @@ export function conversionRate(from: number, to: number): number | null {
   return roundRate(to / from);
 }
 
+export type OrganicSourceSignal = {
+  source: string;
+  pageViews: number;
+  signupClicks: number;
+};
+
+/**
+ * Aggregate first-party SEO page events. These are event counts, not unique
+ * visitors, and deliberately exclude campaign-attributed events.
+ */
+export function aggregateOrganicSourceSignals(
+  rows: Array<{ ref: string | null; event: string; count: number }>
+): OrganicSourceSignal[] {
+  const sources = new Map<string, OrganicSourceSignal>();
+
+  for (const row of rows) {
+    if (!row.ref?.startsWith("seo_")) continue;
+    const source = row.ref.slice("seo_".length);
+    if (!/^[a-z0-9_-]{1,48}$/.test(source)) continue;
+
+    const total = sources.get(source) ?? { source, pageViews: 0, signupClicks: 0 };
+    if (row.event === "landing_view") total.pageViews += row.count;
+    if (row.event === "signup_cta_click") total.signupClicks += row.count;
+    sources.set(source, total);
+  }
+
+  return [...sources.values()].sort((a, b) => a.source.localeCompare(b.source));
+}
+
 function roundRate(value: number): number {
   return Math.round(value * 10_000) / 10_000;
 }

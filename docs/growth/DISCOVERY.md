@@ -1,5 +1,7 @@
 # Daily keyword-based prospect discovery — Phase 9
 
+> **Historical technical documentation:** Discovery tooling may identify or prepare records; it is not authorization to contact anyone. Do not use it for unsolicited messaging. Current marketing is inbound and owner-authorized public listings only; see [ACQUISITION-PLAYBOOK.md](./ACQUISITION-PLAYBOOK.md).
+
 Status: **implemented, not yet run in production.** Written 2026-10-10.
 
 ---
@@ -101,9 +103,7 @@ Before a candidate is stored, `isAlreadyKnown()` rejects it if:
 - **The system never raises its own quota.** There is no code path that
   increments a limit; only an admin PUT to `/api/admin/outreach/settings` can
   change it, and it is clamped to the cap.
-- These are **discovery and preparation limits, not delivery guarantees.**
-  Nothing here promises 50 messages a day. In practice the manual source will
-  produce far fewer, and most prepared invitations will require manual outreach.
+- These are historical **discovery/preparation limits**, not a current marketing target or delivery guarantee. Prepared records do not authorize contacting a business; the current acquisition plan does not use prospect messages.
 
 ---
 

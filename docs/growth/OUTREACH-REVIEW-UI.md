@@ -1,5 +1,7 @@
 # Outreach review UI — fixes E, F(UI) and H
 
+> **Historical technical documentation:** This describes existing controls, not approval to contact prospects. Do not use the UI for unsolicited outreach; current acquisition policy is in [ACQUISITION-PLAYBOOK.md](./ACQUISITION-PLAYBOOK.md).
+
 Follow-up to PR #14 ("Outreach remediation"). PR #14 completed the server side of
 recipient review and the strict manual-send contract but left the admin panel
 behind: it rendered an unpaginated preview, mislabelled blocked recipients, and

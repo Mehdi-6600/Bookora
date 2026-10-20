@@ -1,5 +1,7 @@
 # First Customer Acquisition Pilot — Readiness Report
 
+> **Historical report / not an execution checklist:** The former manual Instagram DM instruction is superseded. Do not send unsolicited messages through Instagram, Telegram or other channels. Current acquisition policy is in [ACQUISITION-PLAYBOOK.md](./ACQUISITION-PLAYBOOK.md).
+
 Produced 2026-10-10 against branch base `b5cf77f` (= current `main`).
 Every line is either a measured result or is explicitly marked **INACCESSIBLE**.
 Nothing here is an assumption presented as a fact.
@@ -199,7 +201,7 @@ Ordered by how much they block. **Nothing was changed, imported, promoted or wri
 
 | # | Blocker | Evidence | Severity |
 | --- | --- | --- | --- |
-| **B1** | **Automated Telegram outreach cannot reach cold prospects — by design and by law.** `checkEligibility()` requires a numeric `telegramUserId` **and** an existing `User` row, which is only created after the person presses Start in the bot. `resolveTelegramUserId()` never guesses an id from a username ("Telegram offers no public API to turn a username into a user id"). | `src/lib/outreach/eligibility.ts` | **Structural.** The first customer cannot come from automated sending. It must come from manual, human-sent outreach. |
+| **B1** | Automated Telegram outreach cannot reach people who have not started the bot. `checkEligibility()` requires a numeric `telegramUserId` and an existing `User` row; the system does not guess an id from a username. | `src/lib/outreach/eligibility.ts` | Historical technical finding only. Current acquisition does not use cold manual or automated messages. |
 | **B2** | **No production access from this environment.** No egress to Vercel/Telegram (§1.2a) and no credentials (§1.2b). | measured | **Blocks** Phase 1.2, 1.4, all of Phase 3, and live Phase 4. |
 | **B3** | **Migration state unknown.** `PRODUCTION-READINESS.md` said NOT VERIFIED at 06:20 UTC; I cannot re-check. If `0001`–`0003` are unapplied, Outreach/Discovery/Campaigns error. | §1.3 | **Blocks** any prospect import or dry run. |
 | **B4** | **Webhook almost certainly not configured.** Documented as never-registered at 06:20 UTC; unverifiable by me. Until `configured: true` **and** `matchesExpected: true`, the bot is silent → no `/start`, no attribution, no opt-out. | §1.4 | **Blocks** attribution and B1's only automated path. |
@@ -252,7 +254,7 @@ Because of this, **the seed file in §5 sets `telegramUsername: null` for all fi
 | آس | — | none found | 0 |
 | پورانداخت | — | none found; the listing says only "تلگرام: رزرو وقت" with no handle | 0 |
 
-Even a **correct** handle does not make a business messageable: `resolveTelegramUserId()` returns `null` unless a `User` row already exists, and per B1 a bot may only DM someone who pressed Start. These handles are for the owner's manual outreach, not for automated delivery.
+These historical handles are not approved contact targets. A correct handle still does not give a bot permission to message a person who has not started it; current acquisition uses no prospect messaging.
 
 ### 4.4 Source URLs (full audit trail)
 
@@ -313,7 +315,7 @@ Even a **correct** handle does not make a business messageable: `resolveTelegram
 - **Cities:** all four launch cities are already approved by default — no market approval needed. Using one city per prospect keeps `city`/`segment` normalization unambiguous (§2.2).
 - **Segments:** `MENS_BARBER` ×4, `WOMENS_SALON` ×1 — matches the code's `GROUP_FIT_BONUS` (BARBER +15 is the best fit for the current feature set).
 - **Send limit:** leave at the default **10**. Do not raise it. The clamp means the system will never raise it itself.
-- **Channel:** manual (Instagram DM / phone), per B1. Automated delivery should be expected to return `no_telegram_id` or `not_started_bot` for **all five** — that is a correct result, not a failure.
+- **Historical channel proposal:** Instagram DM / phone. Superseded; do not use these channels for unsolicited contact. The current plan uses inbound pages and authorized public listings.
 - **Suggested first contact order:** هری کاتر → رازمنا → یونیک. The two Tehrani businesses need a verification step first (آس: does "رزرو آنلاین" work? پورانداخت: displacement pitch only).
 
 ---
@@ -450,36 +452,13 @@ Then, in the browser as admin: **/admin → Outreach → Overview**, **Prospects
 
 ---
 
-## 8. Owner actions, in the exact order needed
+## 8. Current instruction (supersedes the archived action list)
 
-Each step is a hard prerequisite for the next. Do not reorder.
+Do not execute the outreach setup, prospect-import, campaign, dry-run or contact steps from the historical pilot below this report's earlier sections. The current strategy is inbound SEO and owner-authorized public listings only; no unsolicited Instagram, Telegram, phone, email or other messages. See [ACQUISITION-PLAYBOOK.md](./ACQUISITION-PLAYBOOK.md).
 
-| # | Action | Unblocks | Why this order |
-| --- | --- | --- | --- |
-| **1** | **Apply the schema**: `npm run db:push`, or run `0001` → `0002` → `0003` in the Neon SQL Editor in that order. Then run the §7.3 probes. | B3 | Without the tables, Outreach/Discovery/Campaigns error and nothing else can be done. `0003` requires `0001`+`0002`. All three are idempotent and non-destructive. |
-| **2** | **Set `CRON_SECRET`** (≥32 random chars) in Vercel → Production, then **redeploy**. Confirm §7.2 returns 401, not 503. | B5 | Fixes both crons at once, including the pre-existing broken `expire-pending`. Requires a redeploy to take effect — hence before step 3, so one redeploy can cover both if you set them together. |
-| **3** | **Set `TELEGRAM_WEBHOOK_SECRET`** (a *different* ≥32-char random string) in Vercel → Production, **redeploy**, then press **Configure webhook, commands and Mini App button** at Admin → Outreach → Telegram bot. Confirm §7.1 shows `configured: true` **and** `matchesExpected: true`. Then send `/start` to `@Bookora_App_bot` and confirm a reply. | B4, and the only automated path in B1 | Until the bot answers, there is no attribution, no opt-out and no onboarding. `matchesExpected: true` also proves `APP_URL` is the real public HTTPS domain. **If the bot does not reply, stop — nothing downstream can work.** |
-| **4** | **Decide B7.** Either authorize the `isTestBooking` schema fix (I will implement it on this branch with tests, and you authorize the migration), or adopt the §6 interim safe procedure. | B7 — the success criterion itself | Must be settled *before* anyone touches the booking page in production, or a test will be permanently recorded as the first real booking. |
-| **5** | **Approve (or amend) the §4 shortlist.** Then set `outreach.channel_url` at Admin → Outreach → Discovery if you want the channel destination (B6); confirm the read-back succeeds. | B6, Phase 3 | I will not import or promote anything without this approval. |
-| **6** | **Import the five** from `docs/growth/pilot-seed.json` (Admin → Outreach → Discovery → manual seed, or Prospects → Add prospect). Confirm all five are **DISCOVERED**. | Phase 3 | They must stay DISCOVERED until genuinely verified. |
-| **7** | **Open each business's own public page** (the five URLs in §4.1) and only then set **VERIFIED** with one line of `verificationEvidence` (what proves the city and category). Resolve the §4.2 handle conflicts and fill in `telegramUsername` per business. | Campaign eligibility | **Never mark VERIFIED to bypass eligibility.** Verification is the claim that a human actually looked. |
-| **8** | **Create one small pilot campaign**: one city, one segment, send limit left at **10**, template from `ACQUISITION-PLAYBOOK.md` §4. Run **Dry Run**. Read every recipient's verification status, eligibility, exact message and CTA. | Phase 3 | Dry run creates no invitation and sends nothing. |
-| **9** | **Report the dry-run results and stop.** Do not approve, do not send. | — | Per the task. Review before anything is armed. |
-| **10** | **Send manually yourself** — Instagram DM (or phone) to the approved businesses, each with its own attributed `t.me/Bookora_App_bot?start=p.<token>` link, then press **"I sent this manually"**. Max 10. Record "sent", never "delivered". | B1 | This is the only compliant channel. `mark_manual_sent` records a human action already taken; automated delivery stays impossible until a business presses Start. |
-| **11** | **Onboard the first responder yourself**: business setup → service + price → working hours → public booking link. Then have a **real customer** book, and confirm it appears on the owner dashboard. | The actual objective | Steps 6–10 only produce a conversation. This step produces the customer. |
+## 9. External publication status
 
----
-
-## 9. The single next action most likely to produce the first real customer
-
-> **Complete steps 1–3 (apply the schema, set `CRON_SECRET`, set `TELEGRAM_WEBHOOK_SECRET` and press "Configure webhook"), then personally send the Persian invitation to آرایشگاه هری کاتر in Shiraz over Instagram DM, with its attributed link — and offer to set up the booking page for them yourself.**
-
-Why this one, and not something else:
-
-- **Steps 1–3 are strictly upstream of everything.** They are three environment/config actions, roughly 10 minutes total, and until they are done the outreach dashboard errors, both crons fail closed, and the bot is silent. No amount of prospecting converts while they are outstanding. They are also the only items on this list that require no judgement call and no external party.
-- **هری کاتر is the highest-probability first conversation of the five**, on evidence rather than intuition: it is the only shortlisted business where a directory states outright that booking is by phone a day in advance, while the same business simultaneously publishes tiered packages with prices, fixed daily hours (10–21), and sells appointment slots on a deals platform. That combination — appointment-driven revenue, no self-serve booking — is exactly the gap Bookora fills. Unlike پورانداخت it has no existing system to displace, and unlike یونیک and آس there is no ambiguity to resolve first.
-- **"Offer to set it up for them" is the conversion step, not a courtesy.** `OWNER-RUNBOOK.md` step 7 already prescribes it for the "too complicated" objection. The onboarding path is four steps and about two minutes (business → service + price → working hours → share link), and the checklist component is built to drive exactly that: it names the single next pending action and puts copy/share one tap away. Doing it *for* the first business removes the only real friction between a reply and an activated account.
-- **Deliberately not the answer:** more prospecting. 90 businesses are already researched and 5 are now independently verified; discovery is not the constraint. Nor is automated sending — B1 makes it structurally impossible for cold prospects, and it will stay that way no matter how much is imported. Nor is it a code change: at `b5cf77f` the outreach machinery, the verification safeguards and the booking flow are complete, tested (298/298) and deployed successfully. **The constraint is that a human has not yet had a conversation with a business.**
+This historical pilot report did not publish a directory listing or launch Bookora on a third-party site. The current implementation also does not submit anything externally; destination accounts and owner authorization are required. Do not describe a draft, test, or code change as a published listing.
 
 ---
 

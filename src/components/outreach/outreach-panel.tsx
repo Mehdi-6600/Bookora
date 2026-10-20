@@ -75,6 +75,12 @@ import {
 
 
 const CARD_MAIN = "rounded-3xl bg-[#B8D4F5] p-5 shadow-soft";
+const ORGANIC_SOURCE_LABELS: Record<string, "seoBarbers" | "seoSalons" | "seoBeauty" | "seoClinics"> = {
+  barbers: "seoBarbers",
+  salons: "seoSalons",
+  beauty: "seoBeauty",
+  clinics: "seoClinics",
+};
 const CARD_INNER = "rounded-2xl bg-white p-4 shadow-soft";
 const BTN_PRIMARY =
   "flex items-center justify-center gap-2 rounded-2xl bg-[#4F5FE8] px-4 py-2.5 text-sm font-bold text-white shadow-soft transition-transform active:scale-[0.98] disabled:opacity-50";
@@ -766,6 +772,28 @@ function Overview({
               </p>
             </div>
           ))}
+        </div>
+
+        <div className={`${CARD_INNER} mt-3`}>
+          <h3 className="text-xs font-bold text-[#1A1F36]">{t("organicSourcesTitle")}</h3>
+          <p className="mt-1 text-[10px] leading-4 text-[#1A1F36]/55">{t("organicSourcesNote")}</p>
+          <div className="mt-2 space-y-2">
+            {(stats.acquisition?.byOrganicSource ?? []).map((row: any) => (
+              <div key={row.source} className="flex items-center justify-between gap-3 border-t border-[#1A1F36]/10 pt-2">
+                <span className="text-xs font-bold text-[#1A1F36]">
+                  {ORGANIC_SOURCE_LABELS[row.source]
+                    ? t(ORGANIC_SOURCE_LABELS[row.source])
+                    : row.source}
+                </span>
+                <span className="shrink-0 text-end text-[10px] font-medium text-[#1A1F36]/70" dir="ltr">
+                  {row.pageViews} {t("organicPageViews")} · {row.signupClicks} {t("organicSignupClicks")}
+                </span>
+              </div>
+            ))}
+            {(stats.acquisition?.byOrganicSource ?? []).length === 0 && (
+              <p className="text-xs text-[#1A1F36]/55">{t("noOrganicSourceEvents")}</p>
+            )}
+          </div>
         </div>
 
         <div className="mt-3 overflow-x-auto">
